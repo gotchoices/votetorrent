@@ -1,8 +1,18 @@
 /**
  * D-11 re-attach: re-declare the DDL, gate on the schema-init marker, and
- * prove adoption of the persisted rows by asserting EXACT per-table row
- * counts — never a nonzero-floor comparison, which would pass a store that
- * lost most of its registrants.
+ * prove adoption of the persisted rows by asserting that no table holds FEWER
+ * rows than the recorded count. The floor is the recorded count itself, never
+ * zero — a nonzero-floor comparison would pass a store that lost most of its
+ * registrants, and this one refuses a store that lost even one row.
+ *
+ * Counts may GROW (user decision, 2026-11-23): a store fed by peer
+ * replication gains rows between attaches as a matter of course, and an
+ * exact-equality check refused every such attach with
+ * `RowCountMismatchError`. A table with fewer rows than recorded is still
+ * refused, naming the table, the recorded count and the live count. When the
+ * floor came from the persisted record and a table grew, the record is
+ * rewritten with the live counts so the next attach checks against the new
+ * floor (see `attachNetworkDb`).
  *
  * A fresh `Database` does NOT auto-restore the catalog. `packages/vote-engine
  * /src/database/initialize.ts`'s `initDB` says this for LevelDB and it holds
@@ -47,7 +57,7 @@ export class MissingRowCountsError extends Error {
 	}
 }
 
-/** A live per-table row count diverges from the persisted contract-C5 record. */
+/** A table holds fewer rows than the persisted contract-C5 record (its floor). */
 export class RowCountMismatchError extends Error {
 	/**
 	 * @param {string} table
@@ -278,9 +288,11 @@ export async function readRowCounts(db, tableNames) {
 
 /**
  * Read live counts for exactly the keys of `expected` and throw
- * `RowCountMismatchError` on the first divergence, naming table/expected/
- * actual. Exact equality — D-11 says assert row counts, and a nonzero-floor
- * comparison would pass a store that lost 90% of its registrants.
+ * `RowCountMismatchError` on the first table holding FEWER rows than
+ * expected, naming table/expected/actual. Each expected count is that
+ * table's floor: a table may hold more rows (replication adds them), never
+ * fewer. The floor is the recorded count, not zero, so a store that lost
+ * even one row is refused.
  *
  * @param {import('@quereus/quereus').Database} db
  * @param {Record<string, number>} expected
@@ -290,7 +302,7 @@ export async function assertRowCounts(db, expected) {
 	const tableNames = Object.keys(expected);
 	const live = await readRowCounts(db, tableNames);
 	for (const table of tableNames) {
-		if (live[table] !== expected[table]) {
+		if (!(live[table] >= expected[table])) {
 			throw new RowCountMismatchError(table, expected[table], live[table]);
 		}
 	}
@@ -298,8 +310,19 @@ export async function assertRowCounts(db, expected) {
 }
 
 /**
+ * True when at least one table in `live` holds more rows than `floor`.
+ *
+ * @param {Record<string, number>} floor
+ * @param {Record<string, number>} live
+ * @returns {boolean}
+ */
+function countsGrew(floor, live) {
+	return Object.keys(floor).some((table) => live[table] > floor[table]);
+}
+
+/**
  * @typedef {object} AttachNetworkDbOptions
- * @property {Record<string, number>} [expectedCounts] - freshly-verified counts (50-08/50-09 pass these directly)
+ * @property {Record<string, number>} [expectedCounts] - freshly-verified counts (50-08/50-09 pass these directly); used as the floor, and the persisted record is left untouched
  * @property {StorageAdapter} [storage] - injected storage adapter, else `globalThis.localStorage`
  */
 
@@ -307,6 +330,15 @@ export async function assertRowCounts(db, expected) {
  * The D-11 re-attach path, mirroring `networks-engine.ts`'s `open()` minus
  * the strand branch (the dashboard is local-only — there is no strand path
  * here).
+ *
+ * Raising the floor: when the expected counts came from the persisted record
+ * (no `expectedCounts` passed) and any table now holds more rows, the record
+ * is rewritten through `writeRowCounts` with the live counts, so the next
+ * attach starts from the new floor. A record is never lowered — a shrunk
+ * table has already thrown above. When the caller passed `expectedCounts`,
+ * the caller owns the floor and the record is not touched. The rewrite is
+ * best-effort: if storage refuses the write, the old record (a lower floor)
+ * still stands and the attach still succeeds.
  *
  * @param {string} networkHash
  * @param {AttachNetworkDbOptions} [options]
@@ -345,6 +377,7 @@ export async function attachNetworkDb(networkHash, options = {}) {
 		}
 
 		let expected = expectedCounts;
+		const fromRecord = !expected;
 		if (!expected) {
 			const record = await readRowCountsRecord(networkHash, storage);
 			if (!record) {
@@ -353,7 +386,15 @@ export async function attachNetworkDb(networkHash, options = {}) {
 			expected = record.counts;
 		}
 
-		await assertRowCounts(db, expected);
+		const live = await assertRowCounts(db, expected);
+
+		if (fromRecord && countsGrew(expected, live)) {
+			try {
+				await writeRowCounts(networkHash, { ...expected, ...live }, storage);
+			} catch {
+				// Best-effort: the old, lower floor still stands.
+			}
+		}
 
 		return db;
 	} catch (err) {

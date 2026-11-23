@@ -87,7 +87,7 @@ export type { MediaFetch, MediaFingerprintFailure, MediaFingerprintOptions, Medi
 export { LocalConfigKeyProvider } from './association/key-provider.js'
 export type { IIntegrityKeyProvider } from './association/key-provider.js'
 export type { ExpectedAppIdentity } from './association/verifiers/app-identity.js'
-export type { DbFactory, EngineContext } from './types.js'
+export type { DbFactory, DbFactoryOptions, EngineContext } from './types.js'
 export { H16 } from './utils.js'
 // WR-15 (17-REVIEW): single source of truth for the DEBT-04 digest golden
 // vectors — the on-device parity gate (persistence-proof.ts) imports these

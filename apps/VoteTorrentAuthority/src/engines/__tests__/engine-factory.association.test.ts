@@ -88,6 +88,7 @@ jest.mock(
 			appIdentity: any;
 			revoked: any;
 			keysProvisioned: any;
+			options: any;
 			verifyCallCount = 0;
 			constructor(...args: any[]) {
 				this.ctorArgs = args;
@@ -97,6 +98,7 @@ jest.mock(
 				this.appIdentity = args[2];
 				this.revoked = args[3];
 				this.keysProvisioned = args[4];
+				this.options = args[5];
 			}
 			// D-09: any read path that mistakenly consults the verifier fails
 			// LOUDLY (throws) rather than silently succeeding.
@@ -317,10 +319,13 @@ describe("EngineFactory buildEngine('association') — D-09/D-12/D-13/D-14", () 
 			certificateSha256Digests: ['abc123'],
 		});
 		// T-47-01 threading gate (provisioned direction): with the module-level
-		// PROVISIONED key mock, exactly 5 arguments are threaded and the flag
-		// arrives as boolean true, not undefined.
-		expect(injectedVerifier.ctorArgs).toHaveLength(5);
+		// PROVISIONED key mock, exactly 6 arguments are threaded (the 6th is the
+		// debug-only Play Integrity skip option) and the flag arrives as boolean
+		// true, not undefined.
+		expect(injectedVerifier.ctorArgs).toHaveLength(6);
 		expect(injectedVerifier.keysProvisioned).toBe(true);
+		// The committed default runs BOTH halves: the skip arrives as a strict false.
+		expect(injectedVerifier.options).toEqual({ skipPlayIntegrityHalf: false });
 	});
 
 	it(
@@ -339,7 +344,7 @@ describe("EngineFactory buildEngine('association') — D-09/D-12/D-13/D-14", () 
 			expect(engine).toBeInstanceOf(rn.AssociationEngine);
 			const { android: injectedVerifier } = halves(engine, rn);
 			expect(injectedVerifier).toBeInstanceOf(rn.PlayIntegrityVerifier);
-			expect(injectedVerifier.ctorArgs).toHaveLength(5);
+			expect(injectedVerifier.ctorArgs).toHaveLength(6);
 			// STRICT toBe(false), never a truthiness-only matcher: `undefined` is
 			// falsy too, so a loose matcher would PASS for the exact fail-open this
 			// test exists to
@@ -562,5 +567,83 @@ describe("EngineFactory buildEngine('association') — D-09/D-12/D-13/D-14", () 
 		await expect((engine as any).getAssociations('r1')).resolves.toEqual([]);
 		expect(android.verifyCallCount).toBe(0);
 		expect(ios.verifyCallCount).toBe(0);
+	});
+});
+
+describe('EngineFactory association — the debug-only SKIP_PLAY_INTEGRITY_HALF switch', () => {
+	const realDev = (globalThis as any).__DEV__;
+	let warn: jest.SpyInstance;
+
+	beforeEach(() => {
+		warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+	});
+	afterEach(() => {
+		(globalThis as any).__DEV__ = realDev;
+		warn.mockRestore();
+		jest.resetModules();
+	});
+
+	function mockFlags(skip: boolean) {
+		jest.doMock('../proof-flags.generated', () => ({
+			USE_LOCAL_DB_FACTORY: false,
+			USE_STUB_ATTESTATION_VERIFIER: false,
+			SKIP_PLAY_INTEGRITY_HALF: skip,
+		}));
+	}
+
+	async function androidHalf() {
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		const mod = require('../engine-factory');
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		const rn = require('@votetorrent/vote-engine/rn');
+		const factory = new mod.EngineFactory(new rn.LocalStorageReact(), jest.fn());
+		(factory as any).currentNetworkHash = 'hash1';
+		(factory as any).networksEngine = { getEstablishedContext: () => ({ db: {} }) };
+		const engine = await factory.getEngine('association');
+		const { android } = halves(engine, rn);
+		expect(android).toBeInstanceOf(rn.PlayIntegrityVerifier);
+		return { mod, android };
+	}
+
+	it('debug build + flag on: the Android half is built with the skip, and the factory logs the loud warning', async () => {
+		(globalThis as any).__DEV__ = true;
+		// mockUnprovisionedKeys also mocks proof-flags (without the switch), so the flags come after it.
+		mockUnprovisionedKeys();
+		mockFlags(true);
+		const { mod, android } = await androidHalf();
+		expect(mod.resolveSkipPlayIntegrityHalf()).toBe(true);
+		expect(android.options).toEqual({ skipPlayIntegrityHalf: true });
+		// keysProvisioned is still threaded truthfully — the skip does not pretend keys exist.
+		expect(android.keysProvisioned).toBe(false);
+		expect(warn).toHaveBeenCalledWith(mod.PLAY_INTEGRITY_SKIP_WARNING);
+		expect(mod.PLAY_INTEGRITY_SKIP_WARNING).toMatch(/DEBUG SWITCH ON/);
+	});
+
+	it('RELEASE build (__DEV__ false) + flag on: the switch is ignored — both halves run and nothing is logged', async () => {
+		// Mutation lock: deleting the `__DEV__ &&` conjunct from resolveSkipPlayIntegrityHalf turns this RED.
+		(globalThis as any).__DEV__ = false;
+		mockProvisionedKeys();
+		mockFlags(true);
+		const { mod, android } = await androidHalf();
+		expect(mod.resolveSkipPlayIntegrityHalf()).toBe(false);
+		expect(android.options).toEqual({ skipPlayIntegrityHalf: false });
+		expect(android.ctorArgs).toHaveLength(6);
+		expect(warn).not.toHaveBeenCalledWith(mod.PLAY_INTEGRITY_SKIP_WARNING);
+	});
+
+	it('debug build + flag off (the committed default): no skip, no warning', async () => {
+		(globalThis as any).__DEV__ = true;
+		mockProvisionedKeys();
+		mockFlags(false);
+		const { mod, android } = await androidHalf();
+		expect(mod.resolveSkipPlayIntegrityHalf()).toBe(false);
+		expect(android.options).toEqual({ skipPlayIntegrityHalf: false });
+		expect(warn).not.toHaveBeenCalledWith(mod.PLAY_INTEGRITY_SKIP_WARNING);
+	});
+
+	it('the committed proof-flags file ships the switch OFF', () => {
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		const src: string = require('fs').readFileSync(require('path').join(__dirname, '../proof-flags.generated.ts'), 'utf8');
+		expect(src).toMatch(/^export const SKIP_PLAY_INTEGRITY_HALF = false;$/m);
 	});
 });

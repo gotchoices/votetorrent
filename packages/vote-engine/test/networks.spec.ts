@@ -799,6 +799,34 @@ describe('NetworksEngine — factory DI and persistence seam (Phase 14)', () => 
     expect(secondCallCount, 'factory not called on second open (cache hit)').to.equal(1);
   });
 
+  it('the stored relays reach the factory on a re-attach, and only there (create passes none)', async () => {
+    const relays = ['/dns4/relay.example.org/tcp/443/wss/p2p/12D3KooWLWM7y6gkEz3mNygZ3oERGZT1RyH9XaKQ6Ag3X1RpEXR6'];
+    const calls: Array<[string, unknown]> = [];
+    let persistedDb: Database | undefined;
+    const factory: DbFactory = async (hash: string, options?: unknown) => {
+      calls.push([hash, options]);
+      if (persistedDb === undefined) {
+        persistedDb = new Database();
+        await prepareDb(persistedDb);
+      }
+      return persistedDb;
+    };
+    await new NetworksEngine(AsyncStorage, factory).create({ ...makePhase14NetworkInit(), relays }, makePhase14User());
+    expect(calls, 'create calls the factory once').to.have.length(1);
+    expect(calls[0]![1], 'create passes no relays: a founder given an unreachable seed never becomes writable').to.equal(undefined);
+
+    const recents: NetworkReference[] = (await AsyncStorage.getItem('recentNetworks')) ?? [];
+    const ref = recents[0]!;
+    expect(ref.relays).to.deep.equal(relays);
+
+    // A fresh engine = a cold start: cache miss, so open() re-attaches through the factory.
+    await new NetworksEngine(AsyncStorage, factory).open(ref, makePhase14User(), false);
+    expect(calls).to.have.length(2);
+    expect(calls[1]).to.deep.equal([ref.hash, { relays }]);
+    // A copy, so a factory cannot mutate the stored reference.
+    expect((calls[1]![1] as { relays: string[] }).relays).to.not.equal(ref.relays);
+  });
+
   it('open() on cache MISS with UNINITIALIZED store THROWS (D-05) — initDB runs before gate but marker absent', async () => {
     // 14-04: the hasDeclaredSchema guard means initDB now runs BEFORE the D-05 gate when
     // the handle lacks the declaration (hasDeclaredSchema=false). But initDB does NOT write

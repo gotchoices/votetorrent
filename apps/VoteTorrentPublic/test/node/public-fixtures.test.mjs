@@ -271,11 +271,18 @@ test('assertRowCounts holds over every table the public surface seeds', async ()
 	assert.deepEqual(live, { ...PUBLIC_SURFACE_EXPECTED_COUNTS });
 });
 
-test('positive control: assertRowCounts rejects a deliberately wrong RegistrantPublic count', async () => {
+test('positive control: assertRowCounts rejects a RegistrantPublic floor above the live count', async () => {
 	// Without this, an expectation object that silently lost its new keys would
-	// still report green — the check would simply have less to check.
+	// still report green — the check would simply have less to check. The
+	// recorded count is a floor (counts may grow by replication), so the
+	// control sets the floor ONE ABOVE live: a store with fewer rows than
+	// recorded is what must be refused.
 	await assert.rejects(
-		() => assertRowCounts(db, { ...PUBLIC_SURFACE_EXPECTED_COUNTS, RegistrantPublic: 4 }),
+		() =>
+			assertRowCounts(db, {
+				...PUBLIC_SURFACE_EXPECTED_COUNTS,
+				RegistrantPublic: PUBLIC_SURFACE_EXPECTED_COUNTS.RegistrantPublic + 1,
+			}),
 		RowCountMismatchError,
 	);
 });

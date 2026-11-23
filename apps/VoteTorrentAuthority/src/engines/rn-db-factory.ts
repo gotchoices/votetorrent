@@ -17,7 +17,7 @@ import { leveldbOpenPool } from './leveldb-open-pool';
 import { createIsolatedStoreModule } from '@quereus/store';
 import { Database } from '@quereus/quereus';
 import { VOTETORRENT_SCHEMA_SQL, VOTETORRENT_SCHEMA_VERSION } from '@votetorrent/vote-engine/rn';
-import type { DbFactory } from '@votetorrent/vote-engine';
+import type { DbFactory, DbFactoryOptions } from '@votetorrent/vote-engine';
 import type { StrandConfig, StrandInstance } from '@serfab/cadre-core';
 import {
 	failOnStrandError,
@@ -27,6 +27,7 @@ import {
 } from './strand-first-sync';
 import { takeFounderIntent, resolveFounderFlag, JoinedNetworksUnreadableError } from './founder-intent';
 import { strandChanges } from './strand-changes';
+import { normalizeRelaySeed, seedStrandWithRelays, type RelaySeedOutcome, type StrandSeedHost } from './strand-relay-seed';
 
 // cadre-core's StrandDatabase.executeSchema() wraps the sApp schema as
 // `declare schema App { ${schema} } apply schema App;`. VOTETORRENT_SCHEMA_SQL is
@@ -95,7 +96,7 @@ export const rnDbFactory: DbFactory = async (networkHash: string) => {
  * strand-backed factory is unit-testable with a fake node. CadreNode's
  * `getControlNode()` returns `Libp2p | null`; we only read `getConnections()`.
  */
-export interface StrandHost {
+export interface StrandHost extends StrandSeedHost {
 	addStrand(config: StrandConfig): Promise<StrandInstance>;
 	getControlNode(): { getConnections(): readonly unknown[] } | null;
 	whenStrandWritable(strandId: string, options?: { timeoutMs?: number }): Promise<StrandInstance>;
@@ -161,6 +162,11 @@ export interface StrandDbFactoryOptions {
  *       intent is read synchronously as the first statement, so it is claimed by the open that
  *       the window was installed for and by no other.
  *
+ * Relays: a re-attach passes the network's stored relays (`DbFactoryOptions.relays`, from
+ *       `NetworksEngine.open`). They are merged into the strand's carried bootstrap seed before
+ *       `addStrand` (`strand-relay-seed.ts`), never on a founding create. With no relays the
+ *       factory awaits nothing extra, so its timing is unchanged.
+ *
  * Ordering (Pitfall 3): never read `strand.database` before `await addStrand`
  * resolves (or, on the first-sync gate path below, before `waitForStrandWritable`
  * resolves) — `database` is present once the strand is active/idle, which EITHER
@@ -178,7 +184,7 @@ export interface StrandDbFactoryOptions {
  * doc comment for the full class-identity-detection and indefinite-wait rationale.
  */
 export function createStrandDbFactory(node: StrandHost, options?: StrandDbFactoryOptions): DbFactory {
-	return async (networkHash: string) => {
+	return async (networkHash: string, dbOptions?: DbFactoryOptions) => {
 		// D-05: the network hash is already unique per network — use it as the strandId.
 		const strandId = networkHash;
 
@@ -201,6 +207,14 @@ export function createStrandDbFactory(node: StrandHost, options?: StrandDbFactor
 		// D-07 (0.11.0): check for peers BEFORE addStrand — no peers ⇒ we are the founder (the default).
 		const controlConnections = node.getControlNode()?.getConnections().length ?? 0;
 		const founder = resolveFounderFlag({ intent, joined, controlConnections });
+
+		// The network's relays join this strand's bootstrap seed (strand-relay-seed.ts). Awaited only
+		// when there are relays, so a factory call without them keeps its timing.
+		if (normalizeRelaySeed(dbOptions?.relays).length > 0) {
+			const relaySeed: RelaySeedOutcome = await seedStrandWithRelays(node, strandId, dbOptions?.relays, intent === 'founding');
+			console.info("[strand-factory] relay seed", { relaySeed });
+		}
+
 		// Closed tokens only (never the strand id / network hash). This line exists so a device
 		// run can read which founder flag a cold start, an import or a create attached with.
 		console.info("[strand-factory] attach", { founder, controlConnections, intent: intent ?? 'none' });

@@ -192,6 +192,89 @@ test('attachNetworkDb: a row-count mismatch rejects RowCountMismatchError naming
 	);
 });
 
+test('attachNetworkDb: a table that GREW since the record (replication) attaches, and the record is raised to the live counts', async () => {
+	// The record says Officer had 0 rows; the store now holds 1 — the shape a
+	// peer-replicated store has after rows arrived between attaches.
+	const storage = makeFakeStorage();
+	const stale = { ...EXPECTED_COUNTS, Officer: 0 };
+	await writeRowCounts(HASH, stale, storage);
+	const db = await attachNetworkDb(HASH, { storage });
+	assert.deepEqual(await readRowCounts(db, SEED_TABLES), EXPECTED_COUNTS);
+	await closeNetworkDb(db);
+
+	const raised = await readRowCountsRecord(HASH, storage);
+	assert.ok(raised, 'the record must still exist after a grown attach');
+	assert.deepEqual(raised.counts, EXPECTED_COUNTS, 'the record must be raised to the live counts — the new floor');
+	assert.equal(raised.capturedAt.length, 19);
+});
+
+test('attachNetworkDb: after the floor is raised, a store that later LOSES a row is refused against the NEW floor', async () => {
+	// Start from a raised record (Officer recorded at 1 = live) and then
+	// pretend the next attach sees a record above live: the floor is the
+	// record, so anything below it is refused, naming table/expected/actual.
+	const storage = makeFakeStorage();
+	await writeRowCounts(HASH, { ...EXPECTED_COUNTS, Officer: 0 }, storage);
+	const db = await attachNetworkDb(HASH, { storage });
+	await closeNetworkDb(db);
+	assert.equal((await readRowCountsRecord(HASH, storage))?.counts.Officer, 1);
+
+	const raisedAbove = { ...EXPECTED_COUNTS, Officer: 2 };
+	await writeRowCounts(HASH, raisedAbove, storage);
+	await assert.rejects(
+		() => attachNetworkDb(HASH, { storage }),
+		/** @param {any} err */
+		(err) => {
+			assert.ok(err instanceof RowCountMismatchError);
+			assert.equal(err.table, 'Officer');
+			assert.equal(err.expected, 2);
+			assert.equal(err.actual, 1);
+			return true;
+		},
+	);
+	// A refused attach never rewrites the record.
+	assert.deepEqual((await readRowCountsRecord(HASH, storage))?.counts, raisedAbove);
+});
+
+test('attachNetworkDb: explicit expectedCounts below live attach, and leave the persisted record untouched', async () => {
+	const storage = makeFakeStorage();
+	const stale = { ...EXPECTED_COUNTS, Officer: 0 };
+	await writeRowCounts(HASH, stale, storage);
+	const db = await attachNetworkDb(HASH, { expectedCounts: stale, storage });
+	await closeNetworkDb(db);
+	assert.deepEqual((await readRowCountsRecord(HASH, storage))?.counts, stale);
+});
+
+test('attachNetworkDb: a grown table still attaches when storage refuses to raise the floor (best-effort rewrite)', async () => {
+	const storage = makeFakeStorage();
+	const stale = { ...EXPECTED_COUNTS, Officer: 0 };
+	await writeRowCounts(HASH, stale, storage);
+	let setAttempts = 0;
+	const refusing = {
+		...storage,
+		setItem: () => {
+			setAttempts += 1;
+			throw new Error('QuotaExceededError (simulated)');
+		},
+	};
+	const db = await attachNetworkDb(HASH, { storage: refusing });
+	assert.deepEqual(await readRowCounts(db, SEED_TABLES), EXPECTED_COUNTS);
+	await closeNetworkDb(db);
+	assert.equal(setAttempts, 1, 'the raise is attempted exactly once');
+	// The old, lower floor still stands.
+	assert.deepEqual((await readRowCountsRecord(HASH, storage))?.counts, stale);
+});
+
+test('assertRowCounts: a grown table passes and returns the live count; a shrunk table throws', async () => {
+	const db = await attachNetworkDb(HASH, { expectedCounts: EXPECTED_COUNTS });
+	try {
+		const live = await assertRowCounts(db, { ...EXPECTED_COUNTS, Officer: 0 });
+		assert.equal(live.Officer, 1);
+		await assert.rejects(() => assertRowCounts(db, { ...EXPECTED_COUNTS, Officer: 2 }), RowCountMismatchError);
+	} finally {
+		await closeNetworkDb(db);
+	}
+});
+
 test('positive control: the ordinary attach path (correct record, no mutation) resolves with matching counts', async () => {
 	const db = await attachNetworkDb(HASH, { expectedCounts: EXPECTED_COUNTS });
 	const counts = await readRowCounts(db, SEED_TABLES);
