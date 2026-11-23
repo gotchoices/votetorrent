@@ -47,7 +47,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { CadreNode, collectStrandAddrs, STRAND_ADDR_PROTOCOL, ed25519KeyPairFromLibp2p } from '@serfab/cadre-core';
-import { registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
+import { VOTETORRENT_SCHEMA_VERSION, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
 import { createLibp2pNode, RepoClient } from '@optimystic/db-p2p/rn';
 import { webSockets } from '@libp2p/websockets';
 import { generateKeyPair } from '@libp2p/crypto/keys';
@@ -150,7 +150,7 @@ export async function buildGateway({
     controlNetwork: { partyId: PARTY_ID, bootstrapNodes: [] },
     // VoteTorrent's SQL functions before the sApp schema applies (quereus 5.6 CHECK gate).
     strandDatabaseSetup: registerVoteTorrentFunctions,
-    profile: 'storage',
+    nodeClass: 'server',
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
     network: {
@@ -172,6 +172,7 @@ export async function buildGateway({
         id: 'org.votetorrent',
         version: '1.0.0',
         schema: VOTETORRENT_QSQL,
+        schemaVersion: VOTETORRENT_SCHEMA_VERSION,
         latencyHint: 'interactive',
       },
       mode: 'bootstrap',

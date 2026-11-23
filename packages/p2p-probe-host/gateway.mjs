@@ -57,7 +57,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { X509Certificate, createHash } from 'node:crypto';
 import { CadreNode, PROVISIONAL_ADMISSION_DEADLINE_MS, PROVISIONAL_ADMISSION_CLOSE_TIMEOUT_MS, ed25519KeyPairFromLibp2p } from '@serfab/cadre-core';
-import { registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
+import { VOTETORRENT_SCHEMA_VERSION, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
 import { webSockets } from '@libp2p/websockets';
 import { generateKeyPair } from '@libp2p/crypto/keys';
 import { peerIdFromPrivateKey } from '@libp2p/peer-id';
@@ -789,7 +789,7 @@ export async function startGateway(options = {}) {
     // ("node identity not resolved") — drone.mjs:63-72's stated reason, inherited here.
     privateKey: identityKey,
     controlNetwork: { partyId: config.partyId, bootstrapNodes: [] },
-    profile: 'storage',
+    nodeClass: 'server',
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
     strandClusterSize: 2,
@@ -862,6 +862,7 @@ export async function startGateway(options = {}) {
         id: 'org.votetorrent',
         version: '1.0.0',
         schema,
+        schemaVersion: VOTETORRENT_SCHEMA_VERSION,
         latencyHint: 'interactive',
       },
       // `mode: 'bootstrap'` was deleted from StrandConfig in cadre-core 0.11 and has been ignored

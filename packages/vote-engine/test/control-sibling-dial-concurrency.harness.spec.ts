@@ -89,7 +89,7 @@ describeP2PHarness('one unanswering control sibling does not hold up the others 
       strandFilter: { mode: 'all' },
       storage: { provider: () => storage },
       hibernation: { enabled: false },
-      profile: 'transaction',
+      nodeClass: 'device',
       network: { transports: [webSockets()], listenAddrs: ['/ip4/127.0.0.1/tcp/0/ws'], ...network }
     } as any)
   }

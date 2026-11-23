@@ -315,12 +315,12 @@ test('1 platform shape: storage id per network, browser gater kept, no transport
 	assert.equal('trustedOwnerSlot' in platform.storage, false);
 });
 
-test('2 configure: keeps the profile, relaxes schema signing, filters to this strand, pins the cluster size, sets the edgeHost slice', () => {
+test('2 configure: keeps the node class, relaxes schema signing, filters to this strand, pins the cluster size, sets the edgeHost slice', () => {
 	const platform = createMemberPlatform({ networkHash: HASH, keyStore: new InMemoryKeyStore(), relayAddrs: [RELAY], strandId: STRAND });
 	assert.ok(platform.configure);
-	const base = /** @type {any} */ ({ profile: 'transaction', strandFilter: { mode: 'all' } });
+	const base = /** @type {any} */ ({ nodeClass: 'device', strandFilter: { mode: 'all' } });
 	const cfg = /** @type {any} */ (platform.configure(base));
-	assert.equal(cfg.profile, 'transaction');
+	assert.equal(cfg.nodeClass, 'device');
 	assert.equal(cfg.requireSignedSchemas, false);
 	assert.deepEqual(cfg.strandFilter, { mode: 'strandId', strandId: STRAND });
 	assert.equal(cfg.strandClusterSize, MEMBER_STRAND_CLUSTER_SIZE);
@@ -345,7 +345,7 @@ test('3 D-24 end to end: the patched cadre-core strandCohortTopicOption turns th
 	const platform = createMemberPlatform({ networkHash: HASH, keyStore: new InMemoryKeyStore(), relayAddrs: [RELAY], strandId: STRAND });
 	assert.ok(platform.configure);
 	const cfg = /** @type {any} */ (platform.configure(/** @type {any} */ ({})));
-	const option = /** @type {any} */ (strandCohortTopicOption(cfg.strandReactivity, STRAND));
+	const option = /** @type {any} */ (strandCohortTopicOption(cfg.strandReactivity, STRAND, 'forwarder'));
 	const host = option.cohortTopic?.host;
 	assert.ok(host, 'the patched option builds a host for edgeHost: true');
 	assert.equal(host.profile.kind, 'edge');
@@ -354,9 +354,11 @@ test('3 D-24 end to end: the patched cadre-core strandCohortTopicOption turns th
 	assert.equal(host.minSigs, 1);
 
 	const { edgeHost: _dropped, ...withoutEdgeHost } = cfg.strandReactivity;
-	const control = /** @type {any} */ (strandCohortTopicOption(withoutEdgeHost, STRAND));
+	const control = /** @type {any} */ (strandCohortTopicOption(withoutEdgeHost, STRAND, 'forwarder'));
 	assert.equal(control.cohortTopic?.enabled, true);
-	assert.equal('host' in control.cohortTopic, false, 'control: without edgeHost the option carries no host');
+	// cadre-core 1.24 always builds a host from the node's reactivity role; a forwarder gets db-p2p's core profile.
+	assert.equal(control.cohortTopic.host?.profile?.kind, 'core', 'control: without edgeHost the role\'s core host, not the edge host');
+	assert.equal('minSigs' in control.cohortTopic.host, false, 'control: no VoteTorrent minSigs without edgeHost');
 });
 
 test('4 cluster-size parity: MEMBER_STRAND_CLUSTER_SIZE matches what the Authority and Voter providers run', () => {
@@ -1130,7 +1132,7 @@ function edgeReaderLibp2p(options = {}) {
 }
 
 test('21 configure: the dashboard withholds its strand addresses (a member that stores nothing seeds nobody)', () => {
-	const base = /** @type {any} */ ({ profile: 'transaction' });
+	const base = /** @type {any} */ ({ nodeClass: 'device' });
 	const platform = /** @type {any} */ (createMemberPlatform({ networkHash: HASH, keyStore: new InMemoryKeyStore(), relayAddrs: [RELAY], strandId: STRAND }));
 	const cfg = platform.configure(base);
 	assert.equal(cfg.withholdStrandAddrs, true);
@@ -1204,7 +1206,7 @@ test('22b a failing marker handle stops the node and rejects withdraw-failed bef
 });
 
 test('22c R-G4: configure asks cadre-core to declare the marker from the first identify, and a declared node is not handled twice', async () => {
-	const base = /** @type {any} */ ({ profile: 'transaction' });
+	const base = /** @type {any} */ ({ nodeClass: 'device' });
 	const cfg = /** @type {any} */ (createMemberPlatform({ networkHash: HASH, keyStore: new InMemoryKeyStore(), relayAddrs: [RELAY], strandId: STRAND })).configure(base);
 	assert.equal(cfg.edgeReaderProtocol, '/votetorrent/edge-reader/1.0.0');
 	const bare = /** @type {any} */ (createMemberPlatform({ networkHash: HASH, keyStore: new InMemoryKeyStore(), relayAddrs: [RELAY] })).configure(base);

@@ -192,7 +192,7 @@ export class Device {
       storage: { provider: () => storage },
       strandClusterSize: 2,
       hibernation: { enabled: false },
-      profile: this.opts.profile,
+      nodeClass: this.opts.profile === 'transaction' ? 'device' : 'server',
       trustedOwners: { store: await PersistentTrustedOwnerStore.open(fileSlot(join(this.home, 'trusted-owners.json')), PARTY_ID) },
       bootstrapPeers: { store: await PersistentBootstrapPeerStore.open(fileSlot(join(this.home, 'bootstrap-peers.json')), PARTY_ID) },
       network: {
@@ -253,7 +253,7 @@ export class Device {
       const founder = this.foundingIntent === true || (!joined && this.peerCount() === 0)
       await this.node.addStrand({
         strandRow: { Id: hash, MemberPrivateKey: null, Type: 'o', FounderOwnerKey: null, FounderPeerId: null },
-        sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, latencyHint: 'interactive' },
+        sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, schemaVersion: 1, latencyHint: 'interactive' },
         founder,
         ...(founder ? { awaitFirstSync: false } : {})
       }).catch(async (e) => {

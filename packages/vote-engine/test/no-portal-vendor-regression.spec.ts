@@ -223,9 +223,13 @@ describe('no-portal / no-vendor regression (PUB-01 / PUB-02)', () => {
       // the wire once, reservations of a vanished writer lapse after 5 min; engine id quereus@5.6.1, so every
       // machine moves together). @quereus 5.6.0 -> 5.6.1, forced by the plugins' ^5.6.1 peer range. @serfab
       // stays 1.23.0 (no newer release). db-p2p and quereus patch target files byte-identical: renamed only.
+      // 2026-11-23: @serfab 1.23.0 -> 1.24.0 (sApp configs declare a required schemaVersion and a strand refuses an
+      // older one; NodeProfile 'transaction'/'storage' renamed nodeClass 'device'/'server'; per-node roles incl. a
+      // strandCohortMember:false client). cadre-core patch forward-ported: 7 hunks re-placed by hand, two concerns
+      // dropped as upstreamed (lazyRawStorage commit-proof methods; the joiner coordinator-miss deferral).
       const expectedPrefix = pkg === '@serfab/strand-proto'
         ? '0.11.'
-        : pkg.startsWith('@serfab/') ? '1.23.' : '1.29.'
+        : pkg.startsWith('@serfab/') ? '1.24.' : '1.29.'
       expect(
         distinct[0],
         `Resolved ${pkg} version must start with ${expectedPrefix}, got ${distinct[0]}`

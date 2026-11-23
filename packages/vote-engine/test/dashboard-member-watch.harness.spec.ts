@@ -38,6 +38,7 @@ import {
   describeP2PHarness, startTwoNodeHarness, pollUntil,
   VOTETORRENT_INNER_DDL, HARNESS_SAPP_ID, type TwoNodeHarness
 } from './harness/two-node-strand.js'
+import { VOTETORRENT_SCHEMA_VERSION } from '../src/database/schema-version.js'
 
 const SCALE = Number(process.env.P2P_HARNESS_TIMEOUT_SCALE ?? 1)
 const CLUSTER_SIZE = 2
@@ -181,7 +182,7 @@ export async function attachJoinerStrand (joiner: Joiner, strandId: string): Pro
   try {
     await node.addStrand({
       strandRow: { Id: strandId, MemberPrivateKey: null, Type: 'o', FounderOwnerKey: null, FounderPeerId: null },
-      sAppConfig: { id: HARNESS_SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, latencyHint: 'interactive' },
+      sAppConfig: { id: HARNESS_SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, schemaVersion: VOTETORRENT_SCHEMA_VERSION, latencyHint: 'interactive' },
       awaitFirstSync: false
     })
   } catch (err) {
@@ -578,41 +579,47 @@ describeP2PHarness('a joined member node (the dashboard\'s shape) on real strand
 // DM-7a runs in the ordinary suite (no RUN_P2P_HARNESS): the patched option's truth table against the
 // installed cadre-core copy this package resolves.
 describe('DM-7a strandReactivity.edgeHost option (patched cadre-core)', () => {
-  let option: (config: unknown, strandId: string) => any
+  // cadre-core 1.24 passes the node's reactivity role as the third argument and always builds a host from it: a
+  // 'forwarder' gets db-p2p's core profile. "The unpatched slice" is therefore that role host, with no minSigs.
+  let option: (config: unknown, strandId: string, reactivity: 'forwarder' | 'subscriber') => any
+  const expectRoleHost = (r: any): void => {
+    expect(Object.keys(r)).to.deep.equal(['cohortTopic'])
+    expect(r.cohortTopic.enabled).to.equal(true)
+    expect(r.cohortTopic.host.profile.kind).to.equal('core')
+    expect('minSigs' in r.cohortTopic.host).to.equal(false)
+  }
 
   before(async () => {
     const cadreCore: any = await import('@serfab/cadre-core')
     option = cadreCore.strandCohortTopicOption
   })
 
-  it('DM-7a-1 enabled:true keeps the unpatched slice (no host key)', () => {
-    const r = option({ enabled: true }, 'y')
-    expect(r).to.deep.equal({ cohortTopic: { enabled: true } })
-    expect('host' in r.cohortTopic).to.equal(false)
+  it('DM-7a-1 enabled:true keeps the unpatched slice (the role host, no minSigs)', () => {
+    expectRoleHost(option({ enabled: true }, 'y', 'forwarder'))
   })
 
-  it('DM-7a-2 edgeHost:false keeps the unpatched slice (no host key)', () => {
-    const r = option({ enabled: true, edgeHost: false }, 'y')
-    expect(r).to.deep.equal({ cohortTopic: { enabled: true } })
-    expect('host' in r.cohortTopic).to.equal(false)
+  it('DM-7a-2 edgeHost:false keeps the unpatched slice (the role host, no minSigs)', () => {
+    expectRoleHost(option({ enabled: true, edgeHost: false }, 'y', 'forwarder'))
   })
 
   it("DM-7a-3 a non-boolean edgeHost ('true') fails closed to the unpatched slice", () => {
-    expect(option({ enabled: true, edgeHost: 'true' }, 'y')).to.deep.equal({ cohortTopic: { enabled: true } })
+    expectRoleHost(option({ enabled: true, edgeHost: 'true' }, 'y', 'forwarder'))
   })
 
   it('DM-7a-4 enabled:false with edgeHost:true enables nothing', () => {
-    expect(option({ enabled: false, edgeHost: true }, 'y')).to.deep.equal({})
+    expect(option({ enabled: false, edgeHost: true }, 'y', 'forwarder')).to.deep.equal({})
   })
 
   it('DM-7a-5 a strand outside strandIds with edgeHost:true enables nothing', () => {
-    expect(option({ enabled: true, strandIds: ['x'], edgeHost: true }, 'y')).to.deep.equal({})
+    expect(option({ enabled: true, strandIds: ['x'], edgeHost: true }, 'y', 'forwarder')).to.deep.equal({})
   })
 
-  it('DM-7a-6 edgeHost:true builds an edge host with no willing tier and minSigs 1', () => {
-    const host = option({ enabled: true, edgeHost: true }, 'y').cohortTopic.host
-    expect(host.profile.kind).to.equal('edge')
-    expect(host.profile.willingTiers.size).to.equal(0)
-    expect(host.minSigs).to.equal(1)
+  it('DM-7a-6 edgeHost:true builds an edge host with no willing tier and minSigs 1, whatever the role', () => {
+    for (const role of ['forwarder', 'subscriber'] as const) {
+      const host = option({ enabled: true, edgeHost: true }, 'y', role).cohortTopic.host
+      expect(host.profile.kind).to.equal('edge')
+      expect(host.profile.willingTiers.size).to.equal(0)
+      expect(host.minSigs).to.equal(1)
+    }
   })
 })

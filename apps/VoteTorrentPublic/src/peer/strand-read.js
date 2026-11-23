@@ -96,7 +96,7 @@
 
 import { StrandDatabase } from '@serfab/cadre-core';
 import { PUBLIC_SUBSCRIBED_TABLES } from '@votetorrent/web-data/public';
-import { VOTETORRENT_SCHEMA_SQL, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
+import { VOTETORRENT_SCHEMA_SQL, VOTETORRENT_SCHEMA_VERSION, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
 
 /**
  * A strand-read failure naming a table, an option or a limit — NEVER a row
@@ -182,13 +182,14 @@ const VOTETORRENT_INNER_DDL = VOTETORRENT_SCHEMA_SQL.replace(/^\s*declare\s+sche
  * skipped check, it is a check that never existed here, which is a STRONGER
  * posture than a relaxed one, not a weaker one.
  *
- * @returns {Readonly<{ id: string, version: string, schema: string, latencyHint: 'interactive' }>}
+ * @returns {Readonly<{ id: string, version: string, schema: string, schemaVersion: number, latencyHint: 'interactive' }>}
  */
 export function publicSAppConfig() {
 	return Object.freeze({
 		id: 'org.votetorrent',
 		version: '1.0.0',
 		schema: VOTETORRENT_INNER_DDL,
+		schemaVersion: VOTETORRENT_SCHEMA_VERSION,
 		latencyHint: /** @type {'interactive'} */ ('interactive'),
 	});
 }

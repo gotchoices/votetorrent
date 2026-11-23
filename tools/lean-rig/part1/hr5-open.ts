@@ -99,7 +99,7 @@ export async function buildRoleNode (stateDir: string, role: Role, relayAddr: st
     controlNetwork: { partyId, bootstrapNodes },
     strandNetworkState: { store: strandNetworkStateStore },
     trustedOwners: { store: trustedOwnerStore },
-    profile: 'transaction',
+    nodeClass: 'device',
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
     storage: { provider },
@@ -120,7 +120,10 @@ export async function buildRoleNode (stateDir: string, role: Role, relayAddr: st
     // kept out of this node's strand AND control write cohorts (2026-11-13: without these the rig's officer and keyholders
     // counted the browser into every write cohort, which the Authority app never does).
     strandCohortRefusal: edgeReaderRefusal.hook,
-    controlCohortRefusal: edgeReaderRefusal.control
+    controlCohortRefusal: edgeReaderRefusal.control,
+    // quereus 5.6 refuses a CHECK that calls an unregistered function at CREATE TABLE, and cadre-core applies the sApp
+    // schema inside the strand build, so VoteTorrent's SQL functions must be registered there first (as in both apps).
+    strandDatabaseSetup: rnEntry.registerVoteTorrentFunctions
   } as any), privateKey)
   return { node, peerId, isolated, dialRefused, destroyScope, closeStores }
 }

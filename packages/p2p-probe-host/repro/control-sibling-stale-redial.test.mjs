@@ -92,7 +92,7 @@ async function startRelay() {
   const node = new CadreNode({
     privateKey: await generateKeyPair('Ed25519'),
     controlNetwork: { partyId: `${PARTY_ID}-relay`, bootstrapNodes: [] },
-    profile: 'storage',
+    nodeClass: 'server',
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
     storage: { provider: scopedMemoryProvider() },
@@ -123,7 +123,7 @@ async function startAuthorityShaped({ privateKey, relayAddr, gater }) {
   const node = new CadreNode({
     privateKey,
     controlNetwork: { partyId: PARTY_ID, bootstrapNodes: [relayAddr] },
-    profile: 'transaction',
+    nodeClass: 'device',
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
     storage: { provider: scopedMemoryProvider() },

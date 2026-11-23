@@ -403,7 +403,7 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           // D-08: spread only when the store opened. The recovery rebuild reuses this closure, so it gets
           // the SAME store (cadre-core keeps an injected store across stop and start).
           ...(trustedOwnerStore ? { trustedOwners: { store: trustedOwnerStore } } : {}),
-          profile: 'transaction',
+          nodeClass: 'device',
           // sApp-schema signing is DISABLED for VoteTorrent — a deliberate project
           // decision, not an oversight.
           //

@@ -31,6 +31,7 @@ import { InMemoryTestKeyVault } from '../src/crypto/vault.js'
 import { makeTestSignCallback } from './fixtures/test-context.js'
 import { registerDbPlugins, declareViewsInMain } from '../src/database/initialize.js'
 import { createEdgeReaderRefusal, EDGE_READER_CONTROL_KEY, EDGE_READER_PROTOCOL } from '../src/network/edge-reader-refusal.js'
+import { VOTETORRENT_SCHEMA_VERSION } from '../src/database/schema-version.js'
 
 const SCALE = Number(process.env.P2P_HARNESS_TIMEOUT_SCALE ?? 1)
 const ms = (n: number): number => Math.round(n * SCALE)
@@ -94,7 +95,7 @@ describeP2PHarness('a Voter approves nothing yet still writes and reads its own 
       storage: { provider: () => storage },
       strandClusterSize: 4,
       hibernation: { enabled: false },
-      profile: 'transaction',
+      nodeClass: 'device',
       network: { transports: [webSockets()], listenAddrs: ['/ip4/127.0.0.1/tcp/0/ws'] },
       strandReactivity: { enabled: true },
       strandCohortRefusal: refusal.hook,
@@ -109,7 +110,7 @@ describeP2PHarness('a Voter approves nothing yet still writes and reads its own 
       { timeoutMs: ms(60_000), label: `A sees the voter (declares=${String(declares)}) as a member` })
     await node.addStrand({
       strandRow: { Id: network.hash, MemberPrivateKey: null, Type: 'o', FounderOwnerKey: null, FounderPeerId: null },
-      sAppConfig: { id: HARNESS_SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, latencyHint: 'interactive' },
+      sAppConfig: { id: HARNESS_SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, schemaVersion: VOTETORRENT_SCHEMA_VERSION, latencyHint: 'interactive' },
       founder: false,
       awaitFirstSync: false
     })

@@ -283,7 +283,7 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           controlNetwork: { partyId: PARTY_ID, bootstrapNodes },
           ...(trustedOwnerStore ? { trustedOwners: { store: trustedOwnerStore } } : {}),
           ...(bootstrapPeerStore ? { bootstrapPeers: { store: bootstrapPeerStore } } : {}),
-          profile: 'transaction',
+          nodeClass: 'device',
           // Published @serfab/cadre-core@0.8.1 added a fail-closed sApp-schema signature
           // policy (requireSignedSchemas defaults true): the unsigned `org.votetorrent`
           // demo schema (rn-db-factory sAppConfig has id:'org.votetorrent' + no signature)

@@ -231,7 +231,7 @@ describe('CadreNodeProvider (Voter) — edge-reader cohort refusal', () => {
 		const opts = mockConstructedNodes[0].receivedOptions as {edgeReaderProtocol?: unknown; profile?: unknown};
 		expect(opts.edgeReaderProtocol).toBe(EDGE_READER_PROTOCOL);
 		expect(opts.edgeReaderProtocol).toBe('/votetorrent/edge-reader/1.0.0');
-		expect(opts.profile).toBe('transaction');
+		expect(opts.nodeClass).toBe('device');
 	});
 
 	it('ER-V2 the recovery rebuild passes the SAME hook', async () => {

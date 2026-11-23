@@ -235,7 +235,7 @@ async function bootDrone(name, bootstrapControlAddr, strandBootstrapAddr) {
       partyId: PARTY_ID,
       bootstrapNodes: bootstrapControlAddr ? [bootstrapControlAddr] : [],
     },
-    profile: 'storage',
+    nodeClass: 'server',
     strandFilter: { mode: 'all' },
     // Published cadre-core@0.8.1 defaults to fail-closed schema-signature verification
     // (types.d.ts:349-352); this dev-only unsigned MINIMAL_SCHEMA needs the explicit relax.
@@ -257,7 +257,7 @@ async function bootDrone(name, bootstrapControlAddr, strandBootstrapAddr) {
   await withTimeout(
     drone.addStrand({
       strandRow: { Id: STRAND_ID, MemberPrivateKey: null, Type: 'o' },
-      sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, latencyHint: 'interactive' },
+      sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, schemaVersion: 1, latencyHint: 'interactive' },
       mode: 'bootstrap',
       // Founder-ness is normally DERIVED from `strandRow.FounderOwnerKey` matching this node's
       // owner key, and the row above is hand-built with no such provenance -- so the derivation
@@ -320,7 +320,7 @@ function newClient(mode, droneAControlAddr, droneBControlAddr, droneAStrandAddr,
       partyId: PARTY_ID,
       bootstrapNodes: buildClientBootstrapNodes(mode, droneAControlAddr, droneBControlAddr),
     },
-    profile: 'transaction',
+    nodeClass: 'device',
     strandFilter: { mode: 'all' },
     storage: { provider: () => new MemoryRawStorage() },
     network: {
@@ -553,7 +553,7 @@ function newStrandCohortClient(droneAControlAddr, droneBControlAddr, droneAStran
       partyId: PARTY_ID,
       bootstrapNodes: [droneAControlAddr, droneBControlAddr],
     },
-    profile: 'transaction',
+    nodeClass: 'device',
     strandFilter: { mode: 'all' },
     requireSignedSchemas: false,
     storage: { provider: () => new MemoryRawStorage() },
@@ -574,7 +574,7 @@ async function joinStrandAndPollCohort(client, name) {
     await withTimeout(
       client.addStrand({
         strandRow: { Id: STRAND_ID, MemberPrivateKey: null, Type: 'o' },
-        sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, latencyHint: 'interactive' },
+        sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, schemaVersion: 1, latencyHint: 'interactive' },
       }),
       ADD_STRAND_TIMEOUT_MS,
       `${name} addStrand (cohort)`,

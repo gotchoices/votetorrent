@@ -40,7 +40,7 @@ try {
   node = new CadreNode({
     privateKey: await generateKeyPair('Ed25519'),
     controlNetwork: { partyId: 'durability-probe', bootstrapNodes: [] },
-    profile: 'storage',
+    nodeClass: 'server',
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
     network: { transports: [webSockets()], listenAddrs: ['/ip4/127.0.0.1/tcp/0/ws'] },
@@ -56,7 +56,7 @@ try {
 
   await node.addStrand({
     strandRow: { Id: STRAND_ID, MemberPrivateKey: null, Type: 'o' },
-    sAppConfig: { id: 'org.votetorrent.durability-probe', version: '1.0.0', schema: SCHEMA, latencyHint: 'interactive' },
+    sAppConfig: { id: 'org.votetorrent.durability-probe', version: '1.0.0', schema: SCHEMA, schemaVersion: 1, latencyHint: 'interactive' },
     mode: 'bootstrap',
     founder: true,
   });

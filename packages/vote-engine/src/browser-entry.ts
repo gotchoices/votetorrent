@@ -49,6 +49,7 @@ export {
 // The single source of truth for the DDL, bundled as a string so no `node:fs`
 // or `import.meta` is needed in a browser bundle.
 export { VOTETORRENT_SCHEMA_SQL } from './database/schema-sql.js'
+export { VOTETORRENT_SCHEMA_VERSION } from './database/schema-version.js'
 
 // `H16` produces the `networkHash` the browser database name is keyed on; the
 // three datetime helpers are the only correct producers/parsers of the

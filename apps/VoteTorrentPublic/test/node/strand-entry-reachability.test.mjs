@@ -70,7 +70,7 @@ import 'fake-indexeddb/auto';
 import { generateKeyPair } from '@libp2p/crypto/keys';
 import { peerIdFromPrivateKey } from '@libp2p/peer-id';
 import { StrandDatabase } from '@serfab/cadre-core';
-import { VOTETORRENT_SCHEMA_SQL } from '@votetorrent/vote-engine/browser';
+import { VOTETORRENT_SCHEMA_SQL, VOTETORRENT_SCHEMA_VERSION } from '@votetorrent/vote-engine/browser';
 import { publicRoot, moduleUrl } from '../../../../scripts/lib/source-paths.mjs';
 import { createEdgeNode } from '../../src/peer/edge-node.js';
 
@@ -193,7 +193,7 @@ test(
 
 		const strandDb = new StrandDatabase({
 			strandId,
-			sAppConfig: { id: 'org.votetorrent', version: '1.0.0', schema: INNER_DDL, latencyHint: 'interactive' },
+			sAppConfig: { id: 'org.votetorrent', version: '1.0.0', schema: INNER_DDL, schemaVersion: VOTETORRENT_SCHEMA_VERSION, latencyHint: 'interactive' },
 			libp2pNode: edge.node,
 			coordinatedRepo: /** @type {import('@optimystic/db-p2p').OptimysticNode} */ (edge.node).coordinatedRepo,
 			strandType: 'o',

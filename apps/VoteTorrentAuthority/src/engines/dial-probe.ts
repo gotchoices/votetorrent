@@ -58,7 +58,7 @@ export async function runDialProbe(): Promise<void> {
     node = new CadreNode({
       privateKey,
       controlNetwork: { partyId: 'probe-party', bootstrapNodes: [CONTROL_ADDR] },
-      profile: 'transaction',
+      nodeClass: 'device',
       strandFilter: { mode: 'all' },
       // ISO-01 per-scope storage + persistence guardrail (aligned with the app providers).
       storage: { provider: createScopedRnStorageProvider('votetorrent-dialprobe-strand') },

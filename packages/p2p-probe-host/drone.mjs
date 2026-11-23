@@ -31,7 +31,7 @@
  */
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { CadreNode, decodeCadreInvitation, ed25519KeyPairFromLibp2p } from '@serfab/cadre-core';
-import { registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
+import { VOTETORRENT_SCHEMA_VERSION, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
 import { resolveStrandRole, strandFounderOption } from './strand-role.mjs';
 import { MemoryRawStorage } from '@optimystic/db-p2p';
 import { webSockets } from '@libp2p/websockets';
@@ -91,7 +91,7 @@ const node = new CadreNode({
     partyId: PARTY_ID,
     bootstrapNodes: DRONE_BOOTSTRAP_CONTROL_ADDR ? [DRONE_BOOTSTRAP_CONTROL_ADDR] : [],
   },
-  profile: 'storage',
+  nodeClass: 'server',
   // Published @serfab/cadre-core@0.8.1 enforces a fail-closed sApp-schema signature
   // policy (requireSignedSchemas defaults true): the unsigned org.votetorrent demo
   // schema this drone hosts is rejected at strand bring-up with
@@ -436,6 +436,7 @@ await node.addStrand({
     id: 'org.votetorrent',
     version: '1.0.0',
     schema: VOTETORRENT_QSQL,
+    schemaVersion: VOTETORRENT_SCHEMA_VERSION,
     latencyHint: 'interactive',
   },
   mode: 'bootstrap',

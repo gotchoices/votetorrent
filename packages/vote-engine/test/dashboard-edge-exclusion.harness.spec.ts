@@ -31,6 +31,7 @@ import { revokeDashboardPairing } from '../src/pairing/pairing-revocation.js'
 import { bytesToBase64url } from '../src/utils.js'
 import { excludeEdgeReaderMembers, memberAddressPeerId } from '../src/network/edge-reader-members.js'
 import { EDGE_READER_CONTROL_KEY, EDGE_READER_PROTOCOL } from '../src/network/edge-reader-refusal.js'
+import { VOTETORRENT_SCHEMA_VERSION } from '../src/database/schema-version.js'
 
 const SCALE = Number(process.env.P2P_HARNESS_TIMEOUT_SCALE ?? 1)
 const ms = (n: number): number => Math.round(n * SCALE)
@@ -169,7 +170,7 @@ describeP2PHarness('a paired dashboard is never an invitation member or a contro
       storage: { provider: () => storage },
       strandClusterSize: 4,
       hibernation: { enabled: false },
-      profile: 'transaction',
+      nodeClass: 'device',
       network: { transports: [webSockets()], listenAddrs: ['/ip4/127.0.0.1/tcp/0/ws'] },
       strandReactivity: { enabled: true },
       strandCohortRefusal: createEdgeReaderRefusal().hook
@@ -183,7 +184,7 @@ describeP2PHarness('a paired dashboard is never an invitation member or a contro
     const t1 = Date.now()
     await d.addStrand({
       strandRow: { Id: pn.hash, MemberPrivateKey: null, Type: 'o', FounderOwnerKey: null, FounderPeerId: null },
-      sAppConfig: { id: HARNESS_SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, latencyHint: 'interactive' },
+      sAppConfig: { id: HARNESS_SAPP_ID, version: '1.0.0', schema: VOTETORRENT_INNER_DDL, schemaVersion: VOTETORRENT_SCHEMA_VERSION, latencyHint: 'interactive' },
       founder: false,
       awaitFirstSync: false
     })

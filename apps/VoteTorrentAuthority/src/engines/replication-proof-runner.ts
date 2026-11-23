@@ -84,7 +84,7 @@ import { createScopedRnStorageProvider, scopedRnStoreName } from './storage-guar
 import { CadreNode, decodeCadreInvitation } from '@serfab/cadre-core';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
-import { VOTETORRENT_SCHEMA_SQL, NetworkEngine, AuthorityEngine, registerDbPlugins } from '@votetorrent/vote-engine/rn';
+import { VOTETORRENT_SCHEMA_SQL, NetworkEngine, AuthorityEngine, registerDbPlugins, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/rn';
 import { REPLICATION_PROOF_ENABLED } from './proof-flags.generated';
 import { createStrandDbFactory } from './rn-db-factory';
 import { isSelfVouched } from './self-voucher';
@@ -474,7 +474,7 @@ export async function runReplicationProof(): Promise<void> {
       privateKey,
       controlNetwork: { partyId: 'votetorrent', bootstrapNodes: BOOTSTRAP_NODES },
       strandNetworkState: { store: strandNetworkStateStore },
-      profile: 'transaction',
+      nodeClass: 'device',
       // Published @serfab/cadre-core@0.8.1 added a fail-closed sApp-schema signature
       // policy (requireSignedSchemas defaults true): an unsigned sAppConfig is rejected
       // at strand bring-up with SchemaVerificationError('missing signature'). This proof
@@ -563,6 +563,9 @@ export async function runReplicationProof(): Promise<void> {
       // Commit correctness is unaffected — this is replication breadth, not safety.
       strandClusterSize: 2,
       hibernation: { enabled: false },
+      // quereus 5.6 refuses a CHECK that calls an unregistered function at CREATE TABLE; cadre-core applies the
+      // sApp schema inside the strand build, so register VoteTorrent's SQL functions there first (as the providers do).
+      strandDatabaseSetup: registerVoteTorrentFunctions,
     });
 
     // cadre-core 0.13.0 ends start() with driveControlRelayReservation(), which waits on the

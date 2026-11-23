@@ -50,7 +50,7 @@ const loopback = (a) => a.find(x => x.includes('/ip4/127.0.0.1/') && x.includes(
 async function drone(name, boots) {
   const n = new CadreNode({
     ...base(boots, await generateKeyPair('Ed25519'), name),
-    profile: 'storage',
+    nodeClass: 'server',
     network: { transports: [webSockets()], listenAddrs: ['/ip4/0.0.0.0/tcp/0/ws'],
       relayServerInit: { reservations: { maxReservations: 32, defaultDurationLimit: 600000, defaultDataLimit: BigInt(1 << 20) }, maxInboundHopStreams: 64, maxOutboundStopStreams: 64 } },
   });
@@ -61,7 +61,7 @@ async function drone(name, boots) {
 async function peer(name, relays, boots) {
   const n = new CadreNode({
     ...base(boots, await generateKeyPair('Ed25519'), name),
-    profile: 'transaction',
+    nodeClass: 'device',
     // cadre-core 0.12.0: relays live in `network.relayAddrs`, not `listenAddrs` — the old
     // shape is rejected on a control node (it dials the relay during the bring-up quiet
     // period). `listenAddrs` stays unset so this peer keeps no direct listener.

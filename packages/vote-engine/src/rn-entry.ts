@@ -99,6 +99,7 @@ export type { DigestVector } from './database/digest-vectors.js'
 // passes this into CadreNode.addStrand's sAppConfig.schema (P2P-03) so the
 // strand DB and the LevelDB path declare the SAME schema — no drift.
 export { VOTETORRENT_SCHEMA_SQL } from './database/schema-sql.js'
+export { VOTETORRENT_SCHEMA_VERSION } from './database/schema-version.js'
 // Phase 62 Plan 04 (D-03/D-04/D-13/D-18/D-25): the crypto module, re-exported
 // by name (never `export *`) for its RN consumers — 62-14 (intake
 // sealer/opener and officer key registration), 62-21 (the Authority native

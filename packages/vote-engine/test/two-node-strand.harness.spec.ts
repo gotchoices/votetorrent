@@ -35,6 +35,7 @@ import {
   type TwoNodeHarness
 } from './harness/two-node-strand.js'
 import { VOTETORRENT_SCHEMA_SQL } from '../src/database/schema-sql.js'
+import { VOTETORRENT_SCHEMA_VERSION } from '../src/database/schema-version.js'
 
 /** Mirrors networks.spec.ts's makeNetworkInit — copied, not imported (62-06-PLAN.md Part B). */
 function makeNetworkInit (pubKeyHex: string): NetworkInit {
@@ -256,7 +257,7 @@ describeP2PHarness('D-24 two-node strand harness', function () {
       const first = harness.nodeA.node.getStrand(strandId)
       const second = await harness.nodeA.node.addStrand({
         strandRow: { Id: strandId, MemberPrivateKey: null, Type: 'o', FounderOwnerKey: null, FounderPeerId: null },
-        sAppConfig: { id: 'org.votetorrent', version: '1.0.0', schema: VOTETORRENT_INNER_DDL, latencyHint: 'interactive' },
+        sAppConfig: { id: 'org.votetorrent', version: '1.0.0', schema: VOTETORRENT_INNER_DDL, schemaVersion: VOTETORRENT_SCHEMA_VERSION, latencyHint: 'interactive' },
         founder: true,
         awaitFirstSync: false
       })
