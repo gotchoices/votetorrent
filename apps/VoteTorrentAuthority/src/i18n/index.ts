@@ -391,6 +391,8 @@ const resources = {
 			tags: 'Tags',
 			timeline: 'Timeline',
 			keyholderThreshold: 'Keyholder Threshold',
+			// The keyholder policy value on Election Details: how many of the keyholders must release a share.
+			keyholderPolicyValue: '{{threshold}} of {{count}}',
 			keyholderPolicy: 'Keyholder Policy',
 			official: 'Official',
 			adhoc: 'Ad-hoc',
@@ -1867,6 +1869,7 @@ const resources = {
 			tags: 'Etiquetas',
 			timeline: 'Cronograma',
 			keyholderThreshold: 'Umbral de Custodios', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
+			keyholderPolicyValue: '{{threshold}} de {{count}}',
 			keyholderPolicy: 'Política de Custodios', // Phase 11 plan 11-01 (D-11) — Spanish backfill.
 			official: 'Oficial',
 			adhoc: 'Ad-hoc',
