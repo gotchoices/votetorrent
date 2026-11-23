@@ -1,6 +1,7 @@
 require_relative '../node_modules/react-native/scripts/react_native_pods'
 
-platform :ios, min_ios_version_supported
+# react-native-vision-camera-barcode-scanner's podspec declares iOS 15.5; RN's min_ios_version_supported is 15.1.
+platform :ios, '15.5'
 prepare_react_native_project!
 
 target 'VoteTorrentAuthority' do

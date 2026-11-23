@@ -103,6 +103,10 @@ module.exports = {
     '^react-native-share$': '<rootDir>/__mocks__/react-native-share.js',
     '^@dr.pogodin/react-native-fs$': '<rootDir>/__mocks__/@dr.pogodin/react-native-fs.js',
     '^@sayem314/react-native-keep-awake$': '<rootDir>/__mocks__/@sayem314/react-native-keep-awake.js',
+    // 2026-11-23 (user ruling: the Authority scans the join-code QR too): the VisionCamera 5 stack is
+    // Nitro HybridObject bindings that jest cannot load. The Voter's stand-ins, copied with their seams.
+    '^react-native-vision-camera$': '<rootDir>/__mocks__/react-native-vision-camera.js',
+    '^react-native-vision-camera-barcode-scanner$': '<rootDir>/__mocks__/react-native-vision-camera-barcode-scanner.js',
     '^@react-native-community/datetimepicker$': '<rootDir>/__mocks__/@react-native-community/datetimepicker.js',
     '^react-native-vector-icons/FontAwesome$': '<rootDir>/__mocks__/react-native-vector-icons/FontAwesome.js',
     '^@multiformats/multiaddr$': '<rootDir>/__mocks__/@multiformats/multiaddr.js',

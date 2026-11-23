@@ -13,9 +13,78 @@ PODS:
     - ReactNativeDependencies
   - glog (0.3.5):
     - ReactNativeDependencies
+  - GoogleDataTransport (10.1.1):
+    - nanopb (~> 3.30910.0)
+    - PromisesObjC (~> 2.4)
+  - GoogleMLKit/BarcodeScanning (9.0.0):
+    - GoogleMLKit/MLKitCore
+    - MLKitBarcodeScanning (~> 8.0.0)
+  - GoogleMLKit/MLKitCore (9.0.0):
+    - MLKitCommon (~> 14.0.0)
+  - GoogleToolboxForMac/Defines (4.2.1)
+  - GoogleToolboxForMac/Logger (4.2.1):
+    - GoogleToolboxForMac/Defines (= 4.2.1)
+  - "GoogleToolboxForMac/NSData+zlib (4.2.1)":
+    - GoogleToolboxForMac/Defines (= 4.2.1)
+  - GoogleUtilities/Environment (8.1.4):
+    - GoogleUtilities/Privacy
+  - GoogleUtilities/Logger (8.1.4):
+    - GoogleUtilities/Environment
+    - GoogleUtilities/Privacy
+  - GoogleUtilities/Privacy (8.1.4)
+  - GoogleUtilities/UserDefaults (8.1.4):
+    - GoogleUtilities/Logger
+    - GoogleUtilities/Privacy
+  - GTMSessionFetcher/Core (3.5.0)
   - hermes-engine (250829098.0.17):
     - hermes-engine/Pre-built (= 250829098.0.17)
   - hermes-engine/Pre-built (250829098.0.17)
+  - MLImage (1.0.0-beta8)
+  - MLKitBarcodeScanning (8.0.0):
+    - MLKitCommon (~> 14.0)
+    - MLKitVision (~> 10.0)
+  - MLKitCommon (14.0.0):
+    - GoogleDataTransport (~> 10.0)
+    - GoogleToolboxForMac/Logger (< 5.0, >= 4.2.1)
+    - "GoogleToolboxForMac/NSData+zlib (< 5.0, >= 4.2.1)"
+    - GoogleUtilities/Logger (~> 8.0)
+    - GoogleUtilities/UserDefaults (~> 8.0)
+    - GTMSessionFetcher/Core (< 4.0, >= 3.3.2)
+  - MLKitVision (10.0.0):
+    - GoogleToolboxForMac/Logger (< 5.0, >= 4.2.1)
+    - "GoogleToolboxForMac/NSData+zlib (< 5.0, >= 4.2.1)"
+    - GTMSessionFetcher/Core (< 4.0, >= 3.3.2)
+    - MLImage (= 1.0.0-beta8)
+    - MLKitCommon (~> 14.0)
+  - nanopb (3.30910.0):
+    - nanopb/decode (= 3.30910.0)
+    - nanopb/encode (= 3.30910.0)
+  - nanopb/decode (3.30910.0)
+  - nanopb/encode (3.30910.0)
+  - NitroImage (0.15.2):
+    - hermes-engine
+    - NitroModules
+    - RCTRequired
+    - RCTTypeSafety
+    - React-bridging
+    - React-callinvoker
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - NitroModules (0.37.1):
     - hermes-engine
     - RCTRequired
@@ -39,6 +108,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - PromisesObjC (2.4.1)
   - QuickCrypto (1.1.7):
     - hermes-engine
     - NitroModules
@@ -2082,6 +2152,58 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - VisionCamera (5.2.3):
+    - hermes-engine
+    - NitroImage
+    - NitroModules
+    - RCTRequired
+    - RCTTypeSafety
+    - React-bridging
+    - React-callinvoker
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
+  - VisionCameraBarcodeScanner (5.2.3):
+    - GoogleMLKit/BarcodeScanning (= 9.0.0)
+    - hermes-engine
+    - NitroImage
+    - NitroModules
+    - RCTRequired
+    - RCTTypeSafety
+    - React-bridging
+    - React-callinvoker
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - VisionCamera
+    - Yoga
   - Yoga (0.0.0):
     - React-Core-prebuilt
 
@@ -2094,6 +2216,7 @@ DEPENDENCIES:
   - fmt (from `build/rndeps-facades/fmt`)
   - glog (from `build/rndeps-facades/glog`)
   - hermes-engine (from `../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
+  - NitroImage (from `../node_modules/react-native-nitro-image`)
   - NitroModules (from `../node_modules/react-native-nitro-modules`)
   - QuickCrypto (from `../node_modules/react-native-quick-crypto`)
   - RCT-Folly (from `build/rndeps-facades/RCT-Folly`)
@@ -2190,7 +2313,23 @@ DEPENDENCIES:
   - RNVectorIcons (from `../node_modules/react-native-vector-icons`)
   - SocketRocket (from `build/rndeps-facades/SocketRocket`)
   - SplashView (from `../node_modules/react-native-splash-view`)
+  - VisionCamera (from `../node_modules/react-native-vision-camera`)
+  - VisionCameraBarcodeScanner (from `../node_modules/react-native-vision-camera-barcode-scanner`)
   - Yoga (from `build/rncore-facades/Yoga`)
+
+SPEC REPOS:
+  trunk:
+    - GoogleDataTransport
+    - GoogleMLKit
+    - GoogleToolboxForMac
+    - GoogleUtilities
+    - GTMSessionFetcher
+    - MLImage
+    - MLKitBarcodeScanning
+    - MLKitCommon
+    - MLKitVision
+    - nanopb
+    - PromisesObjC
 
 EXTERNAL SOURCES:
   AttestationNative:
@@ -2210,6 +2349,8 @@ EXTERNAL SOURCES:
   hermes-engine:
     :podspec: "../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec"
     :tag: hermes-v250829098.0.17
+  NitroImage:
+    :path: "../node_modules/react-native-nitro-image"
   NitroModules:
     :path: "../node_modules/react-native-nitro-modules"
   QuickCrypto:
@@ -2400,6 +2541,10 @@ EXTERNAL SOURCES:
     :path: build/rndeps-facades/SocketRocket
   SplashView:
     :path: "../node_modules/react-native-splash-view"
+  VisionCamera:
+    :path: "../node_modules/react-native-vision-camera"
+  VisionCameraBarcodeScanner:
+    :path: "../node_modules/react-native-vision-camera-barcode-scanner"
   Yoga:
     :path: build/rncore-facades/Yoga
 
@@ -2411,9 +2556,21 @@ SPEC CHECKSUMS:
   FBLazyVector: 1f950f55bf9d0f1130874f80ff0932945b97e2a8
   fmt: c7776a2a4b1d7ce88b809a1e4d1f7add0f2369df
   glog: b4427c3119645da795ff09985ba9da909c940c96
+  GoogleDataTransport: a24e58982ab3ba2f64d79613e027fe7f57e88539
+  GoogleMLKit: b1eee21a41c57704fe72483b15c85cb2c0cd7444
+  GoogleToolboxForMac: d1a2cbf009c453f4d6ded37c105e2f67a32206d8
+  GoogleUtilities: db34c1c11c6f2eccb6fab2340cb8ceb1451299dc
+  GTMSessionFetcher: 5aea5ba6bd522a239e236100971f10cb71b96ab6
   hermes-engine: 63c5db7d529c36335fada6582fd293ae2a105d77
+  MLImage: 0de5c6c2bf9e93b80ef752e2797f0836f03b58c0
+  MLKitBarcodeScanning: 39de223e7b1b8a8fbf10816a536dd292d8a39343
+  MLKitCommon: 47d47b50a031d00db62f1b0efe5a1d8b09a3b2e6
+  MLKitVision: 39a5a812db83c4a0794445088e567f3631c11961
+  nanopb: fad817b59e0457d11a5dfbde799381cd727c1275
+  NitroImage: 9f433e6cdbb63847b978853eee1da04af99f1254
   NitroModules: 08aff3b1a45badb71cf10d8f2d9cfb4e87cb468e
-  QuickCrypto: 07ca33bf1ba493777ed35c9ee2452d9b0b1e374e
+  PromisesObjC: 752c3227f599e3467650e47ea36f433eeb10c273
+  QuickCrypto: cdae6d665db32a9cb119009798c1159ba85314db
   RCT-Folly: d173e541eeb78cad5c81011c1bbf62d5b86b9778
   RCTDeprecation: 1dce662386078170e119b89c1600db1b6e3d42f6
   RCTRequired: b5a9168b680baa2cda4f6b4764d10b6e58368b25
@@ -2507,8 +2664,10 @@ SPEC CHECKSUMS:
   RNVectorIcons: 25076d7c4d9fbd847fb22590143f31d9758a48b4
   SocketRocket: d57b1af80c029e12a75cd9b218287c67381e4593
   SplashView: fa6fb28c3fdec8e8102c0d7dd2d2ca21ef622d50
+  VisionCamera: 086fa6b679d0f32c4ce2fab3507fc54790262546
+  VisionCameraBarcodeScanner: 603228219919ccdd56a60b69191ec1582d1330f6
   Yoga: 58b502c52b14ad3c4468805d461fc37d275c2a42
 
-PODFILE CHECKSUM: 576120e70558b1a90b4ecda42457301b32122a21
+PODFILE CHECKSUM: b04ea46944b5b17cdbec7b4741392685dfd60a5f
 
 COCOAPODS: 1.17.0
