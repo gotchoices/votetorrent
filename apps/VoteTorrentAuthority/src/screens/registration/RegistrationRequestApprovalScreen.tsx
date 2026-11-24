@@ -5,8 +5,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type {
-	IRegistrationEngine,
-	ISignatureTasksEngine,
 	LikelyDuplicateRequest,
 	PriorRejection,
 	RegistrantSignatureTask,
@@ -17,6 +15,18 @@ import type {
 	SigningStatus,
 } from "@votetorrent/vote-core";
 import { isChecklistGateMet, REGISTRATION_STALE_CLOSE_TIMEOUT_MS } from "@votetorrent/vote-core";
+import {
+	approveRegistrationRequest,
+	closeRegistrationRequestAsStale,
+	closesRequestIdOf,
+	isRegistrationStaleCloseError,
+	loadRegistrationApproval,
+	recordRegistrationRejectVote,
+	refuseRegistrationRequest,
+	registrationApprovalErrorCode,
+	registrationDecisionBlockers,
+	type RegistrationApprovalErrorCode,
+} from "@votetorrent/workflows/authority";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
@@ -26,6 +36,7 @@ import { InlineError } from "../../components/InlineError";
 import { globalStyles } from "../../theme/styles";
 import { useApp } from "../../providers/AppProvider";
 import { createDeviceSigner } from "../../engines/device-signer";
+import { resolveAuthorityKeyVault } from "../../engines/key-vault";
 import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
 import { useCurrentOfficerScopes } from "../../hooks/useCurrentOfficerScopes";
 import {
@@ -47,7 +58,6 @@ import {
 	isClosedAsDuplicateError,
 	isRegistrationContentAccessError,
 	isRequesterSignatureUnverifiableError,
-	publishRegistrationDecisionAfterDecide,
 	registrationContentUnreadKey,
 } from "./continuity-review";
 import { VerificationChecklist } from "./components/VerificationChecklist";
@@ -58,25 +68,17 @@ import { peerUnavailableMessage } from "../../utils/peerUnavailableMessage";
 import { trackCommits, useCommitShareTracker } from "../../hooks/useCommitShare";
 
 /**
- * A local failure carried by code only. The code is the whole message: it never holds a request id or a
- * screen name, and the catches map it to catalog copy, so nothing here can reach the screen as text.
+ * The shared workflow's coded failures (`RegistrationApprovalError`, code-only message: never a request id
+ * or a screen name) mapped to catalog copy, so nothing from them can reach the screen as text.
  */
-type ApprovalScreenErrorCode = "not-found" | "checklist-incomplete" | "no-task";
-class ApprovalScreenError extends Error {
-	readonly code: ApprovalScreenErrorCode;
-	constructor(code: ApprovalScreenErrorCode) {
-		super(code);
-		this.name = "ApprovalScreenError";
-		this.code = code;
-	}
-}
-const APPROVAL_ERROR_KEYS: Record<ApprovalScreenErrorCode, string> = {
+const APPROVAL_ERROR_KEYS: Record<RegistrationApprovalErrorCode, string> = {
 	"not-found": "registrationRequestNotFound",
 	"checklist-incomplete": "registrationRequestChecklistIncomplete",
 	"no-task": "registrationRequestNoTask",
 };
 function approvalErrorKey(err: unknown): string | undefined {
-	return err instanceof ApprovalScreenError ? APPROVAL_ERROR_KEYS[err.code] : undefined;
+	const code = registrationApprovalErrorCode(err);
+	return code === undefined ? undefined : APPROVAL_ERROR_KEYS[code];
 }
 
 /**
@@ -138,6 +140,9 @@ function approvalErrorKey(err: unknown): string | undefined {
  * unreadable state in place of the summary and checklist, never an empty form. The copy is
  * 62-10's Group K; the approval gate's `RegistrationContentAccessError` is mapped by its access
  * code, and its message (request id plus access code) is never rendered.
+ *
+ * The decision workflow itself (load, gate, sign, complete, publish) lives in `@votetorrent/workflows`
+ * `registration-approval.ts` (67-18); this screen keeps state and presentation and calls it.
  */
 
 export interface RequestSummaryRow {
@@ -367,87 +372,42 @@ export default function RegistrationRequestApprovalScreen() {
 			setSigningStatus(null);
 			setStaleClose(undefined);
 			try {
-				const reg = await getEngine<IRegistrationEngine>("registration");
-				const r = await reg.getRegistrationRequest(requestId);
-				if (r === undefined) {
-					// Coded, so the catch shows catalog copy and never an id.
-					throw new ApprovalScreenError("not-found");
-				}
+				// The reads (request, prior rejections, duplicate closure, likely duplicates, the
+				// requestId-scoped own task, signing status, stale-close availability) and their
+				// partial-failure semantics live in the shared workflow; it never throws.
+				const view = await loadRegistrationApproval({ getEngine, requestId, shouldStop: () => unmountedRef.current });
 				if (unmountedRef.current) return;
-				setRead(r);
-				setChecked(r.verificationChecklist ?? []);
-
-				try {
-					const prior = await reg.getPriorRejections(r.requesterKey, r.requestId);
-					if (!unmountedRef.current) setPriorRejections(prior);
-				} catch (err) {
-					// L-3: rendering nothing here would be indistinguishable from "no
-					// prior rejections", the exact misreading D-06 exists to prevent —
-					// so the failure is surfaced and Approve is blocked while Reject
-					// stays available. Refusing under uncertainty is safe; approving
-					// under it is not.
-					if (!unmountedRef.current) {
-						setPriorRejectionsUnavailable(true);
-						setErrorMessage(peerUnavailableMessage(err, tRef.current, "read") ?? tRef.current("priorRejectionsUnavailable"));
-					}
+				if (view.read) {
+					setRead(view.read);
+					setChecked(view.read.verificationChecklist ?? []);
 				}
-
-				// D-44: the closure state first. A request already closed (or closing) as a
-				// duplicate is never decided, and needs no candidate callout.
-				let closed: RegistrationDuplicateClosure | undefined;
-				try {
-					closed = await reg.getDuplicateClosure(requestId);
-					if (!unmountedRef.current) setClosure(closed);
-				} catch {
-					if (!unmountedRef.current) {
-						setClosureUnavailable(true);
-						setErrorMessage(t("possibleDuplicateCheckFailed"));
-					}
+				if (view.priorRejections) setPriorRejections(view.priorRejections);
+				setPriorRejectionsUnavailable(view.priorRejectionsUnavailable);
+				setClosure(view.closure);
+				setClosureUnavailable(view.closureUnavailable);
+				setDuplicate(view.duplicate);
+				setDuplicateUnavailable(view.duplicateUnavailable);
+				if (view.taskLookup) setTask(view.taskLookup.task);
+				setSigningStatus(view.signingStatus);
+				setStaleClose(view.staleClose);
+				// The error area: later failures win over earlier ones, as the sequential reads did.
+				if (view.priorRejectionsUnavailable) {
+					// L-3: rendering nothing here would be indistinguishable from "no prior rejections",
+					// the exact misreading D-06 exists to prevent — so the failure is surfaced and Approve
+					// is blocked while Reject stays available. Refusing under uncertainty is safe;
+					// approving under it is not.
+					setErrorMessage(
+						peerUnavailableMessage(view.priorRejectionsFailure, tRef.current, "read") ?? tRef.current("priorRejectionsUnavailable")
+					);
 				}
-
-				if (r.status === "p" && closed === undefined) {
-					try {
-						const likely = await reg.getLikelyDuplicateRequests(requestId);
-						if (!unmountedRef.current) setDuplicate(likely[0]);
-					} catch {
-						// L-3 mirror: the engine message is never shown, and Approve is blocked.
-						if (!unmountedRef.current) {
-							setDuplicateUnavailable(true);
-							setErrorMessage(t("possibleDuplicateCheckFailed"));
-						}
-					}
+				if (view.closureUnavailable || view.duplicateUnavailable) {
+					// L-3 mirror: the engine message is never shown, and Approve is blocked.
+					setErrorMessage(t("possibleDuplicateCheckFailed"));
 				}
-
-				if (r.status === "p") {
-					const tasksEngine = await getEngine<ISignatureTasksEngine>("signatureTasksEngine");
-					const tasks = await tasksEngine.getRequestedSignatures(true);
-					// 48-11 L-3: the requestId equality below is mandatory — an
-					// officer legitimately has several pending registration requests
-					// at once, and taking the first 'registrant' task would hand the
-					// officer a DIFFERENT request's digest to sign.
-					const found = tasks.find(
-						(x) => x.signatureType === "registrant" && (x as RegistrantSignatureTask).requestId === requestId
-					) as RegistrantSignatureTask | undefined;
-					if (!unmountedRef.current) setTask(found);
-					// D-11: display-only; a failed read is simply no note.
-					try {
-						const status = await tasksEngine.getRegistrantSigningStatus(requestId);
-						if (!unmountedRef.current) setSigningStatus(status);
-					} catch {
-						if (!unmountedRef.current) setSigningStatus(null);
-					}
-					try {
-						const availability = await reg.getStaleCloseAvailability(requestId);
-						if (!unmountedRef.current) setStaleClose(availability);
-					} catch {
-						if (!unmountedRef.current) setStaleClose(undefined);
-					}
-				}
-			} catch (err) {
-				if (!unmountedRef.current) {
+				if (view.failure !== undefined) {
 					const tr = tRef.current;
-					const coded = approvalErrorKey(err);
-					setErrorMessage(peerUnavailableMessage(err, tr, "read") ?? tr(coded ?? "registrationRequestLoadFailed"));
+					const coded = approvalErrorKey(view.failure);
+					setErrorMessage(peerUnavailableMessage(view.failure, tr, "read") ?? tr(coded ?? "registrationRequestLoadFailed"));
 				}
 			} finally {
 				if (!unmountedRef.current) setLoading(false);
@@ -458,15 +418,20 @@ export default function RegistrationRequestApprovalScreen() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [requestId, getEngine, reloadNonce]);
 
-	// Derived values (D-44 / D-11 / D-49).
-	const thresholdAboveOne = (signingStatus?.threshold ?? 1) > 1;
-	const unreachable = mode === "pending" && signingStatus?.unreachable === true && signingStatus.reached === false;
-	const closedAsDuplicate = closure !== undefined;
+	// Derived values (D-44 / D-11 / D-49): the data terms of the Approve and Reject `disabled`
+	// expressions come from the shared workflow, so the CLI refuses on exactly the conditions an
+	// officer sees here; the UI-only terms (`gateMet`, `canDecide`, `submitting`) stay below.
+	const blockers = registrationDecisionBlockers({
+		read,
+		priorRejectionsUnavailable,
+		closure,
+		closureUnavailable,
+		duplicateUnavailable,
+		taskLookup: { task },
+		signingStatus,
+	});
+	const { thresholdAboveOne, unreachable, closedAsDuplicate, contentReadable, rejectableUnread } = blockers;
 	const unreadKey = registrationContentUnreadKey(read?.payloadAccess);
-	const contentReadable = unreadKey === undefined;
-	// An officer cannot refuse a request they cannot see, but may refuse content that fails its
-	// signed digest: refusing under uncertainty is the safe direction.
-	const rejectableUnread = read?.payloadAccess === "tampered";
 	// D-07: derived from `checked` directly (not the `gateMet` state), because `checked` can be
 	// seeded from `read.verificationChecklist` before VerificationChecklist reports.
 	const checklistGateMet = isChecklistGateMet(checked);
@@ -489,23 +454,27 @@ export default function RegistrationRequestApprovalScreen() {
 	// unreachable state too (that is the request it exists for).
 	const staleCloseOffered = mode === "pending" && staleClose?.available === true && canDecide && !closedAsDuplicate;
 
+	// The signer seam the shared workflow takes: resolved per ceremony, never a key.
+	const resolveDeviceSign = () => createDeviceSigner("Device User");
+
 	function buildReviewDeps() {
 		return {
 			getEngine,
 			createPeerStagingTransports,
 			authorityId,
-			sign: createLazyDeviceSign(() => createDeviceSigner("Device User")),
+			sign: createLazyDeviceSign(resolveDeviceSign),
+			resolveVault: resolveAuthorityKeyVault,
 		};
 	}
 
 	/** The request the callout showed, or null: never omitted (automatic closure would close an unseen request). */
 	function closesRequestId(): string | null {
-		return duplicateUnavailable ? null : (duplicate?.requestId ?? null);
+		return closesRequestIdOf({ duplicate, duplicateUnavailable });
 	}
 
-	// G. handleApprove — the accept ceremony (D-07). Four steps: fetch the
-	// engine-authoritative digest, sign it device-side, complete the
-	// signature with the checklist bound into `decision`, then leave.
+	// G. handleApprove — the accept ceremony (D-07): the shared workflow fetches the
+	// engine-authoritative digest, signs it device-side, completes the signature with the
+	// checklist bound into `decision` and publishes; this handler then leaves.
 	async function handleApprove() {
 		if (submittingRef.current) return;
 		submittingRef.current = true;
@@ -514,49 +483,21 @@ export default function RegistrationRequestApprovalScreen() {
 		setSubmitting(true);
 		try {
 			setErrorMessage("");
-			// WR-02: re-assert the D-07 gate INSIDE the handler. Before this the gate lived
-			// solely in the Approve button's `disabled` expression, so any press that
-			// reached the handler — a `disabled`-bypassing dispatch, a future caller, a
-			// state update racing the press — wrote an ungated decision. `isChecklistGateMet`
-			// is the same imported vote-core predicate `VerificationChecklist` reports
-			// through `onChange`; it is re-evaluated against `checked` (the array actually
-			// bound into `decision.checklist` below) rather than trusting the derived
-			// `gateMet` state, so the value gated and the value signed cannot diverge. The
-			// engine refuses this independently — this check exists so the officer sees the
-			// refusal before a device signature is requested, not to replace it.
-			if (!isChecklistGateMet(checked)) {
-				throw new ApprovalScreenError("checklist-incomplete");
-			}
-			if (!task) {
-				throw new ApprovalScreenError("no-task");
-			}
-			const engine = await getEngine<ISignatureTasksEngine>("signatureTasksEngine");
-			// The engine is authoritative; the screen never recomputes a digest
-			// itself (48-11 L-3 scoped this lookup by requestId).
-			const digest = await engine.getSignatureDigest(task);
-			const signer = await createDeviceSigner("Device User");
-			const signature = await signer(digest);
-			// `sign: signer` is passed UNCONDITIONALLY — this screen deliberately
-			// does NOT copy SignatureTaskScreen.tsx's ballot-only narrowing. Per
-			// 48-11 L-2: DG-2 is signed at decision time inside
-			// finalizeRegistrantApproval, and an accept whose `result.sign` is
-			// undefined THROWS in the engine — there is no placeholder fallback,
-			// because a placeholder would produce an approval whose checklist is
-			// covered by nothing. `decision.checklist` is the SAME array instance
-			// `VerificationChecklist` rendered, so what the officer sees and what
-			// the officer signs cannot diverge.
-			await trackDecision(() =>
-				engine.completeSignature(task, {
-					isAccepted: true,
-					signature,
-					sign: signer,
-					decision: { checklist: checked },
-				}),
-			);
-			// D-44: publish right after the decision resolves. Never throws, and a failure here
-			// is never reported as a failed decision: 62-25's drain publishes it later.
-			const published = await trackDecision(() => publishRegistrationDecisionAfterDecide(buildReviewDeps(), requestId, closesRequestId()));
-			if (thresholdAboveOne && published.kind === "still-pending") {
+			// WR-02 / 48-11 L-2: the D-07 gate (against `checked`, the array actually bound into
+			// `decision.checklist`), the own-task check, the digest, the device signature and the
+			// completion with `sign` passed unconditionally are re-asserted inside
+			// approveRegistrationRequest before any signature is requested.
+			const result = await approveRegistrationRequest({
+				getEngine,
+				requestId,
+				task,
+				checklist: checked,
+				resolveSign: resolveDeviceSign,
+				review: buildReviewDeps(),
+				closesRequestId: closesRequestId(),
+				track: trackDecision,
+			});
+			if (thresholdAboveOne && result.published.kind === "still-pending") {
 				// Below threshold: the vote is recorded, the request is still pending.
 				setReloadNonce((n) => n + 1);
 				return;
@@ -594,77 +535,35 @@ export default function RegistrationRequestApprovalScreen() {
 
 	// H. handleReject — the refusal.
 	//
-	// D-12 (48-12, carried verbatim from signature-tasks-engine.ts): a rejection that advances the signing session is a critical integrity hole.
-	// On THIS path a completed 'vrg' session would drive
-	// finalizeRegistrantApproval -> the unchanged register(), so a rejection
-	// that advanced the session would create the very Registrant the officer
-	// refused, while the request row still read Status = 'r' — silently,
-	// invisible to anyone reading only RegistrationRequest.Status.
-	//
-	// L-2 (48-11): `rejectRegistrationRequest` takes a signer because the
-	// rejection RECORD must itself be signed and attributable (D-06) — that
-	// is a different act from advancing the signing session, and this
-	// handler performs the first and NEVER the second: it never calls
-	// `getSignatureDigest` and never invokes `signer(digest)` itself.
+	// D-12 / L-2 (48-11, 48-12) / WR-14 are carried by the shared refuseRegistrationRequest: the gate
+	// first (an ungated press spends NO biometric prompt), the signer handed to the engine to sign the
+	// rejection RECORD (never a digest read, never a signer call of its own, so the signing session
+	// is never advanced), the blank-triple task close isolated and swallowed past the recorded
+	// rejection, and the publish as a third separately failing act that never throws.
 	async function handleReject(reason: string): Promise<void> {
 		setErrorMessage("");
-		// D-07 / WR-02: the engine refuses an ungated reject, and the buttons are disabled on the
-		// same predicate; this is the belt to those braces so an ungated press spends NO biometric
-		// prompt. Fixed text, no request id. Rethrown so RejectReasonCard's latch returns to idle.
-		if (!isChecklistGateMet(checked)) {
-			setErrorMessage(t("registrationRequestRejectChecklistRequired"));
-			throw new Error("reject checklist gate not met");
-		}
 		try {
-			const reg = await getEngine<IRegistrationEngine>("registration");
-			// The screen never calls getSignatureDigest and never invokes
-			// signer(digest) itself on this path — the signer is handed to the
-			// engine, which signs the rejection RECORD, not the signing session.
-			const signer = await createDeviceSigner("Device User");
-			// `reason` arrives already trimmed from RejectReasonCard — not
-			// re-trimmed here.
-			await trackDecision(() => reg.rejectRegistrationRequest(requestId, { checklist: checked, rejectionReason: reason }, signer));
-			// WR-14: past this line the rejection IS RECORDED — permanently, signed, and
-			// `NoDelete`. The two steps below are therefore NOT part of the same atomic act and
-			// must not be reported as one.
-			//
-			// The previous shape awaited task completion inside the same try and let a failure
-			// there propagate to the catch, which surfaced an error and rethrew so RejectReasonCard
-			// returned to idle "for a retry". That retry was a trap: it re-entered
-			// `rejectRegistrationRequest`, which now throws "is already decided (Status=r)". The
-			// officer saw a hard error on a rejection that had in fact SUCCEEDED, and no sequence
-			// of presses could ever clear it.
-			//
-			// So the task-completion step is isolated and its failure swallowed. What is lost by
-			// swallowing is bounded and cosmetic: the Task row stays `IsCompleted = 0`, so a stale
-			// entry lingers in the officer's inbox. What is gained is that the officer is not told
-			// a completed refusal failed. Seeding will not resurrect or duplicate anything either —
-			// the extension row already exists and the request is no longer `'p'`, so
-			// `seedRegistrantSignatureTasks`'s `not exists` / `Status = 'p'` predicates both
-			// exclude it. No `console.*` here: this file's never-log rule (header note 3) is
-			// absolute, and the caught value can carry request identifiers.
-			if (task) {
-				try {
-					const tasksEngine = await getEngine<ISignatureTasksEngine>("signatureTasksEngine");
-					// The blank triple, byte-identical to SignatureTaskScreen.tsx's own
-					// reject path — no `sign` field, no `decision` field. Closing the
-					// task and advancing the signature are different things; only the
-					// second is forbidden.
-					await tasksEngine.completeSignature(task, {
-						isAccepted: false,
-						signature: { signature: "", signerKey: "", signerUserId: "" },
-					});
-				} catch {
-					// Deliberately swallowed — see above. The refusal is recorded; a stale open
-					// task is cosmetic, and reporting it as a failed refusal is not.
-				}
-			}
-			//
-			// WR-14 (62-27): publishing is a third, separately failing act whose failure is never
-			// reported as a failed refusal. It never throws.
-			await trackDecision(() => publishRegistrationDecisionAfterDecide(buildReviewDeps(), requestId, closesRequestId()));
+			// `reason` arrives already trimmed from RejectReasonCard — not re-trimmed here.
+			await refuseRegistrationRequest({
+				getEngine,
+				requestId,
+				task,
+				checklist: checked,
+				reason,
+				resolveSign: resolveDeviceSign,
+				review: buildReviewDeps(),
+				closesRequestId: closesRequestId(),
+				track: trackDecision,
+			});
 			navigation.goBack();
 		} catch (err) {
+			if (registrationApprovalErrorCode(err) === "checklist-incomplete") {
+				// D-07 / WR-02: the engine refuses an ungated reject, and the buttons are disabled on the
+				// same predicate; this is the belt to those braces. Fixed text, no request id. Rethrown
+				// so RejectReasonCard's latch returns to idle.
+				setErrorMessage(t("registrationRequestRejectChecklistRequired"));
+				throw err;
+			}
 			if (isClosedAsDuplicateError(err)) {
 				setErrorMessage("");
 				setShowRejectCard(false);
@@ -699,14 +598,7 @@ export default function RegistrationRequestApprovalScreen() {
 		setSubmitting(true);
 		try {
 			setErrorMessage("");
-			if (!task) {
-				throw new ApprovalScreenError("no-task");
-			}
-			const engine = await getEngine<ISignatureTasksEngine>("signatureTasksEngine");
-			await engine.completeSignature(task, {
-				isAccepted: false,
-				signature: { signature: "", signerKey: "", signerUserId: "" },
-			});
+			await recordRegistrationRejectVote({ getEngine, task });
 			// The request stays pending until the session resolves: reload to show the status.
 			setReloadNonce((n) => n + 1);
 		} catch (err) {
@@ -733,24 +625,18 @@ export default function RegistrationRequestApprovalScreen() {
 	async function handleStaleClose(reason: string): Promise<void> {
 		setErrorMessage("");
 		try {
-			const reg = await getEngine<IRegistrationEngine>("registration");
-			const signer = await createDeviceSigner("Device User");
-			await trackDecision(() => reg.closeStaleRegistrationRequest(requestId, { rejectionReason: reason }, signer));
-			if (task) {
-				try {
-					const tasksEngine = await getEngine<ISignatureTasksEngine>("signatureTasksEngine");
-					await tasksEngine.completeSignature(task, {
-						isAccepted: false,
-						signature: { signature: "", signerKey: "", signerUserId: "" },
-					});
-				} catch {
-					// Cosmetic: the close is recorded; a stale open task is not a failed close.
-				}
-			}
-			await trackDecision(() => publishRegistrationDecisionAfterDecide(buildReviewDeps(), requestId, null));
+			await closeRegistrationRequestAsStale({
+				getEngine,
+				requestId,
+				task,
+				reason,
+				resolveSign: resolveDeviceSign,
+				review: buildReviewDeps(),
+				track: trackDecision,
+			});
 			navigation.goBack();
 		} catch (err) {
-			if (isStaleCloseError(err)) {
+			if (isRegistrationStaleCloseError(err)) {
 				setErrorMessage(t(err.code === "too-early" ? "registrationRequestStaleCloseNotYet" : "registrationRequestStaleCloseFailed"));
 				if (err.code !== "too-early") setReloadNonce((n) => n + 1);
 			} else {
@@ -1043,17 +929,7 @@ export default function RegistrationRequestApprovalScreen() {
 								backgroundColor={colors.success}
 								// WR-13: reads the STATE, not the ref — a ref mutation schedules no render, so
 								// the ref-based form never produced a visual disable while the ceremony ran.
-								disabled={
-										!gateMet ||
-										!canDecide ||
-										priorRejectionsUnavailable ||
-										duplicateUnavailable ||
-										closureUnavailable ||
-										closedAsDuplicate ||
-										!task ||
-										!contentReadable ||
-										submitting
-									}
+								disabled={!gateMet || !canDecide || blockers.approve.length > 0 || submitting}
 								onPress={handleApprove}
 							/>
 						</View>
@@ -1062,14 +938,7 @@ export default function RegistrationRequestApprovalScreen() {
 								title={t("registrationRequestApprovalRejectButton")}
 								icon="xmark"
 								backgroundColor={colors.error}
-								disabled={
-									!checklistGateMet ||
-									!canDecide ||
-									closedAsDuplicate ||
-									(thresholdAboveOne && !task) ||
-									(!contentReadable && !rejectableUnread) ||
-									submitting
-								}
+								disabled={!checklistGateMet || !canDecide || blockers.refuse.length > 0 || submitting}
 								// Threshold 1 fires NO engine call whatsoever — only reveals the card. Above
 								// threshold 1 it records a vote (D-11).
 								onPress={() => (thresholdAboveOne ? handleThresholdRejectVote() : setShowRejectCard(true))}
@@ -1125,15 +994,6 @@ export default function RegistrationRequestApprovalScreen() {
 				</View>
 			) : null}
 		</KeyboardAvoidingScreen>
-	);
-}
-
-function isStaleCloseError(err: unknown): err is { name: "RegistrationStaleCloseError"; code: string } {
-	return (
-		typeof err === "object" &&
-		err !== null &&
-		(err as { name?: unknown }).name === "RegistrationStaleCloseError" &&
-		typeof (err as { code?: unknown }).code === "string"
 	);
 }
 
