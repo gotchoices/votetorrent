@@ -43,6 +43,7 @@ import {
   type VoterKv,
   type VoterLastAttemptStore
 } from './voter-attempt-store.js'
+import type { CliVoterRequestStrand, CliVoterRequestTransports } from './voter-transports.js'
 
 // ---------------------------------------------------------------------------------------------
 // The refusal
@@ -307,6 +308,8 @@ export interface VoterDeps {
   /** A read-only producer (NO_APPROVAL): only `getCurrentDeviceKey` is ever called on it. */
   producerForRead(): Promise<VoteSigningProducer>
   openVoterNetwork(hash: string): Promise<OpenedVoterNetwork>
+  /** Test seam: the transports over an open network; the daemon leaves it undefined (the peer mirror is used). */
+  readonly createTransports?: (strand: CliVoterRequestStrand) => Promise<CliVoterRequestTransports>
 }
 
 const ENGINE_NAMES: ReadonlySet<string> = new Set(['network', 'elections', 'association', 'registration'])

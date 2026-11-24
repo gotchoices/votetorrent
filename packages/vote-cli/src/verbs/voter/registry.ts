@@ -12,7 +12,9 @@
 import type { VerbHandler } from '../../ctl/protocol.js'
 import type { VerbContext } from '../../daemon/verb-context.js'
 import { COMMON_VERBS } from '../common.js'
+import { VOTER_VERBS } from './index.js'
 
 export const VOTER_VERB_ENTRIES: Readonly<Record<string, VerbHandler<VerbContext>>> = Object.freeze({
   ...COMMON_VERBS,
+  ...VOTER_VERBS,
 })
