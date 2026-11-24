@@ -358,7 +358,12 @@ function checkGateScript(manifest, workspaceDir, canonicalRunnerRealPath) {
  * importing only the copy table): it is neither forced to invent a Vite config nor quietly
  * dropped.
  */
-const NON_BROWSER_CONSUMERS = Object.freeze({});
+const NON_BROWSER_CONSUMERS = Object.freeze({
+	'@votetorrent/workflows':
+		'Node-only consumer of the ui-web lifecycle-core timeline primitives so D-19 keeps one source; it ships no browser bundle and no UI copy, and is gated by its own mocha suite.',
+	'@votetorrent/vote-cli':
+		'Node-only consumer of the ui-web lifecycle-core timeline primitives (the Voter timeline rule) so D-19 keeps one source; it ships no browser bundle and no UI copy, and is gated by its own mocha suite.',
+});
 
 /**
  * @param {{ dir: string, name: string, manifest: Record<string, unknown> }} consumer
@@ -373,6 +378,9 @@ function checkConsumer(consumer, ctx) {
 	if (!configPath) {
 		if (consumer.name in ctx.nonBrowserConsumers) {
 			// Exempted — the reason is printed by the caller from NON_BROWSER_CONSUMERS directly.
+			// A non-browser consumer has no browser build, so there is no browser gate for it to
+			// reach either: the exemption covers both rungs, and the consumer is still listed.
+			return violations;
 		} else {
 			violations.push(
 				`${consumer.name}: no production vite config found (checked ${PRODUCTION_VITE_CONFIG_FILENAMES.join(', ')}) ` +
@@ -933,6 +941,16 @@ const CHECKER_FIXTURES = [
 		nonBrowserConsumers: { 'exempt-consumer': 'this fixture consumer ships no browser build' },
 		build(dir) {
 			writeConsumerWorkspace(dir, 'apps/b16', { manifest: compliantManifest('exempt-consumer') });
+		},
+	},
+	{
+		label: 'a no-vite-config, no-gate-script consumer whose name is in a fixture NON_BROWSER_CONSUMERS map',
+		kind: 'benign',
+		nonBrowserConsumers: { 'exempt-node-consumer': 'this fixture consumer ships no browser build and so has no browser gate' },
+		build(dir) {
+			writeConsumerWorkspace(dir, 'apps/b17', {
+				manifest: compliantManifest('exempt-node-consumer', { scripts: { test: 'mocha "test/**/*.spec.ts"' } }),
+			});
 		},
 	},
 	{
