@@ -316,7 +316,7 @@ describe('network verb support', function () {
     expect(mismatch.message).to.not.include(authorityId.slice(0, 8))
     const ok = await resolvePrimaryAuthority(ctx, { networkHash: known, authorityId8: authorityId.slice(0, 8) })
     expect(ok.authorityId).to.equal(authorityId)
-    expect((ok.authority as { id: string }).id).to.equal(authorityId)
+    expect((ok.authority as unknown as { id: string }).id).to.equal(authorityId)
     expect(ok.network).to.equal(network)
     const broken = fresh('open-broken', {
       engine: { getRecentNetworks: async () => [{ hash: known }], open: async () => ({ getDetails: async () => { throw new Error(SENTINEL) } }) }
