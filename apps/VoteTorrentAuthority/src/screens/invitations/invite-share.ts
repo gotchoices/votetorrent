@@ -92,6 +92,40 @@ export function parseInviteShare(text: string): ParsedInviteShare | undefined {
 	return parsed;
 }
 
+/** The fields an invitation share carries, in the order they are written. */
+export interface InviteShareFields {
+	invitePrivate: string;
+	inviteKey: string;
+	expiration: string;
+	type: InviteType;
+	name: string;
+}
+
+/**
+ * The invitation text that Share, Copy and the QR code all carry. JSON, as before, but with every
+ * character outside printable ASCII written as a \uXXXX escape: a QR in Byte mode and every
+ * clipboard then carry the same bytes, and `JSON.parse` reads back exactly the same fields. For an
+ * ASCII name this is byte for byte what `JSON.stringify` writes.
+ */
+export function serializeInviteShare(fields: InviteShareFields): string {
+	const json = JSON.stringify({
+		invitePrivate: fields.invitePrivate,
+		inviteKey: fields.inviteKey,
+		expiration: fields.expiration,
+		type: fields.type,
+		name: fields.name,
+	});
+	return json.replace(/[^\x20-\x7e]/g, (ch) => '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0'));
+}
+
+/**
+ * True when a scanned or decoded QR value is an invitation share with a role type. A bare private
+ * key (no type) is not treated as an invitation QR: the app never draws one.
+ */
+export function isInvitationQrText(text: unknown): boolean {
+	return typeof text === 'string' && parseInviteShare(text)?.type !== undefined;
+}
+
 const HAS_DESIGNATOR = /(Z|[+-]\d{2}:?\d{2})$/i;
 
 /**
