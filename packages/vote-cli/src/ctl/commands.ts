@@ -7,10 +7,12 @@
 // to start itself. This path never calls assertFreshBuild: it only speaks HTTP.
 
 import { resolve } from 'node:path'
+import type { Readable } from 'node:stream'
 import { parseArgs } from 'node:util'
 import { EXIT, type ExitCode } from '../cli/exit-codes.js'
 import type { CliIo } from '../cli/run-cli.js'
 import { redact } from '../secrecy/redact.js'
+import { attachApprovalToken } from './approval-transport.js'
 import { callCtl, exitCodeFor } from './ctl-client.js'
 import { VERB_NAME_RE, type CtlErrorView, type Role } from './protocol.js'
 
@@ -30,6 +32,7 @@ export const ROLE_USAGE = [
   '          --timeout-ms N      give up waiting after N ms (exit 3)',
   '          --args-json <json>  extra args as one JSON object',
   '          --<name> <value>    one verb arg; a bare --<name> is true, --no-<name> is false, repeats collect',
+  '          --token-file <path> | --token-env | --token-stdin   the approval token for an approval-class verb, per call',
   '',
   'values are passed as strings and the verb validates them. A secret (join code, registration code,',
   'key share, approval) is passed by FILE PATH only (e.g. --code-file <path>), never on the command line.',
@@ -160,7 +163,7 @@ function redactErrorView(error: CtlErrorView | undefined): CtlErrorView {
 export async function runRoleCommand(
   argv: readonly string[],
   io: CliIo,
-  opts: { env?: NodeJS.ProcessEnv, local?: ReadonlyMap<string, LocalCommand> } = {}
+  opts: { env?: NodeJS.ProcessEnv, local?: ReadonlyMap<string, LocalCommand>, stdin?: Readable } = {}
 ): Promise<ExitCode> {
   const role = argv[0] as Role
   const verb = argv[1]
@@ -195,7 +198,12 @@ export async function runRoleCommand(
     io.err('vt: --peer <dir> is required (or set VT_PEER)\n')
     return EXIT.USAGE
   }
-  const reply = await callCtl({ dir: resolve(peer), role, verb, args, timeoutMs: control.timeoutMs })
+  const approved = await attachApprovalToken(args, { env: opts.env ?? process.env, stdin: opts.stdin ?? process.stdin, cwd: process.cwd() })
+  if (!approved.ok) {
+    io.err(`vt: approval token refused (${approved.code})\n`)
+    return EXIT.FAIL
+  }
+  const reply = await callCtl({ dir: resolve(peer), role, verb, args: approved.args, timeoutMs: control.timeoutMs })
   const code = exitCodeFor(reply)
   if (code === EXIT.PASS) {
     io.out(JSON.stringify(control.json ? reply.body : reply.body.result ?? {}) + '\n')
