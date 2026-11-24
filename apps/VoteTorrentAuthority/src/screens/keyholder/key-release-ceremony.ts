@@ -1,65 +1,29 @@
 /**
- * key-release-ceremony.ts — keyholder share release ceremony (D-17, D-20). Never throws.
- *
- * Four points:
- *  1. D-20 entry path: the ceremony is only reachable from a release-key task in the Tasks inbox,
- *     and those tasks exist only once the election timeline has entered `releasingKeys` (the
- *     release engine's pull-and-seed, run by `getKeysToRelease(true)`). Nothing here seeds,
- *     schedules or polls.
- *  2. D-17 effect: a successful run leaves one public, signed `KeyholderShareRelease` row under the
- *     KEYHOLDER's own identity key. The signer ALWAYS accompanies the completion call: a call with
- *     no signer is refused by the engine (`signer-required`), and this ceremony never uses the
- *     officer's device key.
- *  3. Prompt budget: a first release performs two auth-required vault reads (the share, then the
- *     signing key) inside ONE keyholder session (`withKeyholderSession`): one prompt on the seat
- *     vault (`keyholder-seat-vault.ts`), two on a plain per-alias vault. A repeat on an already-released
- *     task performs zero; a device that does not hold the task's keyholder identity performs zero
- *     and writes nothing, because the identity lookup runs before the engine or the vault is touched.
- *  4. This module never reconstructs a key (D-16): it only publishes one share.
- *
- * The outcome carries a machine code, never an error message, so nothing here can leak an identifier
- * into a screen.
+ * key-release-ceremony.ts — thin binding. The share release ceremony moved to
+ * `packages/workflows/src/authority/key-release-ceremony.ts` (phase 67 plan 14); this path stays so existing
+ * imports, `jest.mock` targets and tests keep working. The shared code has NO default store (`storage` is
+ * required there); this binding supplies the app's AsyncStorage as the default store, the SAME object the
+ * keyholder-identity binding uses, so the shared per-storage mutex keeps serializing every app write of the
+ * identity store. No workflow logic lives here.
  */
 
-import type { IKeysTasksEngine, ReleaseKeyTask } from '@votetorrent/vote-core';
-import type { IKeyVault } from '@votetorrent/vote-engine/rn';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { ReleaseKeyTask } from '@votetorrent/vote-core';
+import { releaseKeyholderShare as sharedReleaseKeyholderShare } from '@votetorrent/workflows/authority';
+import type { KeyReleaseCeremonyDeps as SharedKeyReleaseCeremonyDeps, KeyReleaseCeremonyOutcome } from '@votetorrent/workflows/authority';
 import type { KeyVaultStorage } from '../../engines/key-vault';
-import { createKeyholderSigner, getKeyholderIdentity } from '../../engines/keyholder-identity';
-import { withKeyholderSession } from '../../engines/keyholder-session';
 
-export interface KeyReleaseCeremonyDeps {
-	getEngine: <T>(engineName: string) => Promise<T>;
-	vault: IKeyVault;
+export { keyReleaseErrorCopyKey } from '@votetorrent/workflows/authority';
+export type { KeyReleaseCeremonyOutcome } from '@votetorrent/workflows/authority';
+
+/** The app's platform store, passed as the same object on every call (see the header). */
+const appStorage = AsyncStorage as unknown as KeyVaultStorage;
+
+/** App-facing shape: `storage` stays optional here and defaults to the app store. */
+export interface KeyReleaseCeremonyDeps extends Omit<SharedKeyReleaseCeremonyDeps, 'storage'> {
 	storage?: KeyVaultStorage;
 }
 
-export type KeyReleaseCeremonyOutcome = { kind: 'released' } | { kind: 'failed'; code: string; authDenied: boolean };
-
-function codeOf(err: unknown): string {
-	const code = typeof err === 'object' && err !== null ? (err as { code?: unknown }).code : undefined;
-	return typeof code === 'string' ? code : 'unknown';
-}
-
-function failed(code: string): KeyReleaseCeremonyOutcome {
-	return { kind: 'failed', code, authDenied: code === 'auth-denied' };
-}
-
-export async function releaseKeyholderShare(deps: KeyReleaseCeremonyDeps, task: ReleaseKeyTask): Promise<KeyReleaseCeremonyOutcome> {
-	try {
-		const identity = await getKeyholderIdentity(task.userId, deps.storage);
-		if (identity === undefined) {
-			return failed('identity-not-found');
-		}
-		const engine = await deps.getEngine<IKeysTasksEngine>('keysTasksEngine');
-		const signer = createKeyholderSigner({ vault: deps.vault }, identity);
-		await withKeyholderSession(deps.vault, identity.userId, () => engine.completeKeyRelease(task, signer));
-		return { kind: 'released' };
-	} catch (err) {
-		return failed(codeOf(err));
-	}
-}
-
-/** Catalog key for a failed outcome: biometric denial gets the generic verify copy, everything else the release copy. */
-export function keyReleaseErrorCopyKey(outcome: Extract<KeyReleaseCeremonyOutcome, { kind: 'failed' }>): 'deviceSigningErrorGeneric' | 'keyholderReleaseError' {
-	return outcome.authDenied ? 'deviceSigningErrorGeneric' : 'keyholderReleaseError';
+export function releaseKeyholderShare(deps: KeyReleaseCeremonyDeps, task: ReleaseKeyTask): Promise<KeyReleaseCeremonyOutcome> {
+	return sharedReleaseKeyholderShare({ ...deps, storage: deps.storage ?? appStorage }, task);
 }
