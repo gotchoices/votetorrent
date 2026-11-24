@@ -26,7 +26,7 @@ import {
   type BuildRoleNodeOptions,
   type RoleNodeDeps
 } from '../src/node/build-role-node.js'
-import { openRoleNetwork } from '../src/node/role-networks.js'
+import { openRoleNetwork, type RoleNetworksEngineLike } from '../src/node/role-networks.js'
 
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url))
 const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
@@ -577,7 +577,7 @@ describe('node units', function () {
       getEstablishedContext(hash: string) {
         return { db: { hash } }
       }
-    }
+    } as unknown as RoleNetworksEngineLike
     const user = { id: 'u1', name: 'Officer', activeKeys: [] }
     let e1: unknown
     try {
