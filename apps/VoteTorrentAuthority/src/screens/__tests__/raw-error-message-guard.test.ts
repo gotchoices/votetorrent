@@ -328,7 +328,6 @@ export const EXEMPT_FILES: ExemptFile[] = [
 	{ file: 'engines/recovery-branch-proof.ts', reason: 'dev proof, imported only by its proof runner, never rendered' },
 ];
 export const EXEMPT_LINES: ExemptLine[] = [
-	{ file: 'engines/control-schema-recovery.ts', key: 'c42d2f971c7320c8', count: 1, reason: 'matches the boot error chain against fixed patterns to choose a recovery; the text is never rendered or returned' },
 	{ file: 'engines/device-signer.ts', key: 'e71aa10492f070ee', count: 1, reason: 'developer-facing text inside a thrown error for an unlinked native module; every screen maps it through the shared error copy' },
 	{ file: 'screens/authorities/AuthorityDetailsScreen.tsx', key: 'e5fdcc7f513d08cb', count: 1, reason: 'reads the failure only to detect the not-found case, never rendered' },
 	{ file: 'screens/elections/election-error-messages.ts', key: 'd7eb40dd0c9ea05d', count: 1, reason: 'matched against constraint patterns to classify, never returned' },

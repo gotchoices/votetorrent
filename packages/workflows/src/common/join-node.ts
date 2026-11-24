@@ -3,3 +3,6 @@
 export * from './bootstrap-config.js'
 export * from './join-bootstrap.js'
 export * from './joined-networks.js'
+export * from './control-schema-recovery.js'
+export * from './cadre-node-options.js'
+export * from './cadre-node-boot.js'

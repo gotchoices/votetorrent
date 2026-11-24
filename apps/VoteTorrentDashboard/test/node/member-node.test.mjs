@@ -362,13 +362,16 @@ test('3 D-24 end to end: the patched cadre-core strandCohortTopicOption turns th
 });
 
 test('4 cluster-size parity: MEMBER_STRAND_CLUSTER_SIZE matches what the Authority and Voter providers run', () => {
+	// Both providers build their node options through the one shared builder in @votetorrent/workflows, so the
+	// cluster-size posture is read there; each provider is then checked to delegate and not override it beside.
 	const providers = [
 		workspacePath('apps/VoteTorrentAuthority', 'src', 'providers', 'CadreNodeProvider.tsx'),
 		workspacePath('apps/VoteTorrentVoter', 'src', 'providers', 'CadreNodeProvider.tsx'),
 	];
+	const optionBuilders = [workspacePath('packages/workflows', 'src', 'common', 'cadre-node-options.ts')];
 	/** @type {string[]} */
 	const branches = [];
-	for (const file of providers) {
+	for (const file of optionBuilders) {
 		const code = stripComments(readFileSync(file, 'utf8'));
 		assert.match(code, /strandReactivity/, 'positive control: the provider source was read');
 		const explicit = /strandClusterSize\s*:\s*(\d+)/.exec(code);
@@ -380,7 +383,12 @@ test('4 cluster-size parity: MEMBER_STRAND_CLUSTER_SIZE matches what the Authori
 			assert.equal(MEMBER_STRAND_CLUSTER_SIZE, DEFAULT_STRAND_CLUSTER_SIZE);
 		}
 	}
-	assert.deepEqual(branches, ['default', 'default'], 'both providers run the cadre-core default today; a provider change must revisit this pin');
+	assert.deepEqual(branches, ['default'], 'the shared builder runs the cadre-core default today; a builder change must revisit this pin');
+	for (const file of providers) {
+		const code = stripComments(readFileSync(file, 'utf8'));
+		assert.ok(code.includes('buildCadreNodeOptions('), `${file}: the provider delegates to the shared builder`);
+		assert.doesNotMatch(code, /strandClusterSize\s*:/, `${file}: a provider must not override the size beside the builder`);
+	}
 	assert.equal(MEMBER_STRAND_CLUSTER_SIZE, 4);
 });
 

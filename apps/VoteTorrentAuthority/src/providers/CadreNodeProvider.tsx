@@ -2,6 +2,8 @@
  * D-03: This file is the ONLY place `@serfab/cadre-core`,
  * `@optimystic/db-p2p-storage-rn`, and `rn-leveldb` are imported for the
  * CadreNode app lifecycle. They MUST NOT appear under packages/vote-engine/.
+ * The option set and the boot sequence are the shared buildCadreNodeOptions / bootCadreNode in
+ * @votetorrent/workflows; this file supplies the RN pieces.
  */
 
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from "react";
@@ -9,8 +11,8 @@ import type { PropsWithChildren } from "react";
 import { LevelDB, LevelDBWriteBatch } from 'rn-leveldb';
 import { openOptimysticRNDb, loadOrCreateRNPeerKey } from '@optimystic/db-p2p-storage-rn';
 import { createScopedRnStorageProvider } from '../engines/storage-guard';
-import { isUnrestorableControlSchemaError } from '../engines/control-schema-recovery';
 import { withIdentityOwnerKey, type WithIdentityOwnerKey } from '../engines/identity-owner-key';
+import { bootCadreNode, buildCadreNodeOptions, type CadreNodeBootInput, type CadreNodeOptionsInput } from '@votetorrent/workflows';
 import { CadreNode, controlStorageScope, type TrustedOwnerStore } from '@serfab/cadre-core';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
@@ -179,9 +181,6 @@ const PARTY_ID = 'votetorrent';
 
 /** The store scope for this node's two saved records (strand network state and trusted owners). */
 const CADRE_STORE_SCOPE = 'votetorrent-cadre-node';
-
-/** Strand-address re-ask interval (ms); see the `controlCohort` comment in the CadreNode config. */
-const STRAND_ADDR_REFRESH_MS = 30_000;
 
 const bootstrapConfig = readBootstrapConfig(bootstrapConfigDoc);
 
@@ -385,181 +384,81 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
         storeKindRef.current = storeKind;
 
         // A joined Authority install's bootstrap is the member machines its join code named. They are
-        // bootstrap peers only and never relay reservation targets, as the Voter does
-        // (apps/VoteTorrentVoter/src/providers/CadreNodeProvider.tsx l.239-245; D-26, research M4).
-        // The recovery rebuild below reuses this list, and the control-scope wipe leaves the
-        // AsyncStorage record alone. The read never rejects, so an unreadable record boots on config.
+        // bootstrap peers only and never relay reservation targets, as the Voter does (D-26, research M4).
+        // The shared builder merges them after the relays (config first, deduplicated). The recovery
+        // rebuild reuses this list, and the control-scope wipe leaves the AsyncStorage record alone. The
+        // read never rejects, so an unreadable record boots on config.
         const joinBootstrap = await readJoinBootstrap();
-        const bootstrapNodes = [...new Set([...CONTROL_RELAY_ADDRS, ...joinBootstrap])];
 
-        // One edge-reader refusal per boot, created outside makeNode so the recovery rebuild reuses it.
+        // One edge-reader refusal per boot, created outside createNode so the recovery rebuild reuses it.
         const edgeReaderRefusal = createEdgeReaderRefusal();
 
-        // cadre-core 1.18: keep the owner key = the identity key (engines/identity-owner-key.ts).
-        const makeNode = () => withIdentityOwnerKey(new CadreNode({
+        // The ONE CadreNode option set of both apps and the CLI is built by @votetorrent/workflows
+        // (buildCadreNodeOptions): the posture keys, the network block, both edge-reader refusals and the
+        // schema setup live there, with their rationale. This provider supplies only the RN pieces: the
+        // LevelDB peer key, the scoped LevelDB storage, the AsyncStorage-backed stores, the bundled relay
+        // list, the join-bootstrap hints, the libp2p transport factories and the native Noise crypto.
+        const nodeInput: CadreNodeOptionsInput = {
+          role: 'authority',
+          partyId: PARTY_ID,
           privateKey,
-          controlNetwork: { partyId: PARTY_ID, bootstrapNodes },
-          strandNetworkState: { store: strandNetworkStateStore },
-          // D-08: spread only when the store opened. The recovery rebuild reuses this closure, so it gets
-          // the SAME store (cadre-core keeps an injected store across stop and start).
-          ...(trustedOwnerStore ? { trustedOwners: { store: trustedOwnerStore } } : {}),
-          nodeClass: 'device',
-          // sApp-schema signing is DISABLED for VoteTorrent — a deliberate project
-          // decision, not an oversight.
-          //
-          // This policy was never a VoteTorrent requirement. It arrived as an UPSTREAM
-          // fail-closed default when the project de-vendored to published
-          // @serfab/cadre-core@0.8.1 (d67a649, 2026-07-13): cadre-core's
-          // strand-instance-manager.js:101 does `config.requireSignedSchemas ?? true`
-          // and calls assertSchemaSignature(), which throws
-          // SchemaVerificationError('missing signature') for any sAppConfig without a
-          // `signature` field. VoteTorrent's schema (rn-db-factory.ts sAppConfig:
-          // id 'org.votetorrent' v1.0.0) has no signature, so EVERY network creation
-          // failed with "Failed to create database context: SchemaVerificationError"
-          // (networks-engine.ts:59) — reproduced on-device in the release APK.
-          //
-          // Setting it to a literal `false` (NOT `!__DEV__`) is what "remove entirely"
-          // requires: `!__DEV__` evaluates to TRUE in a release build, so it only ever
-          // relaxed the policy for debug builds and left release permanently broken.
-          // The relaxation excuses ONLY an absent signature — cadre-core still rejects a
-          // present-but-invalid one (schema-verification.js:82) — so a signed schema
-          // would still be verified if VoteTorrent ever adopts signing.
-          requireSignedSchemas: false,
-          strandFilter: { mode: 'all' },
-          // ISO-01: per-scope storage. cadre-core invokes provider(scopeId) with the
-          // strandId for each strand and 'control' for the control DB — one distinct
-          // LevelDB per scope isolates each network's collections.
+          relay: CONTROL_RELAY_ADDRS,
+          bootstrap: joinBootstrap,
           storage: { provider: scopedStorageProvider },
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          // CONTROL node network — reserves through the drone's CONTROL relay (P2P-11 41-11).
-          network: {
-            // cadre-core 1.13.0 stamps the strand-addr refresh per (sibling, strand) from the
-            // sibling's OUTCOME: an answer, even an empty one, waits the full default (10 min).
-            // A sibling that answered before it held the strand's addresses therefore blinds this
-            // phone (round-3 UAT test 15: no strand socket for >60 s after Connect). Re-ask every
-            // 30 s until the upstream fix lands; see the strand-addr-refresh-throttle todo.
-            controlCohort: { strandAddrRefreshMs: STRAND_ADDR_REFRESH_MS },
-            transports: [
-              webSockets(),
-              // D-10: cast by the global transportSymbol, not structural type — the
-              // sereus-chat pattern for multi-copy @libp2p/interface brand-skew
-              // (Probe 4, 41-01: not load-bearing on Node's single-copy graph but
-              // re-verified at Metro/Hermes on device).
-              circuitRelayTransport({
-                // PROBE 5 (41-01, EXERCISED): N relay-qualified listenAddrs ALONE do
-                // NOT yield N reservations under the default circuitRelayTransport() —
-                // DEFAULT_RESERVATION_CONCURRENCY=1 serializes the reserve queue and
-                // drops any 2nd+ reservation via reserveQueue.clear(). Size concurrency
-                // to the number of known control relays driving CONTROL_RELAY_ADDRS
-                // (never less than 1).
-                reservationConcurrency: Math.max(1, CONTROL_RELAY_ADDRS.length),
-              }) as unknown as ReturnType<typeof webSockets>,
-            ],
-            // D-03/D-05: always-on relay reservation-seeking (P2P-08 drone-relay path),
-            // relay-qualified — but scoped to the drone's CONTROL relay (P2P-11 41-11).
-            // The STRAND relay moves to strandNetwork below, so the control and strand
-            // libp2p nodes no longer collide at one relay under this peer's shared PeerId.
-            relayAddrs: CONTROL_RELAY_ADDRS,
-            // Fail-soft on the FIRST reservation attempt. cadre-core's default (requireRelay unset)
-            // throws RelayReservationFailedError out of start() when that attempt lands nothing
-            // inside its budget (18 s at the default link), and this provider then stops the node
-            // and settles 'failed' for the whole process: no strand network can open until the
-            // app is killed. 64-53 hit exactly that on a relaunched keyholder (status: retrying)
-            // while the relay refused nothing and admitted a reservation within the same minute.
-            // `false` runs the SAME drive and keeps the SAME background supervisor re-driving the
-            // reservation; only the throw is dropped, so a slow relay or a starved JS thread costs
-            // dialability for a while instead of the session.
-            requireRelay: false,
-            // Permissive gater — allows loopback / emulator host dials (D-11).
-            // Per-strand enrollment gating is v2.x scope.
-            connectionGater: { denyDialMultiaddr: async () => false },
-            // Spike 093: native Noise crypto (react-native-quick-crypto) for the control node
-            // AND every strand node. Pure-JS Noise on Hermes saturated the JS thread during
-            // bring-up. See engines/noise-crypto-config.ts.
-            noiseCrypto: noiseCryptoForNode(),
-          } as any,
-          // SPIKE 062 — the `strandNetwork` override block is REMOVED on cadre-core 0.10.0.
-          //
-          // It was VT's 41-11 workaround for the shared-PeerId circuit-relay-v2 collision:
-          // give strand nodes a SECOND relay identity so the relay could not misroute their
-          // streams onto the control connection. Upstream fixed the root cause instead —
-          // `strandTransportKey(identityKey, strandId)` gives each strand its OWN derived
-          // transport peerId (sereus#1, spike 059) — so one relay is now correct and the
-          // two-relay topology is obsolete.
-          //
-          // Both keys this block carried are DEAD CONFIG on 0.10.0 (verified: zero
-          // occurrences of either in the published types/dist):
-          //   - `strandNetwork`         — the config key our dropped yarn-patch added
-          //   - `strandBootstrapNodes`  — replaced by `resolveCohortSeed`, which derives
-          //     strand peers from the CONTROL cohort (`queryCadrePeers()` → siblings with a
-          //     live control connection → `/sereus/strand-addr/1.0.0` RPC), not from an
-          //     app-supplied strand multiaddr.
-          //
-          // Strand nodes therefore inherit `network` above (the single control relay), which
-          // is the topology upstream's delegate-admission path expects.
-          hibernation: { enabled: false },
-          // Change notifications (cadre-core 1.20 `strandReactivity`, optimystic cohort-topic substrate): every
-          // strand node announces the commits it coordinates, and tables tagged "optimystic.network_watch" get a
-          // network watch, so a screen (useStrandChanges) is woken by a commit made on ANOTHER machine instead of
-          // waiting for its focus reload or a timer. It is also what gives the strand node its matchmaking
-          // handlers (Voter: pool-matchmaking-ports.ts). Cost: one cohort-topic host per strand node (db-p2p
-          // builds it as a core host, 30 s renewals, even on a phone); measure CPU on the Redmi before release.
-          strandReactivity: { enabled: true },
-          // Keeps strand peers that declared themselves read-only edge readers (an officer's browser dashboard,
-          // which stores nothing) out of this phone's write cohorts and coordinator choice, so a write never
-          // waits on an approval that peer cannot give. Reads are unaffected. A peer is refused only on its own
-          // identify, so no peer can get another one refused.
-          strandCohortRefusal: edgeReaderRefusal.hook,
-          // VoteTorrent's SQL functions on each strand database before cadre-core applies the schema (patched
-          // cadre-core `strandDatabaseSetup`): quereus 5.6 refuses a CHECK calling an unregistered function at
-          // CREATE TABLE, so registering them after the strand opened (registerDbPlugins) is too late.
+          transports: { webSockets, circuitRelayTransport },
+          edgeReader: { refusal: edgeReaderRefusal },
           strandDatabaseSetup: registerVoteTorrentFunctions,
-          // The same refusal for the CONTROL network (VoteTorrent cadre-core patch): a paired dashboard is a
-          // cadre member, and the control cohort is every member, so without it every control write (a
-          // voter's admission, a join code, a record refresh) waited on the browser; with the browser
-          // unresponsive a control write took 84-105 s on the host (2026-11-13). Reads are unaffected.
-          controlCohortRefusal: edgeReaderRefusal.control,
-        }), privateKey);
+          // D-08: a store is spread only when it opened (the builder leaves the key out otherwise). The
+          // recovery rebuild reuses this input, so it gets the SAME store (cadre-core keeps an injected
+          // store across stop and start).
+          stores: { strandNetworkState: strandNetworkStateStore, trustedOwners: trustedOwnerStore ?? undefined },
+          // Spike 093: native Noise crypto (react-native-quick-crypto) for the control node AND every
+          // strand node. Pure-JS Noise on Hermes saturated the JS thread during bring-up. See
+          // engines/noise-crypto-config.ts.
+          noiseCrypto: noiseCryptoForNode(),
+        };
 
-        // node.start() is inside useEffect — never blocks initial render (D-06 / T-22-03).
-        localNode = makeNode();
-        try {
-          await localNode.start();
-        } catch (startError) {
-          // Spike 105: a control store an older cadre-core wrote (1.13 -> 1.14: Revocation.RowIsGone
-          // still references the dropped PendingJoin) can be neither migrated nor restored, so every
-          // launch fails. cadre-core's policy is to recreate it. Recreate ONLY the control scope —
-          // the peer key and every network's strand store stay — and start once more. See
-          // engines/control-schema-recovery.ts for why the Authority's networks survive this.
-          if (!isUnrestorableControlSchemaError(startError)) throw startError;
-          const controlScope = controlStorageScope(PARTY_ID);
-          console.warn(`[CadreNodeProvider] control store '${controlScope}' was written by an older cadre-core and cannot be migrated; recreating it`);
-          await localNode.stop().catch(() => undefined);
-          await scopedStorageProvider.destroyScope(controlScope);
-          localNode = makeNode();
-          await localNode.start();
-        }
+        // cadre-core 1.18: keep the owner key = the identity key (engines/identity-owner-key.ts). Called on
+        // every construction, so a recovery rebuild gets fresh transports and the same refusal, stores and
+        // provider; localNode is always the last node made (the catch below stops it).
+        const createNode = () => {
+          localNode = withIdentityOwnerKey(
+            new CadreNode(buildCadreNodeOptions(nodeInput) as unknown as ConstructorParameters<typeof CadreNode>[0]),
+            privateKey,
+          );
+          return localNode;
+        };
 
-        // D-08 founder re-anchor: anchors this node's own key when its OwnerKey row is live. It never
-        // pins a foreign key. Bounded and never rejecting, so it cannot stop the boot.
-        await reanchorOwnKey(localNode);
-        // D-09: classify AFTER the re-anchor. An unreadable read reports 'ok' (the token is logged).
-        const classification = storeKind === 'persistent' ? await readOwnerTrustClassification(localNode, 'persistent') : 'ok';
-        const nextTrust: OwnerTrustState =
-          storeKind === 'memory' ? 'memory-only' : classification === 'needs-reinvite' ? 'needs-reinvite' : 'ok';
+        // node.start() is inside useEffect — never blocks initial render (D-06 / T-22-03). The shared boot
+        // runs, in order: start; the one-shot control-store recovery (spike 105: recreate ONLY the control
+        // scope, the peer key and every network's strand store stay, start once more; see
+        // engines/control-schema-recovery.ts for why the Authority's networks survive it); the D-08 founder
+        // re-anchor (once, on the final node; it never pins a foreign key, is bounded and never rejects);
+        // the D-09 classification AFTER the re-anchor (an unreadable read reports 'ok'); and, while mounted,
+        // the best-effort pool rendezvous host (spike 102: this node is the rendezvous its voters pool their
+        // votes through; a voter that cannot reach it keeps its vote saved, never lost), not awaited.
+        const bootInput: CadreNodeBootInput<AuthorityCadreNode> = {
+          partyId: PARTY_ID,
+          createNode,
+          destroyScope: (scope) => scopedStorageProvider.destroyScope(scope),
+          // Wrapped so cadre-core's export is dereferenced only on the recovery path, as before.
+          controlStorageScope: (party) => controlStorageScope(party),
+          logTag: '[CadreNodeProvider]',
+          warn: (...args) => console.warn(...args),
+          ownerTrust: { storeKind, reanchorOwnKey, readOwnerTrustClassification },
+          rendezvous: { host: hostPoolRendezvous, shouldHost: () => isMounted },
+        };
+        const boot = await bootCadreNode(bootInput);
 
         if (isMounted) {
-          nodeRef.current = localNode;
-          setOwnerTrust(nextTrust);
-          // Spike 102: this node is the rendezvous its voters pool their votes through. Best
-          // effort — a voter that cannot reach it keeps its vote saved, never lost.
-          const hosted = localNode;
-          hostPoolRendezvous(hosted)
-            .then((detach) => {
-              if (nodeRef.current === hosted) detachRendezvousRef.current = detach;
-              else void detach();
-            })
-            .catch((e) => console.warn('[CadreNodeProvider] pool rendezvous not hosted:', e instanceof Error ? e.message : String(e)));
+          nodeRef.current = boot.node;
+          setOwnerTrust(boot.ownerTrust ?? 'ok');
+          const hosted = boot.node;
+          void boot.rendezvous?.then((detach) => {
+            if (!detach) return;
+            if (nodeRef.current === hosted) detachRendezvousRef.current = detach;
+            else void detach();
+          });
           // D-26/D-28: an owner phone answers browser-pairing mint requests from its cadre's officer phones.
           // Owner phones only (startPairMintHost resolves null elsewhere), best effort and never awaited, so the
           // boot is unchanged; the log names the error class only. A phone that becomes an owner later hosts
@@ -571,12 +470,13 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
               else void host.detach().catch(() => undefined);
             })
             .catch((e) => console.warn('[CadreNodeProvider] pair-mint not hosted:', e instanceof Error ? e.name : 'unknown'));
-          setNode(localNode);
+          setNode(hosted);
           // D-08/D-09: success exit — the strand backend is now the correct dispatch.
-          settleNode({ status: 'ready', node: localNode });
+          settleNode({ status: 'ready', node: hosted });
         } else {
-          // Component unmounted before start completed — clean up.
-          await localNode.stop().catch(() => undefined);
+          // Component unmounted before start completed — clean up, including a rendezvous that may still land.
+          void boot.rendezvous?.then((detach) => detach?.().catch(() => undefined));
+          await boot.node.stop().catch(() => undefined);
           // D-08/D-09: the node was just stopped; resolve 'failed' with null so
           // the contract stays total (no path leaves nodeSettled pending).
           settleNode({ status: 'failed', node: null });

@@ -30,6 +30,10 @@
  * constant (the n=4 on-device harness drives 2 drones; `CadreNodeProvider.tsx`
  * is the production single-authority app and only ever needs 1).
  *
+ *
+ * Both apps' CadreNodeProvider.tsx now build their node options through @votetorrent/workflows
+ * common/cadre-node-options.ts, so this gate reads that one file (it also closes the old gap where the
+ * Voter provider was covered by neither lock).
  * Assertions are anchored to the `network: { ... hibernation: }` config-body
  * slice (extract-between-markers, mirrors relay-reachability-coverage.spec.ts's
  * extractConnectBody) for the listenAddrs-assignment/cast checks, and to the
@@ -59,8 +63,8 @@ function findRepoRoot (): string {
 }
 
 const REPO_ROOT = findRepoRoot()
-const CADRE_PROVIDER_PATH = join(
-  REPO_ROOT, 'apps', 'VoteTorrentAuthority', 'src', 'providers', 'CadreNodeProvider.tsx'
+const NODE_OPTIONS_PATH = join(
+  REPO_ROOT, 'packages', 'workflows', 'src', 'common', 'cadre-node-options.ts'
 )
 const PROOF_RUNNER_PATH = join(
   REPO_ROOT, 'apps', 'VoteTorrentAuthority', 'src', 'engines', 'replication-proof-runner.ts'
@@ -217,12 +221,12 @@ function assertQualifiedListenAddrsShape (path: string, label: string): void {
 
 describe('P2P-11/41-02: network.relayAddrs (cadre-core 0.12.0) + reservationConcurrency + transportSymbol cast', () => {
   it('both apps/ source files exist at the expected paths', () => {
-    expect(existsSync(CADRE_PROVIDER_PATH), `Expected ${CADRE_PROVIDER_PATH}`).to.equal(true)
+    expect(existsSync(NODE_OPTIONS_PATH), `Expected ${NODE_OPTIONS_PATH}`).to.equal(true)
     expect(existsSync(PROOF_RUNNER_PATH), `Expected ${PROOF_RUNNER_PATH}`).to.equal(true)
   })
 
-  it('CadreNodeProvider.tsx: relay-qualified listenAddrs + reservationConcurrency + transportSymbol cast', () => {
-    assertQualifiedListenAddrsShape(CADRE_PROVIDER_PATH, 'CadreNodeProvider.tsx')
+  it('cadre-node-options.ts: relay-qualified listenAddrs + reservationConcurrency + transportSymbol cast', () => {
+    assertQualifiedListenAddrsShape(NODE_OPTIONS_PATH, 'cadre-node-options.ts')
   })
 
   it('replication-proof-runner.ts: relay-qualified listenAddrs + reservationConcurrency + transportSymbol cast', () => {
@@ -235,7 +239,7 @@ describe('P2P-11/41-02: network.relayAddrs (cadre-core 0.12.0) + reservationConc
     // this test, which is exactly the parity anchor's job (verified by reasoning: temporarily
     // reverting either file's listenAddrs/transports block to the retired shape reproduces a
     // failure in the corresponding assertQualifiedListenAddrsShape call above).
-    expect(() => assertQualifiedListenAddrsShape(CADRE_PROVIDER_PATH, 'CadreNodeProvider.tsx')).to.not.throw()
+    expect(() => assertQualifiedListenAddrsShape(NODE_OPTIONS_PATH, 'cadre-node-options.ts')).to.not.throw()
     expect(() => assertQualifiedListenAddrsShape(PROOF_RUNNER_PATH, 'replication-proof-runner.ts')).to.not.throw()
   })
 
@@ -252,7 +256,7 @@ describe('P2P-11/41-02: network.relayAddrs (cadre-core 0.12.0) + reservationConc
   })
 
   it('no superMajorityThreshold/clusterSize literal is introduced in either edited file', () => {
-    const providerSrc = readFileSync(CADRE_PROVIDER_PATH, 'utf8')
+    const providerSrc = readFileSync(NODE_OPTIONS_PATH, 'utf8')
     const runnerSrc = readFileSync(PROOF_RUNNER_PATH, 'utf8')
     expect(providerSrc.includes(SUPER_MAJORITY_MARKER)).to.equal(false)
     expect(providerSrc.includes(CLUSTER_SIZE_MARKER)).to.equal(false)
@@ -261,7 +265,7 @@ describe('P2P-11/41-02: network.relayAddrs (cadre-core 0.12.0) + reservationConc
   })
 
   it('no GSD phase number appears on a runtime (non-comment) line of either edited file', () => {
-    const providerLines = runtimeLines(readFileSync(CADRE_PROVIDER_PATH, 'utf8'))
+    const providerLines = runtimeLines(readFileSync(NODE_OPTIONS_PATH, 'utf8'))
     const runnerLines = runtimeLines(readFileSync(PROOF_RUNNER_PATH, 'utf8'))
     const isOffender = (l: string): boolean =>
       l.includes(PHASE_38_20_MARKER) || l.includes(PHASE_38_21_MARKER) ||

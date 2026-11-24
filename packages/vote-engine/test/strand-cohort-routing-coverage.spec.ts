@@ -90,6 +90,10 @@
  * no other signal changing. NO new patch/resolution assertion is added (no fix landed this plan);
  * all prior db-p2p-patch + p2p-fret-^0.6.0-no-patch + app-parity assertions above stay unchanged.
  *
+ *
+ * Both apps' CadreNodeProvider.tsx now build their node options through @votetorrent/workflows
+ * common/cadre-node-options.ts, so this gate reads that one file (it also closes the old gap where the
+ * Voter provider was covered by neither lock).
  * 2026-08-05 DB-P2P PATCH RETIREMENT (supersedes the "UNAFFECTED and stays locked exactly as
  * before" clause in the 260715-keg paragraph above): the `@optimystic/db-p2p` patch has now
  * followed p2p-fret's path. Both hunks it carried were upstreamed — identifyPush in >= 0.16.3 (the
@@ -122,8 +126,8 @@ function findRepoRoot (): string {
 }
 
 const REPO_ROOT = findRepoRoot()
-const CADRE_PROVIDER_PATH = join(
-  REPO_ROOT, 'apps', 'VoteTorrentAuthority', 'src', 'providers', 'CadreNodeProvider.tsx'
+const NODE_OPTIONS_PATH = join(
+  REPO_ROOT, 'packages', 'workflows', 'src', 'common', 'cadre-node-options.ts'
 )
 const PROOF_RUNNER_PATH = join(
   REPO_ROOT, 'apps', 'VoteTorrentAuthority', 'src', 'engines', 'replication-proof-runner.ts'
@@ -386,12 +390,12 @@ function addedNonCommentLines (patchSrc: string): string[] {
 
 describe('P2P-11/41-04: strand-cohort NoValidAddressesError fix — app-side parity intact + identifyPush yarn-patch present', () => {
   it('both apps/ source files exist at the expected paths', () => {
-    expect(existsSync(CADRE_PROVIDER_PATH), `Expected ${CADRE_PROVIDER_PATH}`).to.equal(true)
+    expect(existsSync(NODE_OPTIONS_PATH), `Expected ${NODE_OPTIONS_PATH}`).to.equal(true)
     expect(existsSync(PROOF_RUNNER_PATH), `Expected ${PROOF_RUNNER_PATH}`).to.equal(true)
   })
 
-  it('CadreNodeProvider.tsx: D-05 relay-qualified strand-routing posture intact (unchanged since 41-02)', () => {
-    assertStrandRelayRoutingIntact(CADRE_PROVIDER_PATH, 'CadreNodeProvider.tsx')
+  it('cadre-node-options.ts: D-05 relay-qualified strand-routing posture intact (unchanged since 41-02)', () => {
+    assertStrandRelayRoutingIntact(NODE_OPTIONS_PATH, 'cadre-node-options.ts')
   })
 
   it('replication-proof-runner.ts: D-05 relay-qualified strand-routing posture intact (unchanged since 41-02)', () => {
@@ -402,7 +406,7 @@ describe('P2P-11/41-04: strand-cohort NoValidAddressesError fix — app-side par
     // If either file's addressing posture had regressed (a one-file drift), the corresponding
     // call would throw — reproducible by reasoning: temporarily reverting either file's
     // listenAddrs assignment to a direct-only literal fails that file's own assertion above.
-    expect(() => assertStrandRelayRoutingIntact(CADRE_PROVIDER_PATH, 'CadreNodeProvider.tsx')).to.not.throw()
+    expect(() => assertStrandRelayRoutingIntact(NODE_OPTIONS_PATH, 'cadre-node-options.ts')).to.not.throw()
     expect(() => assertStrandRelayRoutingIntact(PROOF_RUNNER_PATH, 'replication-proof-runner.ts')).to.not.throw()
   })
 
@@ -465,7 +469,7 @@ describe('P2P-11/41-04: strand-cohort NoValidAddressesError fix — app-side par
   })
 
   it('no GSD phase number appears on a runtime (non-comment) line of either app file or this spec\'s own assertions', () => {
-    const providerLines = runtimeLines(readFileSync(CADRE_PROVIDER_PATH, 'utf8'))
+    const providerLines = runtimeLines(readFileSync(NODE_OPTIONS_PATH, 'utf8'))
     const runnerLines = runtimeLines(readFileSync(PROOF_RUNNER_PATH, 'utf8'))
     const isOffender = (l: string): boolean => l.includes(PHASE_41_04_MARKER)
     const offenders = [...providerLines, ...runnerLines].filter(isOffender)
