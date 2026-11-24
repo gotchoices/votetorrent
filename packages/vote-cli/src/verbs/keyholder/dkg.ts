@@ -40,6 +40,13 @@ export const DKG_MAX_DRIVES_DEFAULT = 400
 export const DKG_PAUSE_AFTER_PROGRESS_MS = 1_500
 /** After a drive that did nothing, or a cohort-unreachable read. */
 export const DKG_PAUSE_IDLE_MS = 4_000
+/**
+ * Consecutive drive errors other than `auth-denied` tolerated before the verb refuses with the code:
+ * two daemons posting rounds to one strand at the same time can lose a commit (a code-less engine
+ * error the driver reports as `unknown`), and the next drive re-reads and continues, as the lean rig's
+ * host-kh loop does. `auth-denied` is never retried.
+ */
+export const DKG_MAX_CONSECUTIVE_ERRORS = 3
 
 const dkg: VerbHandler<VerbContext> = async (ctx, args) => {
   const t0 = Date.now()
@@ -62,6 +69,7 @@ const dkg: VerbHandler<VerbContext> = async (ctx, args) => {
         let actions = 0
         let status: KeyholderDkgStatus | null = null
         let electionKey: KeyholderDkgStatus['electionKey'] = null
+        let consecutiveErrors = 0
         for (;;) {
           if (drives >= maxDrives || Date.now() - t0 >= boundMs) throw new KeyholderVerbError('dkg', 'dkg-timeout')
           drives++
@@ -70,12 +78,12 @@ const dkg: VerbHandler<VerbContext> = async (ctx, args) => {
           actions += out.actions.length
           if (out.status !== null) status = out.status
           if (out.error !== undefined) {
-            if (out.error.code === 'peer-unavailable') {
-              await sleep(DKG_PAUSE_IDLE_MS)
-              continue
-            }
-            throw new KeyholderVerbError('dkg', out.error.code)
+            if (out.error.code === 'auth-denied') throw new KeyholderVerbError('dkg', 'auth-denied')
+            if (out.error.code !== 'peer-unavailable' && ++consecutiveErrors >= DKG_MAX_CONSECUTIVE_ERRORS) throw new KeyholderVerbError('dkg', out.error.code)
+            await sleep(DKG_PAUSE_IDLE_MS)
+            continue
           }
+          consecutiveErrors = 0
           const phase = out.status?.phase
           if (phase === 'failed') throw new KeyholderVerbError('dkg', 'dkg-failed')
           if (phase === 'complete') {

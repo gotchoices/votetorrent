@@ -28,6 +28,8 @@ export interface KeyholderVerbContext {
   }
   readonly secrets: SecretRegistry
   openNetwork(hash: string): Promise<{ est: EngineContext, ref: NetworkReference }>
+  /** The daemon's crash recorder (redacted, 0600 `crash.jsonl`); a spec's fake may omit it. */
+  record?(where: string, err: unknown): void
 }
 
 export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -150,7 +152,7 @@ export async function openKeyholderEngines(ctx: KeyholderVerbContext, networkHas
   }
   const { est, ref } = opened
   const invitations = new InvitationEngine(est)
-  const dkg = new KeyholderDkgEngine(est, { vault: vaultView })
+  const dkg = recordingAdvance(new KeyholderDkgEngine(est, { vault: vaultView }), ctx, verb)
   const keyRelease = new KeyReleaseEngine(est)
   let keysTasks: KeysTasksEngine | undefined
   const engines: KeyholderEngines = {
@@ -179,6 +181,32 @@ export async function openKeyholderEngines(ctx: KeyholderVerbContext, networkHas
     }
   }
   return engines
+}
+
+/**
+ * The shared DKG driver reports a drive failure as a code only (`unknown` for a code-less engine
+ * error), so the engine error itself is recorded here, redacted, in the daemon's crash.jsonl before
+ * the driver sees it: diagnosable without a message ever reaching a reply.
+ */
+function recordingAdvance(dkg: KeyholderDkgEngine, ctx: KeyholderVerbContext, verb: KeyholderVerb): KeyholderDkgEngine {
+  if (ctx.record === undefined) return dkg
+  const record = ctx.record.bind(ctx)
+  return new Proxy(dkg, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver) as unknown
+      if (prop === 'advanceDkg' && typeof value === 'function') {
+        return async (...args: unknown[]) => {
+          try {
+            return await (value as (...a: unknown[]) => Promise<unknown>).apply(target, args)
+          } catch (e) {
+            record(`verb.${verb}.advanceDkg`, e)
+            throw e
+          }
+        }
+      }
+      return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value
+    }
+  })
 }
 
 /** The first 16 hex chars of sha256 over the utf8 joint public key: comparable, never the 64-hex key itself. */
