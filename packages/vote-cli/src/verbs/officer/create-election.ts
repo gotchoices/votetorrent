@@ -58,7 +58,11 @@ export async function runCreateElection(deps: OfficerElectionDeps, args: Record<
   if (typeof instructions !== 'string' || instructions.length > MAX_INSTRUCTIONS) refuse('instructions-invalid')
   const parsed = parseTimelineArgs({ leadMs: a.leadMs, windowMs: a.windowMs })
   if (!parsed.ok) refuse(parsed.code)
-  const built = (deps.buildTimeline ?? buildCliTimeline)({ now: deps.now(), leadMs: parsed.leadMs, windowMs: parsed.windowMs })
+  // The timeline instants are second-aligned on T (Pitfall 11); the election id and the revision timestamp
+  // take the RAW instant: the schema's RevisionTimestampValid needs `now - 1000` strictly below a
+  // second-granular context.now, which T - 1000 (the current second) is not.
+  const rawNow = deps.now()
+  const built = (deps.buildTimeline ?? buildCliTimeline)({ now: rawNow, leadMs: parsed.leadMs, windowMs: parsed.windowMs })
   const conflicts = checkVoterTimelineRules({ timeline: built.timeline, date: built.date, ballotDeadline: built.ballotDeadline, now: built.T })
   if (conflicts.length > 0) refuse('timeline-voter-rules')
   return withCallApproval(args, (approval) =>
@@ -82,7 +86,7 @@ export async function runCreateElection(deps: OfficerElectionDeps, args: Record<
           ballotDeadline: built.ballotDeadline
         },
         createSigner: () => signer.createSigner(),
-        now: built.T
+        now: rawNow
       })
       if (!res.ok) refuse(res.refusal.code)
       const electionCount = (await network.electionsEngine.getElections()).length

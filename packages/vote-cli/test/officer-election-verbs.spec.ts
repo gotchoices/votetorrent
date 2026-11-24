@@ -361,7 +361,8 @@ describe('officer election verbs: refusals', function () {
     expect(r.windowMs).to.equal(480000)
     expect(r.belowProvenDefaults).to.equal(false)
     expect(r.authorityId8).to.equal(AUTHORITY.slice(-8))
-    expect(r.electionId).to.equal('election-1700000001000')
+    // the id and the revision timestamp derive from the RAW instant; the instants below are second-aligned on T
+    expect(r.electionId).to.equal('election-1700000000123')
     expect(typeof r.ms).to.equal('number')
     const created = deps.world.created[0]!
     const tl = created.revision.timeline as Record<string, number>
