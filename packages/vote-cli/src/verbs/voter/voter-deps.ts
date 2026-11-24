@@ -12,13 +12,24 @@ import { createHash, randomUUID } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import { decodeCadreInvitation, mergeSeedPeers, verifyInvitationAdmission } from '@serfab/cadre-core'
 import { UserKeyType, type INetworksEngine, type NetworkReference, type User } from '@votetorrent/vote-core'
-import { AssociationEngine, ElectionsEngine, NetworkEngine, RegistrationEngine } from '@votetorrent/vote-engine/rn'
+import {
+  AssociationEngine,
+  ElectionResultsEngine,
+  ElectionsEngine,
+  KeyReleaseEngine,
+  NetworkEngine,
+  RegistrationEngine,
+  TallyPublicationEngine
+} from '@votetorrent/vote-engine/rn'
 import type { EngineContext } from '@votetorrent/vote-engine/rn'
+import type { KvStorage } from '@votetorrent/workflows/platform'
 import type { SignCallback, VoteSigningProducer } from '@votetorrent/workflows/platform'
 import {
   createVoterRequestTransportSource,
   createVoterStrandPort,
+  createVoteSendingPort,
   resolveRegistrationStatus,
+  VOTE_SENDING_PORT_ENGINE,
   type RegistrationCeremonyAttemptStore,
   type RegistrationCeremonyTransports,
   type RegistrationStatusKind,
@@ -26,11 +37,13 @@ import {
   type VoterJoinCadre,
   type VoterJoinNode,
   type VoterRequestTransports,
-  type VoterStrandPort
+  type VoterStrandPort,
+  type VoteContext
 } from '@votetorrent/workflows/voter'
 import type { VerbHandler } from '../../ctl/protocol.js'
 import type { VerbContext } from '../../daemon/verb-context.js'
 import type { SecretRegistry } from '../../secrecy/redact.js'
+import type { TokenKeyDeriver } from '../../voter/vote-record-seams.js'
 import { CALL_APPROVAL_ARG_KEYS, withCallApproval } from '../../approval/call-approval.js'
 import {
   assertTokenSigningKeyHeld,
@@ -80,10 +93,27 @@ export const VOTER_REFUSAL_CODES = Object.freeze([
   'unknown-engine',
   'wait-invalid',
   'wait-timeout',
-  'token-refused'
+  'token-refused',
+  // the vote verbs (67-30): cast, send, results
+  'election-required',
+  'election-mismatch',
+  'selection-ambiguous',
+  'selections-file-invalid',
+  'choice-index-invalid',
+  'choice-file-exists',
+  'choice-unreadable',
+  'no-saved-vote',
+  'saved-vote-unreadable',
+  'probe-budget-invalid',
+  'expected-file-invalid',
+  'needle-file-invalid',
+  'engine-unknown'
 ] as const)
 
 export type VoterFixedRefusalCode = (typeof VOTER_REFUSAL_CODES)[number]
+
+/** The shared castVote's failure stages (67-22), carried as `<stage>:<reason>`. */
+export type VoteCastStage = 'ineligible' | 'build' | 'sign' | 'seal' | 'store'
 
 /** The ceremony's named failures (the map lives in ceremony-step.ts, `CEREMONY_ERROR_CODES`). */
 export type CeremonyRefusalCode =
@@ -94,7 +124,7 @@ export type CeremonyRefusalCode =
   | 'challenge-without-nonce'
   | 'ceremony-failed'
 
-export type VoterRefusalCode = VoterFixedRefusalCode | CeremonyRefusalCode | `join-${string}`
+export type VoterRefusalCode = VoterFixedRefusalCode | CeremonyRefusalCode | `join-${string}` | `${VoteCastStage}:${string}` | `send:${string}`
 
 const FAILED_NAME_RE = /^[A-Za-z]{1,60}$/
 
@@ -278,7 +308,11 @@ export async function ensureVoterDeviceId(deps: Pick<VoterDeps, 'vault' | 'secre
 // ---------------------------------------------------------------------------------------------
 // The deps
 
-/** Engine lookup by name: `network`, `elections`, `association`, `registration`; anything else is `unknown-engine`. */
+/**
+ * Engine lookup by name: `network`, `elections`, `association`, `registration` (67-29) plus the names the shared
+ * vote workflows request (67-30): `keyRelease`, `electionResults`, `tallyPublication` and the sending port
+ * (`VOTE_SENDING_PORT_ENGINE` -> `createVoteSendingPort(est.db)`); anything else is `unknown-engine`.
+ */
 export type VoterGetEngine = <T>(engineName: string, initParams?: unknown) => Promise<T>
 
 export interface OpenedVoterNetwork {
@@ -316,7 +350,7 @@ export interface VoterDeps {
   readonly createTransports?: (strand: CliVoterRequestStrand) => Promise<CliVoterRequestTransports>
 }
 
-const ENGINE_NAMES: ReadonlySet<string> = new Set(['network', 'elections', 'association', 'registration'])
+const ENGINE_NAMES: ReadonlySet<string> = new Set(['network', 'elections', 'association', 'registration', 'keyRelease', 'electionResults', 'tallyPublication', VOTE_SENDING_PORT_ENGINE])
 
 interface PerNetwork {
   getEngine: VoterGetEngine
@@ -335,6 +369,10 @@ function buildPerNetwork(ctx: VerbContext, est: EngineContext, ref: NetworkRefer
       if (name === 'network') engine = new NetworkEngine(ref, ctx.localStorage, est)
       else if (name === 'elections') engine = new ElectionsEngine(est)
       else if (name === 'association') engine = new AssociationEngine(est)
+      else if (name === 'keyRelease') engine = new KeyReleaseEngine(est)
+      else if (name === 'electionResults') engine = new ElectionResultsEngine(est)
+      else if (name === 'tallyPublication') engine = new TallyPublicationEngine(est)
+      else if (name === VOTE_SENDING_PORT_ENGINE) engine = createVoteSendingPort(est.db as unknown as Parameters<typeof createVoteSendingPort>[0])
       else engine = new RegistrationEngine(est)
       engines.set(name, engine)
     }
@@ -565,4 +603,71 @@ export async function withVoterApproval<T>(
       return rethrowTokenRefused(e)
     }
   })
+}
+
+// ---------------------------------------------------------------------------------------------
+// The vote verbs' deps (67-30: cast, send, results), built on the deps above: the same network opener and
+// the same engine map, plus the device keys for the token-derived vote-record wrap, the control node and the
+// join-bootstrap store the phone also reads for the rendezvous addresses.
+
+export interface OpenedVoteNetwork {
+  readonly est: EngineContext
+  readonly getEngine: VoterGetEngine
+  /** The rendezvous addresses the join left behind (the 67-08 store over the daemon's kv). */
+  readRendezvousAddrs(): Promise<string[]>
+}
+
+export interface VoterVoteDeps {
+  readonly partyId: string
+  readonly kv: KvStorage
+  readonly keys: TokenKeyDeriver
+  readonly vault: ApprovalScopedVault
+  readonly secrets: SecretRegistry
+  readonly secretsDir: string
+  /** The daemon's CadreNode (its control node dials the rendezvous); null in a fake context. */
+  readonly node: { getControlNode(): unknown } | null
+  now(): number
+  redact(text: string): string
+  /** The vault's prompt counter (one per K_vote unwrap). */
+  authPromptCount(): number
+  openNetwork(hash: string): Promise<OpenedVoteNetwork>
+  /** K_vote's producer under this call's token (67-20, load-or-create; the device id is the at-rest one). */
+  producer(approval: ApprovalContext): Promise<VoteSigningProducer>
+  /** Spec seam: the election read; the daemon leaves it undefined (the shared `readVoteContext` is used). */
+  readonly readContext?: (deps: { getEngine: VoterGetEngine }, nowMs: number) => Promise<VoteContext>
+}
+
+/** The deps for one vote verb call; everything that touches the node, the engines or the vault is lazy. */
+export function voterVoteDeps(ctx: VerbContext): VoterVoteDeps {
+  const base = voterDepsFor(ctx, {})
+  return {
+    partyId: ctx.partyId,
+    kv: ctx.kv,
+    keys: ctx.device.keys,
+    vault: ctx.device.vault,
+    secrets: ctx.secrets,
+    secretsDir: ctx.secretsDir,
+    node: ctx.node as unknown as { getControlNode(): unknown },
+    now: () => Date.now(),
+    redact: (text) => ctx.redact(text),
+    authPromptCount: () => ctx.device.vault.authPromptCount,
+    openNetwork: async (hash) => {
+      const opened = await base.openVoterNetwork(hash)
+      const raw = await ctx.openNetwork(hash)
+      return {
+        est: raw.est,
+        getEngine: opened.getEngine,
+        readRendezvousAddrs: () => ctx.built.stores.joinBootstrap.readJoinBootstrap()
+      }
+    },
+    producer: async (approval) => {
+      const deviceId = await ensureVoterDeviceId(base)
+      return createTokenAttestationProducer({ vault: ctx.device.vault, token: approval, alias: VOTER_KVOTE_ALIAS, deviceId })
+    }
+  }
+}
+
+/** The ctl handler over a vote verb body. */
+export function bindVoteVerb(run: (deps: VoterVoteDeps, args: Record<string, unknown>) => Promise<Record<string, unknown>>): VerbHandler<VerbContext> {
+  return async (ctx, args) => run(voterVoteDeps(ctx), args)
 }
