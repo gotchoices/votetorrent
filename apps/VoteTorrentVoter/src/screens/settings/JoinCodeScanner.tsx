@@ -20,6 +20,16 @@
  * `useCameraPermission()` / `useCameraDevice()`, because two permission hooks do not share state
  * after a request; the screen learns availability and failures only through the callback.
  *
+ * Choose image: inside the scanner, next to Paste instead, a "Choose image" button opens the
+ * system photo picker so a photo or screenshot of the join-code QR can be read instead of the live
+ * camera. The camera pauses while the picker is open and resumes when it closes without a code.
+ * The picked image is read by `pickImageAndReadQrCodes` (engines/qr-image-decode, which deletes the
+ * picker's copy), and its QR values go through `judgeScannedValues`, the same check a camera frame
+ * goes through: a join code reaches `onAccept` exactly as a scan would, and anything else gets the
+ * same "not a join code" banner. A cancelled pick, a picture with no QR and an unreadable picture
+ * each get their own banner. A build without the image picker shows the button disabled with a
+ * sentence that says so. The Join screen uses `useScanImage` for the same pick when the camera is off.
+ *
  * D-06: the join code is a bearer credential. This file never logs, stores or forwards a barcode
  * object, `rawValue` (other than the one accepted value handed to `onAccept`), corner points, raw
  * bytes, or an error object or message. Every console call is `console.info` with one closed
@@ -43,6 +53,8 @@ import {useBarcodeScannerOutput} from 'react-native-vision-camera-barcode-scanne
 import type {Barcode, BarcodeScannerOutputResolution, TargetBarcodeFormat} from 'react-native-vision-camera-barcode-scanner';
 import {looksLikeJoinCode} from '@votetorrent/vote-engine/rn';
 import {useVoterApp} from '../../providers/VoterAppProvider';
+import {isQrImageDecodeAvailable, pickImageAndReadQrCodes} from '../../engines/qr-image-decode';
+import type {QrImageReadResult} from '../../engines/qr-image-decode';
 
 export type JoinScanCameraState = 'ready' | 'blocked' | 'none' | 'denied' | 'failed';
 
@@ -69,6 +81,88 @@ export function joinScanAvailability(status: string, hasDevice: boolean): 'ready
 	if (status === 'denied' || status === 'restricted') return 'blocked';
 	if (status === 'authorized' && !hasDevice) return 'none';
 	return 'ready';
+}
+
+/** What a read holds: the camera's frames and a picked image are judged by this one rule. */
+export type ScanReadVerdict = {type: 'accepted'; value: string} | {type: 'not-join-code'};
+
+/** The first join code among the read values, or the refusal. */
+export function judgeScannedValues(values: readonly unknown[]): ScanReadVerdict {
+	for (const value of values) {
+		if (typeof value === 'string' && looksLikeJoinCode(value)) return {type: 'accepted', value};
+	}
+	return {type: 'not-join-code'};
+}
+
+/** A picked image, judged: the join code to accept, or the sentence (a `join` i18n key) and its closed log token. */
+export type ScanImageOutcome = {type: 'accepted'; value: string} | {type: 'message'; key: string; token: string};
+
+/** Map a picker read to what the scanner and the Join screen do with it. */
+export function scanImageOutcome(result: QrImageReadResult): ScanImageOutcome {
+	switch (result.kind) {
+		case 'decoded': {
+			const verdict = judgeScannedValues(result.values);
+			return verdict.type === 'accepted' ? verdict : {type: 'message', key: 'scanNotJoinCode', token: 'rejected-not-join-code'};
+		}
+		case 'no-code':
+			return {type: 'message', key: 'scanImageNoCode', token: 'no-code'};
+		case 'unreadable':
+			return {type: 'message', key: 'scanImageUnreadable', token: 'unreadable'};
+		case 'unavailable':
+			return {type: 'message', key: 'scanImageUnavailable', token: 'unavailable'};
+		case 'cancelled':
+		default:
+			return {type: 'message', key: 'scanImageCancelled', token: 'cancelled'};
+	}
+}
+
+export interface ScanImagePicker {
+	/** False on a build without the image picker: the button is shown disabled with a sentence. */
+	available: boolean;
+	/** True while the photo picker is open or its image is being read. */
+	picking: boolean;
+	/** Open the picker and judge the image. Resolves null when a pick is already open or the caller unmounted. Never rejects. */
+	pick(): Promise<ScanImageOutcome | null>;
+}
+
+/** The Choose image pick, shared by the scanner and the Join screen's camera-off notice. */
+export function useScanImage(): ScanImagePicker {
+	const available = useMemo(() => isQrImageDecodeAvailable(), []);
+	const [picking, setPicking] = useState(false);
+	const pickingRef = useRef(false);
+	const mountedRef = useRef(true);
+	useEffect(() => {
+		mountedRef.current = true;
+		return () => {
+			mountedRef.current = false;
+		};
+	}, []);
+	const pick = useCallback(async (): Promise<ScanImageOutcome | null> => {
+		if (pickingRef.current) return null;
+		if (!available) {
+			console.info('[join] image: unavailable');
+			return scanImageOutcome({kind: 'unavailable'});
+		}
+		pickingRef.current = true;
+		setPicking(true);
+		try {
+			let result: QrImageReadResult;
+			try {
+				result = await pickImageAndReadQrCodes({logTag: '[join]'});
+			} catch {
+				// pickImageAndReadQrCodes never rejects; a stand-in that does is an unreadable image.
+				result = {kind: 'unreadable'};
+			}
+			if (!mountedRef.current) return null;
+			const outcome = scanImageOutcome(result);
+			console.info(`[join] image: ${outcome.type === 'accepted' ? 'accepted' : outcome.token}`);
+			return outcome;
+		} finally {
+			pickingRef.current = false;
+			if (mountedRef.current) setPicking(false);
+		}
+	}, [available]);
+	return {available, picking, pick};
 }
 
 // Fixed colours: they sit on live camera video, so they are not theme tokens (UI-SPEC "Color").
@@ -118,7 +212,7 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 	const [phase, setPhase] = useState<Phase>('closed');
 	const [resolution, setResolution] = useState<BarcodeScannerOutputResolution>('preview');
 	const [slow, setSlow] = useState(false);
-	const [bannerVisible, setBannerVisible] = useState(false);
+	const [bannerKey, setBannerKey] = useState<string | null>(null);
 	const [appActive, setAppActive] = useState(true);
 
 	// Refs mirror the latest render, so the scan callback and the async open attempt never read stale values.
@@ -135,7 +229,11 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 	onAcceptRef.current = props.onAccept;
 	onCameraStateRef.current = props.onCameraState;
 
+	const image = useScanImage();
+	const imagePick = image.pick;
 	const lockRef = useRef(false);
+	// True while the photo picker is open: camera frames are ignored and the camera is paused.
+	const pausedRef = useRef(false);
 	const ignoreRejectRef = useRef(false);
 	const attemptRef = useRef(0);
 	const mountedRef = useRef(true);
@@ -181,7 +279,7 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 		if (!props.visible) {
 			clearTimers();
 			setPhase('closed');
-			setBannerVisible(false);
+			setBannerKey(null);
 			setSlow(false);
 			setResolution('preview');
 			return;
@@ -192,7 +290,7 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 		ignoreRejectRef.current = false;
 		slowStartedRef.current = false;
 		clearTimers();
-		setBannerVisible(false);
+		setBannerKey(null);
 		setSlow(false);
 		setResolution('preview');
 
@@ -250,19 +348,13 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 
 	// Stable (empty deps), refs only: the library memoises the output on formats and resolution.
 	const onBarcodes = useCallback((barcodes: Barcode[]) => {
-		if (lockRef.current) return;
-		let accepted: string | undefined;
-		for (const barcode of barcodes) {
-			const value = barcode.rawValue;
-			if (typeof value === 'string' && looksLikeJoinCode(value)) {
-				accepted = value;
-				break;
-			}
-		}
+		if (lockRef.current || pausedRef.current) return;
+		const verdict = judgeScannedValues(barcodes.map(barcode => barcode.rawValue));
+		const accepted = verdict.type === 'accepted' ? verdict.value : undefined;
 		if (accepted !== undefined) {
 			lockRef.current = true;
 			if (bannerTimerRef.current !== undefined) clearTimeout(bannerTimerRef.current);
-			setBannerVisible(false);
+			setBannerKey(null);
 			setPhase('accepted');
 			console.info('[join] scan: accepted');
 			onAcceptRef.current(accepted);
@@ -271,14 +363,45 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 		if (ignoreRejectRef.current) return;
 		ignoreRejectRef.current = true;
 		console.info('[join] scan: rejected-not-join-code');
-		setBannerVisible(true);
+		setBannerKey('scanNotJoinCode');
 		if (bannerTimerRef.current !== undefined) clearTimeout(bannerTimerRef.current);
-		bannerTimerRef.current = setTimeout(() => setBannerVisible(false), JOIN_SCAN_BANNER_MS);
+		bannerTimerRef.current = setTimeout(() => setBannerKey(null), JOIN_SCAN_BANNER_MS);
 		if (ignoreTimerRef.current !== undefined) clearTimeout(ignoreTimerRef.current);
 		ignoreTimerRef.current = setTimeout(() => {
 			ignoreRejectRef.current = false;
 		}, JOIN_SCAN_REJECT_IGNORE_MS);
 	}, []);
+
+	const showBanner = useCallback((key: string) => {
+		setBannerKey(key);
+		if (bannerTimerRef.current !== undefined) clearTimeout(bannerTimerRef.current);
+		bannerTimerRef.current = setTimeout(() => setBannerKey(null), JOIN_SCAN_BANNER_MS);
+	}, []);
+
+	// Choose image: pause the camera, read the picked image, then accept it exactly as a scan or
+	// show its banner and resume. A pick that returns after the scanner closed is dropped.
+	const onChooseImage = useCallback(async () => {
+		if (lockRef.current || pausedRef.current) return;
+		const attempt = attemptRef.current;
+		pausedRef.current = true;
+		if (bannerTimerRef.current !== undefined) clearTimeout(bannerTimerRef.current);
+		setBannerKey(null);
+		let outcome: ScanImageOutcome | null;
+		try {
+			outcome = await imagePick();
+		} finally {
+			pausedRef.current = false;
+		}
+		if (outcome === null || !mountedRef.current || !visibleRef.current || attemptRef.current !== attempt || lockRef.current) return;
+		if (outcome.type === 'accepted') {
+			lockRef.current = true;
+			setPhase('accepted');
+			console.info('[join] scan: accepted');
+			onAcceptRef.current(outcome.value);
+			return;
+		}
+		showBanner(outcome.key);
+	}, [imagePick, showBanner]);
 
 	const onStarted = useCallback(() => {
 		setPhase(p => (p === 'starting' ? 'scanning' : p));
@@ -309,7 +432,8 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 	const textLeft = Math.round((width - textWidth) / 2);
 	const pasteBottom = insets.bottom + 16;
 	const showCamera = (phase === 'starting' || phase === 'scanning' || phase === 'accepted') && device !== undefined;
-	const cameraActive = (phase === 'starting' || phase === 'scanning') && appActive;
+	const cameraActive = (phase === 'starting' || phase === 'scanning') && appActive && !image.picking;
+	const imageDisabled = !image.available || image.picking || phase === 'accepted';
 	const waiting = phase === 'requesting' || phase === 'starting';
 	const boldText = {fontFamily: fonts.bold.fontFamily, fontWeight: fonts.bold.fontWeight};
 	const regularText = {fontFamily: fonts.regular.fontFamily, fontWeight: fonts.regular.fontWeight};
@@ -377,20 +501,43 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 					)}
 				</View>
 
-				{bannerVisible ? (
-					<View testID="join-network-scan-banner" accessibilityRole="alert" style={[styles.banner, {bottom: pasteBottom + 44 + 16}]}>
-						<FontAwesome6 name="circle-exclamation" size={16} color={INK} />
-						<Text style={[styles.body, regularText, styles.bannerText]}>{t('scanNotJoinCode')}</Text>
-					</View>
-				) : null}
+				<View style={[styles.bottomBar, {bottom: pasteBottom}]} pointerEvents="box-none">
+					{bannerKey !== null ? (
+						<View testID="join-network-scan-banner" accessibilityRole="alert" style={styles.banner}>
+							<FontAwesome6 name="circle-exclamation" size={16} color={INK} />
+							<Text style={[styles.body, regularText, styles.bannerText]}>{t(bannerKey)}</Text>
+						</View>
+					) : null}
 
-				<Pressable
-					testID="join-network-scan-paste"
-					accessibilityRole="button"
-					onPress={props.onPasteInstead}
-					style={[styles.pasteButton, {bottom: pasteBottom}]}>
-					<Text style={[styles.pasteLabel, boldText]}>{t('scanPasteInstead')}</Text>
-				</Pressable>
+					{!image.available ? (
+						<Text testID="join-network-scan-image-unavailable" style={[styles.caption, regularText]}>
+							{t('scanImageUnavailable')}
+						</Text>
+					) : null}
+					<Pressable
+						testID="join-network-scan-image"
+						accessibilityRole="button"
+						accessibilityLabel={t('scanImageLabel')}
+						accessibilityState={{disabled: imageDisabled, busy: image.picking}}
+						disabled={imageDisabled}
+						onPress={onChooseImage}
+						style={[styles.imageButton, !image.available ? styles.imageButtonDisabled : null]}>
+						{image.picking ? (
+							<ActivityIndicator testID="join-network-scan-image-busy" color={INK} />
+						) : (
+							<FontAwesome6 name="image" size={18} color={INK} />
+						)}
+						<Text style={[styles.imageLabel, boldText]}>{t('scanImageButton')}</Text>
+					</Pressable>
+
+					<Pressable
+						testID="join-network-scan-paste"
+						accessibilityRole="button"
+						onPress={props.onPasteInstead}
+						style={styles.pasteButton}>
+						<Text style={[styles.pasteLabel, boldText]}>{t('scanPasteInstead')}</Text>
+					</Pressable>
+				</View>
 			</View>
 		</Modal>
 	);
@@ -455,10 +602,16 @@ const styles = StyleSheet.create({
 		lineHeight: 22,
 		textAlign: 'center',
 	},
-	banner: {
+	bottomBar: {
 		position: 'absolute',
-		left: 16,
-		right: 16,
+		left: 0,
+		right: 0,
+		alignItems: 'center',
+		gap: 12,
+	},
+	banner: {
+		alignSelf: 'stretch',
+		marginHorizontal: 16,
 		flexDirection: 'row',
 		alignItems: 'center',
 		backgroundColor: BANNER_BG,
@@ -470,10 +623,35 @@ const styles = StyleSheet.create({
 		marginLeft: 12,
 		textAlign: 'left',
 	},
+	caption: {
+		color: INK,
+		fontSize: 14,
+		lineHeight: 20,
+		textAlign: 'center',
+		maxWidth: TEXT_MAX_WIDTH,
+	},
+	imageButton: {
+		minHeight: 48,
+		paddingHorizontal: 20,
+		borderRadius: 24,
+		borderWidth: 1,
+		borderColor: INK,
+		backgroundColor: SCRIM,
+		flexDirection: 'row',
+		alignItems: 'center',
+		justifyContent: 'center',
+		gap: 10,
+	},
+	imageButtonDisabled: {
+		opacity: 0.5,
+	},
+	imageLabel: {
+		color: INK,
+		fontSize: 16,
+		lineHeight: 22,
+	},
 	pasteButton: {
-		position: 'absolute',
-		left: 0,
-		right: 0,
+		alignSelf: 'stretch',
 		minHeight: 44,
 		alignItems: 'center',
 		justifyContent: 'center',
