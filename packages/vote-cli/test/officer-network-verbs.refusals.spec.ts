@@ -100,7 +100,8 @@ describe('officer network verbs: refusals over ctl', function () {
     for (const name of OFFICER_NETWORK_VERB_NAMES) expect(typeof OFFICER_NETWORK_VERBS[name]).to.equal('function')
     expect(Object.isFrozen(OFFICER_NETWORK_VERBS)).to.equal(true)
     // the officer registry carries the common verbs, then this group; the election and intake groups are empty stubs today
-    expect(Object.keys(OFFICER_VERB_ENTRIES).sort()).to.deep.equal(['authority-id', 'capability', 'dashboard-code', 'found', 'join', 'mint', 'owner-setup', 'readback', 'stop'])
+    // Later groups (election, intake, results) append their own names; this spec pins only that the network group and the common verbs are served.
+    expect(Object.keys(OFFICER_VERB_ENTRIES)).to.include.members(['authority-id', 'capability', 'dashboard-code', 'found', 'join', 'mint', 'owner-setup', 'readback', 'stop'])
     for (const name of OFFICER_NETWORK_VERB_NAMES) expect(OFFICER_VERB_ENTRIES[name]).to.equal(OFFICER_NETWORK_VERBS[name])
   })
 
