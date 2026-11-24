@@ -68,8 +68,8 @@ describe('network init: CLI-owned founding builders', () => {
     expect(built.name).to.equal('T24 Net')
     expect(built.primaryAuthority).to.deep.equal({ name: 'T24 Net Authority', domainName: 'authority.vt.invalid' })
     expect(built.admin.officers).to.have.lengthOf(1)
-    expect(built.admin.officers[0]!.init.name).to.equal('vt officer')
-    expect(built.admin.officers[0]!.init.title).to.equal('Chair')
+    expect(built.admin.officers[0]!.init!.name).to.equal('vt officer')
+    expect(built.admin.officers[0]!.init!.title).to.equal('Chair')
   })
 
   it("buildAuthorityUser output has the engine fixture's User shape, without imageRef", () => {
@@ -97,7 +97,7 @@ describe('network init: CLI-owned founding builders', () => {
     expect(golden.scopes).to.deep.equal([...codes].sort())
     expect(Object.isFrozen(FOUNDING_SCOPES)).to.equal(true)
     const built = buildNetworkInit({ name: 'T24 Net', relays: [RELAY] })
-    expect([...built.admin.officers[0]!.init.scopes]).to.deep.equal(codes)
+    expect([...built.admin.officers[0]!.init!.scopes]).to.deep.equal(codes)
   })
 
   it('threshold policies are rn, mel and ceb at 1 and the network has no timestamp authorities', () => {
