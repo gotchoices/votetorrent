@@ -21,6 +21,8 @@ const APP_ROOT = path.resolve(__dirname, '..');
 /** The exact three files D-23's derivation touches — deliberately narrow. */
 const TARGET_FILES = [
 	'src/engines/registration-status.ts',
+	// phase 67 plan 30: the four-outcome read moved to the shared package; its binding above stays scanned
+	'../../packages/workflows/src/voter/registration-status.ts',
 	'src/components/TimelineRegistrationPanel.tsx',
 	'src/screens/timeline/TimelineScreen.tsx',
 ].map(rel => path.join(APP_ROOT, rel));
@@ -83,7 +85,7 @@ describe('no client-side identity persistence (D-23, 59-09)', () => {
 	});
 
 	test('registration-status.ts DOES call the read-only P-256 current-key accessor -- proving the correct key is used, not merely that the wrong one is absent', () => {
-		const file = TARGET_FILES.find(f => f.endsWith('registration-status.ts'));
+		const file = TARGET_FILES.find(f => f.endsWith(path.join('workflows', 'src', 'voter', 'registration-status.ts')));
 		expect(file).toBeDefined();
 		const text = readStripped(file as string);
 		expect(PROVISION_DEVICE_KEY_CALL_RE.test(text)).toBe(true);

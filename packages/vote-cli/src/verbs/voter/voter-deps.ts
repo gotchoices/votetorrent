@@ -16,11 +16,16 @@ import { AssociationEngine, ElectionsEngine, NetworkEngine, RegistrationEngine }
 import type { EngineContext } from '@votetorrent/vote-engine/rn'
 import type { SignCallback, VoteSigningProducer } from '@votetorrent/workflows/platform'
 import {
+  createVoterRequestTransportSource,
   createVoterStrandPort,
+  resolveRegistrationStatus,
   type RegistrationCeremonyAttemptStore,
+  type RegistrationCeremonyTransports,
+  type RegistrationStatusKind,
   type VoterJoinBootstrapWriter,
   type VoterJoinCadre,
   type VoterJoinNode,
+  type VoterRequestTransports,
   type VoterStrandPort
 } from '@votetorrent/workflows/voter'
 import type { VerbHandler } from '../../ctl/protocol.js'
@@ -43,7 +48,6 @@ import {
   type VoterKv,
   type VoterLastAttemptStore
 } from './voter-attempt-store.js'
-import type { CliVoterRequestStrand, CliVoterRequestTransports } from './voter-transports.js'
 
 // ---------------------------------------------------------------------------------------------
 // The refusal
@@ -407,8 +411,8 @@ export function bindVoterVerb(run: VoterVerbRun): VerbHandler<VerbContext> {
 
 /**
  * D-45: the registration code, minted by the identity-key signer on the peer route. The Voter's one call
- * (`apps/VoteTorrentVoter/src/engines/continuity.ts` `mintRegistrationCodeForSubmit`, pinned by
- * test/voter-mirror-drift.spec.ts): the association engine derives it; no catch, a rejection propagates.
+ * (`apps/VoteTorrentVoter/src/engines/continuity.ts` `mintRegistrationCodeForSubmit`): the association
+ * engine derives it; no catch, a rejection propagates.
  */
 export async function mintVoterRegistrationCode(getEngine: VoterGetEngine, registrantId: string, sign: SignCallback): Promise<string> {
   const association = await getEngine<RegistrationCodeMinter>('association')
@@ -418,6 +422,79 @@ export async function mintVoterRegistrationCode(getEngine: VoterGetEngine, regis
 /** The association engine's code-derivation slice (`IReassociationEngine.deriveRegistrationCode`). */
 export interface RegistrationCodeMinter {
   deriveRegistrationCode(registrantId: string, sign: SignCallback): Promise<string>
+}
+
+// ---------------------------------------------------------------------------------------------
+// Request transports and the registration status, over the shared Voter modules (67-30; the 67-29
+// drift-pinned copies are gone)
+
+export interface CliVoterRequestStrand {
+  /** The shared strand port over the joined network's database. */
+  port: VoterStrandPort
+  /** The network hash, which is the staging rows' StrandId. */
+  strandId: string
+  /** The joined network's primary authority (the sealer's recipient set and the policy row). */
+  authorityId: string
+}
+
+/** The ceremony's transports plus the own-association lister `read-decision` and the status read use. */
+export interface CliVoterRequestTransports extends RegistrationCeremonyTransports {
+  registrationRoute: 'peer'
+  registrationTransport: RegistrationCeremonyTransports['registrationTransport'] & {
+    pollDecisions(sinceCursor?: string): Promise<Array<{ requestId: string, status: string, cursor: string }>>
+  }
+  ownAssociationRequestIds(requesterKey: string): Promise<string[]>
+}
+
+/**
+ * The Voter's transport source over the shared strand port, peer-backed by construction. The CLI has no REST
+ * route: when the replicated AuthorityIntakePolicy names a valid REST bridge the injected factory refuses
+ * `rest-bridge-configured` (the lean rig's rule), never falls back to P2P (D-28/D-29: a double path could
+ * stage the same request twice).
+ */
+export async function createCliVoterRequestTransports(strand: CliVoterRequestStrand): Promise<CliVoterRequestTransports> {
+  const { port, strandId, authorityId } = strand
+  const source = createVoterRequestTransportSource(
+    { strandId, port, peerBacked: true },
+    { createRestRegistrationTransport: () => { throw new VoterVerbRefusal('rest-bridge-configured') } }
+  )
+  const transports = await source.resolve(authorityId)
+  if (transports === undefined || transports.registrationRoute !== 'peer') throw new VoterVerbRefusal('rest-bridge-configured')
+  return transports as unknown as CliVoterRequestTransports
+}
+
+export type VoterRegistrationStatus = RegistrationStatusKind
+
+/** The transports slice the corroborating leg reads (`createCliVoterRequestTransports`' result fits). */
+export interface VoterRegistrationStatusTransports {
+  ownAssociationRequestIds(requesterKey: string): Promise<string[]>
+  associationTransport: {
+    pollDecisions(sinceCursor?: string): Promise<Array<{ requestId: string, status: string }>>
+  }
+}
+
+export interface VoterRegistrationStatusDeps {
+  getEngine: <T>(engineName: string, initParams?: unknown) => Promise<T>
+  /** READ-ONLY current P-256 device-key lookup (the producer's `getCurrentDeviceKey`), never a provision. */
+  getCurrentDeviceKey: () => Promise<{ publicKey: string }>
+  /** The transports over the joined network, already built; undefined skips the corroborating leg. */
+  transports: VoterRegistrationStatusTransports | undefined
+  /** Narrows own association requests to this election; a request with no electionId is accepted regardless. */
+  electionId?: string
+  /** Receives the shared read's fixed `where` text for a swallowed failure, never the error; absent drops it. */
+  logError?: (where: string) => void
+}
+
+/** The four-outcome status for this device: the shared Voter derivation, reduced to its status token. */
+export async function readVoterRegistrationStatus(deps: VoterRegistrationStatusDeps): Promise<VoterRegistrationStatus> {
+  const result = await resolveRegistrationStatus({
+    getEngine: deps.getEngine,
+    getCurrentDeviceKey: deps.getCurrentDeviceKey,
+    resolveTransports: async () => deps.transports as unknown as VoterRequestTransports | undefined,
+    logError: (where) => { deps.logError?.(where) },
+    ...(deps.electionId === undefined ? {} : { electionId: deps.electionId })
+  })
+  return result.kind
 }
 
 // ---------------------------------------------------------------------------------------------

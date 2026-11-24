@@ -14,7 +14,7 @@ import { readTokenSigningPublicKey } from '../src/approval/signer.js'
 import type { VerbContext } from '../src/daemon/verb-context.js'
 import { SecretRegistry } from '../src/secrecy/redact.js'
 import { openDeviceVault, type DeviceVault } from '../src/vault/device-vault.js'
-import { readVoterRegistrationStatus } from '../src/verbs/voter/registration-status.js'
+import { readVoterRegistrationStatus } from '../src/verbs/voter/voter-deps.js'
 import {
   createLastAttemptStore,
   createVoterAttemptStore,
@@ -36,7 +36,7 @@ import {
   withVoterApproval,
   type VoterDeps
 } from '../src/verbs/voter/voter-deps.js'
-import { createCliVoterRequestTransports } from '../src/verbs/voter/voter-transports.js'
+import { createCliVoterRequestTransports } from '../src/verbs/voter/voter-deps.js'
 
 type Coded = { name?: unknown, code?: unknown, message?: unknown }
 

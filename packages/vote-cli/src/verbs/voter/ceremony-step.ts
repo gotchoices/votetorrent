@@ -28,7 +28,7 @@ import {
   type VoterApproval,
   type VoterDeps
 } from './voter-deps.js'
-import { createCliVoterRequestTransports, type CliVoterRequestTransports } from './voter-transports.js'
+import { createCliVoterRequestTransports, type CliVoterRequestTransports } from './voter-deps.js'
 
 /** The ceremony's fixed error names and messages (67-11), and the vault codes, mapped to voter refusal codes. */
 export const CEREMONY_ERROR_CODES = Object.freeze({

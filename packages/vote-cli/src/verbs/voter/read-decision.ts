@@ -8,7 +8,7 @@ import type { VerbHandler } from '../../ctl/protocol.js'
 import type { VerbContext } from '../../daemon/verb-context.js'
 import { parseWaitMs } from './answer-challenge.js'
 import { openVoterTransports } from './ceremony-step.js'
-import { readVoterRegistrationStatus, type VoterRegistrationStatus } from './registration-status.js'
+import { readVoterRegistrationStatus, type VoterRegistrationStatus } from './voter-deps.js'
 import {
   bindVoterVerb,
   elapsedMs,

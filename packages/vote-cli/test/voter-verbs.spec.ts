@@ -25,7 +25,7 @@ import { VOTER_VERB_ENTRIES } from '../src/verbs/voter/registry.js'
 import { runStageAssociation } from '../src/verbs/voter/stage-association.js'
 import { createLastAttemptStore, createVoterAttemptStore, type VoterKv } from '../src/verbs/voter/voter-attempt-store.js'
 import { ensureVoterDeviceId, ensureVoterIdentity, type VoterDeps } from '../src/verbs/voter/voter-deps.js'
-import type { CliVoterRequestTransports } from '../src/verbs/voter/voter-transports.js'
+import type { CliVoterRequestTransports } from '../src/verbs/voter/voter-deps.js'
 import { assertNoLeak } from './support/vault-leak-check.js'
 
 type Coded = { name?: unknown, code?: unknown, message?: unknown, failedName?: unknown }
