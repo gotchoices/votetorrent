@@ -4,7 +4,7 @@
 // `vt run` calls assertFreshBuild() first; importing this module does nothing.
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** `packages/`: two levels above this file, from src/engine.ts and from dist/engine.js alike. */
@@ -98,6 +98,20 @@ function mtimeOrNull (path: string): number | null {
 }
 
 /**
+ * The `dist` directory the sentinel lives in (the nearest ancestor named `dist`, else the sentinel's
+ * own directory). tsc and aegir re-emit only outputs whose content changed, so the sentinel's own
+ * mtime can stay old after a real rebuild while a sibling output moved: the dist side of the
+ * comparison is therefore the newest file anywhere under that directory, never the sentinel alone.
+ */
+function distRootOf (sentinel: string): string {
+  let dir = dirname(sentinel)
+  for (let cur = dir; ; cur = dirname(cur)) {
+    if (basename(cur) === 'dist') return cur
+    if (dirname(cur) === cur) return dir
+  }
+}
+
+/**
  * Refuse a missing or stale dist for every target, in build order; return one mtime record each.
  * The sentinel is checked first, so a package that does not exist at all reads as `not-built`.
  */
@@ -108,8 +122,9 @@ export function assertFreshBuild (targets: readonly FreshnessTarget[] = DEFAULT_
     if (distMtimeMs === null) throw new StaleBuildError('not-built', target.name)
     if (!existsSync(target.srcDir)) throw new StaleBuildError('src-missing', target.name)
     const srcNewestMs = newest(target.srcDir)
-    if (distMtimeMs < srcNewestMs) throw new StaleBuildError('stale', target.name)
-    records.push({ name: target.name, srcNewestMs, distMtimeMs })
+    const distNewestMs = Math.max(distMtimeMs, newest(distRootOf(target.distSentinel)))
+    if (distNewestMs < srcNewestMs) throw new StaleBuildError('stale', target.name)
+    records.push({ name: target.name, srcNewestMs, distMtimeMs: distNewestMs })
   }
   return records
 }

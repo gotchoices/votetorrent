@@ -99,6 +99,16 @@ describe('freshness: assertFreshBuild', () => {
     expect(err.target).to.equal('a')
   })
 
+  it('passes when the sentinel is old but a sibling dist output is newer than every src file (partial re-emit)', () => {
+    writeFileSync(join(root, 'a', 'src', 'x.ts'), 'export const x = 2\n')
+    touch(join(root, 'a', 'src', 'x.ts'), NEWER)
+    touch(join(root, 'a', 'dist', 'index.js'), T)
+    writeFileSync(join(root, 'a', 'dist', 'other.js'), 'export const o = 1\n')
+    touch(join(root, 'a', 'dist', 'other.js'), NEWER + 100)
+    const records = assertFreshBuild(targets)
+    expect(records[0]!.distMtimeMs).to.be.at.least(records[0]!.srcNewestMs)
+  })
+
   it('refuses src-missing when the src directory is absent but dist exists', () => {
     rmSync(join(root, 'b', 'src'), { recursive: true, force: true })
     const err = refusal(() => assertFreshBuild(targets))
