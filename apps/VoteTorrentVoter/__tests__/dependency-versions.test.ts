@@ -28,6 +28,8 @@ const PARITY_PACKAGES = [
   'react-native-vector-icons',
   '@types/react-native-vector-icons',
   '@react-native-clipboard/clipboard', // R-7: same resolution as the Authority (one lock entry)
+  'react-native-image-picker', // Choose image in the QR scanner: the same picker as the Authority
+  '@dr.pogodin/react-native-fs', // deletes the picked image's copy, as in the Authority
 ];
 
 describe('dependency version parity (D-18)', () => {

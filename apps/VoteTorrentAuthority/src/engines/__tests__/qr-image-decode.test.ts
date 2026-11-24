@@ -162,6 +162,19 @@ describe('pickImageAndReadQrCodes', () => {
 		});
 		expect(result).toEqual({ kind: 'decoded', values: ['a', 'b'] });
 	});
+
+	it('D10: the log lines carry the caller\'s closed tag ([join] from the join-code scanner), [invite] by default', async () => {
+		const capture = captureConsole();
+		try {
+			const { deps } = fakeDevice({});
+			await pickImageAndReadQrCodes({ ...deps, logTag: '[join]' });
+			await pickImageAndReadQrCodes(deps);
+			const lines = capture.calls().map((c) => c.join(' '));
+			expect(lines).toEqual(['[join] image: load-failed', '[invite] image: load-failed']);
+		} finally {
+			capture.restore();
+		}
+	});
 });
 
 describe('availability and helpers', () => {

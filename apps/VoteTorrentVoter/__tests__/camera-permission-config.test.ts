@@ -148,6 +148,29 @@ describe("Voter iOS camera purpose strings", () => {
 	});
 });
 
+describe("Voter photo picker declarations (Choose image in the QR scanner)", () => {
+	const PHOTO_USAGE_EN =
+		"VoteTorrent reads only the picture you choose, to find the QR join code in it. It does not keep, change or upload your photos.";
+	const PHOTO_USAGE_ES =
+		"VoteTorrent lee solo la imagen que eliges, para encontrar en ella el código QR de acceso. No guarda, cambia ni sube tus fotos.";
+
+	it("T15: Info.plist and both InfoPlist.strings carry the photo purpose string", () => {
+		expect(plistString(read(INFO_PLIST), "NSPhotoLibraryUsageDescription")).toBe(PHOTO_USAGE_EN);
+		expect(stringsValue(read(EN_STRINGS), "NSPhotoLibraryUsageDescription")).toBe(PHOTO_USAGE_EN);
+		expect(stringsValue(read(ES_STRINGS), "NSPhotoLibraryUsageDescription")).toBe(PHOTO_USAGE_ES);
+	});
+
+	it("T16: the external-storage permissions the file module declares are removed from the merged manifest", () => {
+		const xml = stripXmlComments(read(MANIFEST));
+		expect(xml).toContain('xmlns:tools="http://schemas.android.com/tools"');
+		const removed = elements(xml, "uses-permission")
+			.filter((p) => attr(p, "tools:node") === "remove")
+			.map((p) => attr(p, "android:name"))
+			.sort();
+		expect(removed).toEqual(["android.permission.READ_EXTERNAL_STORAGE", "android.permission.WRITE_EXTERNAL_STORAGE"]);
+	});
+});
+
 describe("Voter iOS deployment target", () => {
 	it("T13: the Podfile targets iOS 15.5, not min_ios_version_supported", () => {
 		const code = stripHashComments(read(PODFILE));

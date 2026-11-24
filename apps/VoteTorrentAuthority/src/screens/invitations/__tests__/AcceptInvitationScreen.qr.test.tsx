@@ -378,6 +378,62 @@ describe('Choose image', () => {
   });
 });
 
+describe('Choose image inside the scanner', () => {
+  const inScanner = (id: string) =>
+    (hostById('accept-invitation-scanner') as Inst | undefined)?.findAll((n) => typeof n.type === 'string' && n.props.testID === id).length === 1;
+
+  it('SI1: the invitation scanner has its own Choose image; a picked invitation fills the field as a scan does', async () => {
+    const { text, invitePrivate } = invitation('k');
+    mockPick.mockResolvedValueOnce({ kind: 'decoded', values: [JOIN_CODE, text] });
+    const capture = captureConsole();
+    try {
+      await mount();
+      await press('accept-invitation-scan');
+      expect(inScanner('accept-invitation-scan-image')).toBe(true);
+      expect(elWith('accept-invitation-scan-image', 'onPress').props.accessibilityLabel).toBe(en.scanImageLabel);
+      await press('accept-invitation-scan-image');
+      expect(mockPick).toHaveBeenCalledTimes(1);
+      expect(cams()).toHaveLength(0);
+      expect(summaryShown()).toBe(true);
+      expect(statusText()).toBe(en.inviteScanScanned);
+      expect(mockReplace).not.toHaveBeenCalled();
+      await press('accept-invitation-continue');
+      const [route, params] = mockReplace.mock.calls[0];
+      expect(route).toBe('KeyholderInvitation');
+      expect(takeInviteShare(params.shareToken) === text).toBe(true);
+      expectNoSecretInConsole(capture, [text, invitePrivate]);
+    } finally {
+      capture.restore();
+    }
+  });
+
+  it.each([
+    ['a join code', { kind: 'decoded', values: [JOIN_CODE] }, 'inviteScanIsJoinCode'],
+    ['another QR', { kind: 'decoded', values: ['hello'] }, 'inviteScanNotInvitation'],
+    ['no QR', { kind: 'no-code' }, 'inviteImageNoCode'],
+    ['an unreadable image', { kind: 'unreadable' }, 'inviteImageUnreadable'],
+    ['a cancelled pick', { kind: 'cancelled' }, 'scanImageCancelled'],
+  ])('SI2: %s shows its banner in the scanner, which stays open with the camera running', async (_label, result, key) => {
+    mockPick.mockResolvedValueOnce(result);
+    await mount();
+    await press('accept-invitation-scan');
+    await press('accept-invitation-scan-image');
+    expect(textOf(hostById('accept-invitation-scan-banner') as Inst)).toBe(en[key]);
+    expect(cams()).toHaveLength(1);
+    expect(cams()[0].props.isActive).toBe(true);
+    expect(summaryShown()).toBe(false);
+  });
+
+  it('SI3: not available on this build: the scanner shows its Choose image disabled with the sentence', async () => {
+    mockAvailable.mockReturnValue(false);
+    await mount();
+    await press('accept-invitation-scan');
+    expect(elWith('accept-invitation-scan-image', 'onPress').props.disabled).toBe(true);
+    expect(textOf(hostById('accept-invitation-scan-image-unavailable') as Inst)).toBe(en.inviteImageUnavailable);
+    expect(mockPick).not.toHaveBeenCalled();
+  });
+});
+
 describe('copy', () => {
   it('every new sentence exists in English and Spanish', () => {
     const es = resources.es.translation as Record<string, string>;

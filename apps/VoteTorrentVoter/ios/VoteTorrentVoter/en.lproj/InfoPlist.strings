@@ -3,3 +3,6 @@
 
 /* Purpose shown with the camera permission prompt when the voter opens the QR join-code scanner. */
 "NSCameraUsageDescription" = "VoteTorrent uses the camera only to scan the QR join code from your election authority. It does not take photos or record video.";
+
+/* Purpose shown if iOS asks about photos when the voter chooses a picture of the QR join code. */
+"NSPhotoLibraryUsageDescription" = "VoteTorrent reads only the picture you choose, to find the QR join code in it. It does not keep, change or upload your photos.";

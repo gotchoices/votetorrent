@@ -13,6 +13,11 @@
  * that points to paste. The Networks screen's Scan button opens the `JoinNetworkByScan` route, which
  * is this screen with the scanner open on arrival (`openScannerOnMount`).
  *
+ * Choose image: the scanner has its own Choose image button. When the camera cannot be used (no
+ * camera, access off, refused or failed), the camera notice is followed by the same Choose image
+ * button, because reading a picture needs no camera. Its read goes through the scanner's own check
+ * (`useScanImage`) and fills the field through `onScanAccept`, as a scan does.
+ *
  * UI-SPEC A1: root-stack routes with no params. The code lives only in this screen's state; it is
  * never passed to `navigate`, `setParams` or `setOptions`, and navigation state is not persisted.
  *
@@ -72,7 +77,7 @@ import { mapDeviceSigningError } from "../../utils/deviceSigningError";
 import { errorClassName } from "../../utils/errorClassName";
 import { globalStyles } from "../../theme/styles";
 import type { NavigationProp } from "../../navigation/types";
-import JoinCodeScanner, { type JoinScanCameraState } from "./JoinCodeScanner";
+import JoinCodeScanner, { type JoinScanCameraState, useScanImage } from "./JoinCodeScanner";
 
 /** The translated sentence for each way a join can fail, chosen by the typed reason only. */
 export function joinNetworkFailureKey(reason: NetworkJoinFailureReason | "founder-cannot-join"): string {
@@ -170,6 +175,9 @@ export default function JoinNetworkScreen({ openScannerOnMount = false }: JoinNe
 	const [availability, setAvailability] = useState<ScanAvailability>("ready");
 	const [scanNotice, setScanNotice] = useState<ScanNotice | null>(null);
 	const [scanCount, setScanCount] = useState(0);
+	// The sentence (an i18n key) after a Choose image pick from the camera notice.
+	const [imageNoticeKey, setImageNoticeKey] = useState<string | null>(null);
+	const image = useScanImage("join-code");
 	const scanButtonRef = useRef<HostInstance>(null);
 	const wasScannerOpenRef = useRef(false);
 	const announcedCountRef = useRef(0);
@@ -270,6 +278,7 @@ export default function JoinNetworkScreen({ openScannerOnMount = false }: JoinNe
 	function onChangeText(value: string): void {
 		setText(value);
 		setScanNotice(null);
+		setImageNoticeKey(null);
 		setPhase((p) => (p.kind === "failed" ? { kind: "idle" } : p));
 		retryOnFocusRef.current = null;
 	}
@@ -281,6 +290,7 @@ export default function JoinNetworkScreen({ openScannerOnMount = false }: JoinNe
 				if (!value || !mountedRef.current) return;
 				setText(value);
 				setScanNotice(null);
+				setImageNoticeKey(null);
 				setPhase({ kind: "idle" });
 				retryOnFocusRef.current = null;
 			});
@@ -289,6 +299,7 @@ export default function JoinNetworkScreen({ openScannerOnMount = false }: JoinNe
 	function onScanPress(): void {
 		if (phase.kind === "joining" || availability !== "ready") return;
 		setScanNotice(null);
+		setImageNoticeKey(null);
 		setScannerOpen(true);
 	}
 
@@ -300,6 +311,16 @@ export default function JoinNetworkScreen({ openScannerOnMount = false }: JoinNe
 		setScannerOpen(false);
 		setScanNotice("scanned");
 		setScanCount((count) => count + 1);
+	}
+
+	// Choose image from the camera notice: the same check and the same fill as a scan.
+	async function onChooseImage(): Promise<void> {
+		if (phase.kind === "joining") return;
+		setImageNoticeKey(null);
+		const outcome = await image.pick();
+		if (outcome === null || !mountedRef.current) return;
+		if (outcome.type === "accepted") onScanAccept(outcome.value);
+		else setImageNoticeKey(outcome.key);
 	}
 
 	function onScanClose(): void {
@@ -489,6 +510,29 @@ export default function JoinNetworkScreen({ openScannerOnMount = false }: JoinNe
 								) : null}
 							</View>
 						) : null}
+						{statusKind !== null && statusKind !== "scanned" && image.available ? (
+							<Pressable
+								testID="join-network-scan-status-image"
+								accessibilityRole="button"
+								accessibilityLabel={t("scanImageLabel")}
+								accessibilityState={{ disabled: busy || image.picking, busy: image.picking }}
+								disabled={busy || image.picking}
+								onPress={onChooseImage}
+								style={styles.chooseImage}
+							>
+								{image.picking ? (
+									<ActivityIndicator color={colors.primary} />
+								) : (
+									<FontAwesome6 name="image" size={16} color={colors.primary} />
+								)}
+								<Text style={{ color: colors.primary, fontSize: 16, fontWeight: "400" }}>{t("scanImageButton")}</Text>
+							</Pressable>
+						) : null}
+						{imageNoticeKey !== null ? (
+							<ThemedText testID="join-network-image-notice" accessibilityRole="alert" style={{ color: colors.text }}>
+								{t(imageNoticeKey)}
+							</ThemedText>
+						) : null}
 						{decoded && decoded.ok ? (
 							<View testID="join-network-preview" style={styles.stack}>
 								<ThemedText type="small" style={{ color: colors.textSecondary }}>
@@ -605,5 +649,11 @@ const styles = StyleSheet.create({
 	openSettings: {
 		minHeight: 44,
 		justifyContent: "center",
+	},
+	chooseImage: {
+		minHeight: 44,
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 8,
 	},
 });

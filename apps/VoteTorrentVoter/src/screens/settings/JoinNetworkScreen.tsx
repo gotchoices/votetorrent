@@ -16,6 +16,11 @@
  * ok (R3): the note says "check the network name and fingerprint below", which would be false next
  * to an older, newer or malformed code's field error.
  *
+ * Choose image: the scanner has its own Choose image button. When the camera cannot be used (no
+ * camera, access off, refused or failed), the camera notice is followed by the same Choose image
+ * button, because reading a picture needs no camera. Its read goes through the scanner's own check
+ * (`useScanImage`) and fills the field through `onScanAccept`, as a scan does.
+ *
  * Registered on the Settings, Registration and Timeline stacks (route closure, D-14); it only ever
  * goes back, so it adds no onward routes. The Scan tab's root (`ScanScreen`) renders this same
  * screen with `JoinNetworkScreenProps`: the scanner opens as the tab comes into view, closes when
@@ -41,7 +46,7 @@ import {useVoterApp} from '../../providers/VoterAppProvider';
 import {globalStyles} from '../../theme/styles';
 import {errorClassName} from '../../utils/errorClassName';
 import {useKeyboardInset} from '../../hooks/useKeyboardInset';
-import JoinCodeScanner from './JoinCodeScanner';
+import JoinCodeScanner, {useScanImage} from './JoinCodeScanner';
 import type {JoinScanCameraState} from './JoinCodeScanner';
 
 /** The translated copy for each way a join can fail (keys in the `join` namespace). */
@@ -124,6 +129,16 @@ export default function JoinNetworkScreen({scanRequest = 0, active = true, onDon
 	const [availability, setAvailability] = useState<ScanAvailability>('ready');
 	const [scanNotice, setScanNotice] = useState<ScanNotice | null>(null);
 	const [scanCount, setScanCount] = useState(0);
+	// The sentence (a `join` key) after a Choose image pick from the camera notice.
+	const [imageNoticeKey, setImageNoticeKey] = useState<string | null>(null);
+	const image = useScanImage();
+	const mountedRef = useRef(true);
+	useEffect(() => {
+		mountedRef.current = true;
+		return () => {
+			mountedRef.current = false;
+		};
+	}, []);
 	const scanButtonRef = useRef<React.ComponentRef<typeof Pressable>>(null);
 	const wasScannerOpenRef = useRef(false);
 	const announcedCountRef = useRef(0);
@@ -182,12 +197,14 @@ export default function JoinNetworkScreen({scanRequest = 0, active = true, onDon
 			setText(pasted);
 			setPhase({kind: 'idle'});
 			setScanNotice(null);
+			setImageNoticeKey(null);
 		}
 	}
 
 	function onScanPress() {
 		if (busy || availability !== 'ready') return;
 		setScanNotice(null);
+		setImageNoticeKey(null);
 		setScannerOpen(true);
 	}
 
@@ -198,6 +215,16 @@ export default function JoinNetworkScreen({scanRequest = 0, active = true, onDon
 		setScannerOpen(false);
 		setScanNotice('scanned');
 		setScanCount(count => count + 1);
+	}
+
+	// Choose image from the camera notice: the same check and the same fill as a scan.
+	async function onChooseImage() {
+		if (busy) return;
+		setImageNoticeKey(null);
+		const outcome = await image.pick();
+		if (outcome === null || !mountedRef.current) return;
+		if (outcome.type === 'accepted') onScanAccept(outcome.value);
+		else setImageNoticeKey(outcome.key);
 	}
 
 	function onScanClose() {
@@ -320,6 +347,7 @@ export default function JoinNetworkScreen({scanRequest = 0, active = true, onDon
 					onChangeText={value => {
 						setText(value);
 						setScanNotice(null);
+						setImageNoticeKey(null);
 						if (phase.kind === 'failed') setPhase({kind: 'idle'});
 					}}
 					placeholder={t('codePlaceholder')}
@@ -378,6 +406,29 @@ export default function JoinNetworkScreen({scanRequest = 0, active = true, onDon
 							</Pressable>
 						) : null}
 					</View>
+				) : null}
+
+				{statusKind !== null && statusKind !== 'scanned' && image.available ? (
+					<Pressable
+						testID="join-network-scan-status-image"
+						accessibilityRole="button"
+						accessibilityLabel={t('scanImageLabel')}
+						accessibilityState={{disabled: busy || image.picking, busy: image.picking}}
+						disabled={busy || image.picking}
+						onPress={onChooseImage}
+						style={styles.chooseImage}>
+						{image.picking ? (
+							<ActivityIndicator color={colors.link} />
+						) : (
+							<FontAwesome6 name="image" size={16} color={colors.link} />
+						)}
+						<Text style={{color: colors.link, fontSize: typeScale.body.fontSize}}>{t('scanImageButton')}</Text>
+					</Pressable>
+				) : null}
+				{imageNoticeKey !== null ? (
+					<Text testID="join-network-image-notice" accessibilityRole="alert" style={[bodyStyle, {fontFamily: fonts.regular.fontFamily}]}>
+						{t(imageNoticeKey)}
+					</Text>
 				) : null}
 
 				{decoded?.ok ? (
@@ -519,6 +570,12 @@ const styles = StyleSheet.create({
 	openSettings: {
 		minHeight: 44,
 		justifyContent: 'center',
+	},
+	chooseImage: {
+		minHeight: 44,
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: 8,
 	},
 	preview: {
 		marginTop: 16,
