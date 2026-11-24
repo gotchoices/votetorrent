@@ -403,7 +403,8 @@ test('5 MEMBER_SAPP_CONFIG: org.votetorrent 1.0.0, interactive, frozen, the unwr
 	assert.equal(MEMBER_SAPP_CONFIG.schema, expected);
 	assert.ok(MEMBER_SAPP_CONFIG.schema.length > 1000);
 	assert.equal(/^declare\s+schema/.test(MEMBER_SAPP_CONFIG.schema), false);
-	const factory = readFileSync(workspacePath('apps/VoteTorrentAuthority', 'src', 'engines', 'rn-db-factory.ts'), 'utf8');
+	// The strand factory moved into the shared workflows package (the Authority's rn-db-factory.ts is a binding now).
+	const factory = readFileSync(workspacePath('packages/workflows', 'src', 'common', 'strand-db-factory.ts'), 'utf8');
 	assert.ok(factory.includes("id: 'org.votetorrent'"));
 	assert.ok(factory.includes("version: '1.0.0'"));
 });
