@@ -7,6 +7,7 @@
 import { EXIT, type ExitCode } from './exit-codes.js'
 import { runRoleCommand } from '../ctl/commands.js'
 import { isRole } from '../ctl/protocol.js'
+import { LOCAL_COMMANDS } from '../daemon/start-command.js'
 
 export interface CliIo {
   out(text: string): void
@@ -46,7 +47,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCo
     io.out(USAGE)
     return EXIT.PASS
   }
-  if (isRole(first)) return runRoleCommand(argv, io, { env: process.env })
+  if (isRole(first)) return runRoleCommand(argv, io, { env: process.env, local: LOCAL_COMMANDS })
   io.err('vt: unknown command (see vt --help)\n')
   return EXIT.USAGE
 }
