@@ -31,6 +31,7 @@ import { bytesToHex } from '@noble/curves/utils.js';
 import { setKeyholderKeyVaultForTests } from '../../../engines/keyholder-vault';
 import { InviteShareError } from '../../invitations/invite-share';
 import { stashInviteShare } from '../../invitations/invite-share-handoff';
+import { readQrPngBase64 } from '../../__fixtures__/read-qr-png';
 
 jest.mock('@votetorrent/attestation-native', () => ({ setSecureScreen: jest.fn(async () => true) }));
 
@@ -718,6 +719,47 @@ describe('KeyholderInvitationScreen - send mode (UAT 62 L, validity presets, inv
       pressBack();
       expect(mockGoBack).toHaveBeenCalledTimes(1);
       expect(alertSpy).not.toHaveBeenCalled();
+    });
+
+    const sharedText = (tr: renderer.ReactTestRenderer): string =>
+      tr.root.findAll((n) => n.props?.testIDPrefix === 'keyholder-invitation-share' && typeof n.props?.shareText === 'string')[0].props.shareText;
+    const qrBase64 = (tr: renderer.ReactTestRenderer): string => {
+      const img = tr.root.findAll((n) => n.props?.testID === 'keyholder-invitation-share-qr-image' && typeof n.props?.source?.uri === 'string')[0];
+      return String(img.props.source.uri).replace('data:image/png;base64,', '');
+    };
+
+    it('QR1: after Send, Show QR code draws exactly the text Share and Copy send', async () => {
+      const tr = await render();
+      expect(tr.root.findAll((n) => n.props?.testID === 'keyholder-invitation-share-qr-open')).toHaveLength(0);
+      await sendKh(tr);
+      await tap(tr, 'keyholder-invitation-share-qr-open');
+      const text = sharedText(tr);
+      expect(readQrPngBase64(qrBase64(tr)) === text).toBe(true);
+      expect(JSON.parse(text).name).toBe('Kay Holder');
+      expect(JSON.parse(text).type).toBe('k');
+    });
+
+    it('QR2: a non-ASCII invitee name goes out as ASCII and the QR still reads back exactly', async () => {
+      mockRouteParams.keyholder = invitee('Zoë Ñandú');
+      const tr = await render();
+      await sendKh(tr);
+      await tap(tr, 'keyholder-invitation-share-qr-open');
+      const text = sharedText(tr);
+      expect(/^[\x20-\x7e]+$/.test(text)).toBe(true);
+      expect(JSON.parse(text).name).toBe('Zoë Ñandú');
+      expect(readQrPngBase64(qrBase64(tr)) === text).toBe(true);
+    });
+
+    it('QR3: showing the QR keeps the guard; a QR image share the sheet reports as sent releases it', async () => {
+      const tr = await render();
+      await sendKh(tr);
+      await tap(tr, 'keyholder-invitation-share-qr-open');
+      expect(lastPrevent()).toBe(true);
+      await tap(tr, 'keyholder-invitation-share-qr-share');
+      pressBack();
+      expect(mockGoBack).toHaveBeenCalledTimes(1);
+      expect(alertSpy).not.toHaveBeenCalled();
+      expect(navigationLeaks(JSON.parse(sharedText(tr)).invitePrivate)).toEqual([]);
     });
   });
 });

@@ -8,7 +8,7 @@
  */
 
 import { bytesToBase64, encodeGray8Png } from './gray-png';
-import { buildQrMatrix, type QrMatrix } from './qr-matrix';
+import { buildQrMatrix, type QrErrorCorrectionLevel, type QrMatrix } from './qr-matrix';
 import { QR_QUIET_MODULES, qrLayout } from './qr-layout';
 
 export interface QrPanelPng {
@@ -54,8 +54,8 @@ export function drawQrModules(
 	}
 }
 
-export function buildQrPanelPng(text: string, targetPx: number): QrPanelPng {
-	const matrix = buildQrMatrix(text);
+export function buildQrPanelPng(text: string, targetPx: number, level: QrErrorCorrectionLevel = 'L'): QrPanelPng {
+	const matrix = buildQrMatrix(text, level);
 	const layout = qrLayout(matrix.n, targetPx);
 	const canvas = new Uint8Array(layout.panelPx * layout.panelPx).fill(0xff);
 	const quiet = QR_QUIET_MODULES * layout.m;

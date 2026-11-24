@@ -32,7 +32,15 @@ import {
 	keyholderInviteExpiration,
 	keyholderInviteExpiryLabel,
 } from "./keyholder-invite-expiry";
-import { inviteAcceptErrorKey, inviteLoadErrorKey, isShareExpired, parseInviteExpirationMs, parseInviteShare, resolveInviteFromShare } from "../invitations/invite-share";
+import {
+	inviteAcceptErrorKey,
+	inviteLoadErrorKey,
+	isShareExpired,
+	parseInviteExpirationMs,
+	parseInviteShare,
+	resolveInviteFromShare,
+	serializeInviteShare,
+} from "../invitations/invite-share";
 import { takeInviteShare } from "../invitations/invite-share-handoff";
 import { InviteSharePasteField } from "../invitations/InviteSharePasteField";
 import { globalStyles } from "../../theme/styles";
@@ -178,7 +186,8 @@ export function KeyholderInvitationScreen() {
 			// Include the invitePrivate so the invitee can paste and accept (D-06).
 			// WR-04: no inviteSignature is shared — the invitee reconstructs from
 			// invitePrivate; no placeholder signature is propagated.
-			const sharePayload = JSON.stringify({
+			// The same ASCII-only text goes out by Share, Copy and the QR code (serializeInviteShare).
+			const sharePayload = serializeInviteShare({
 				invitePrivate,
 				inviteKey,
 				expiration,
@@ -362,7 +371,13 @@ export function KeyholderInvitationScreen() {
 
 						{/* D-05: render share text + Copy button after a successful send */}
 						{shareText ? (
-							<InviteShareBlock label={t("invitationKey")} shareText={shareText} testIDPrefix="keyholder-invitation-share" onShared={markInviteShared} />
+							<InviteShareBlock
+								label={t("invitationKey")}
+								shareText={shareText}
+								testIDPrefix="keyholder-invitation-share"
+								onShared={markInviteShared}
+								showQr
+							/>
 						) : null}
 
 						{/* Pattern B error display */}

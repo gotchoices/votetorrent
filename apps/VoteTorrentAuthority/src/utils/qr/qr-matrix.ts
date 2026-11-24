@@ -1,6 +1,7 @@
 /**
  * qr-matrix.ts - Phase 64 Plan 10 (D-03, notes 4.8). The QR module matrix for the join code, over
- * qrcode-generator 2.0.4 at error correction L in Byte mode (auto version).
+ * qrcode-generator 2.0.4 in Byte mode (auto version). Error correction is L unless the caller asks
+ * for another level: the keyholder invitation QR uses M (see utils/qr/invite-qr.ts).
  *
  * The join code is a bearer credential (D-06): nothing here logs, reads a caught error's text or
  * keeps the input reachable. The result is a snapshot of the modules only. Error messages are fixed
@@ -14,6 +15,16 @@ import qrcode from 'qrcode-generator';
 
 /** Byte-mode capacity of version 40 at error correction L. */
 export const QR_MAX_TEXT_CHARS = 2953;
+
+export type QrErrorCorrectionLevel = 'L' | 'M' | 'Q' | 'H';
+
+/** Byte-mode capacity of version 40 at each error correction level (ISO/IEC 18004 table 7). */
+export const QR_MAX_TEXT_CHARS_BY_LEVEL: Readonly<Record<QrErrorCorrectionLevel, number>> = {
+	L: QR_MAX_TEXT_CHARS,
+	M: 2331,
+	Q: 1663,
+	H: 1273,
+};
 
 export type QrInputErrorCode = 'not-string' | 'empty' | 'non-ascii';
 
@@ -35,7 +46,7 @@ export class QrInputError extends Error {
 export class QrOverflowError extends Error {
 	readonly code: 'overflow';
 	constructor() {
-		super('qr: input exceeds the QR capacity at error correction L');
+		super('qr: input exceeds the QR capacity at its error correction level');
 		this.name = 'QrOverflowError';
 		this.code = 'overflow';
 	}
@@ -46,10 +57,12 @@ export interface QrMatrix {
 	isDark(r: number, c: number): boolean;
 }
 
-export function buildQrMatrix(text: string): QrMatrix {
+export function buildQrMatrix(text: string, level: QrErrorCorrectionLevel = 'L'): QrMatrix {
 	if (typeof text !== 'string') throw new QrInputError('not-string');
 	if (text.length === 0) throw new QrInputError('empty');
-	if (text.length > QR_MAX_TEXT_CHARS) throw new QrOverflowError();
+	const capacity = QR_MAX_TEXT_CHARS_BY_LEVEL[level];
+	if (capacity === undefined) throw new QrOverflowError();
+	if (text.length > capacity) throw new QrOverflowError();
 	for (let i = 0; i < text.length; i++) {
 		const ch = text.charCodeAt(i);
 		if (ch < 0x20 || ch > 0x7e) throw new QrInputError('non-ascii');
@@ -58,7 +71,7 @@ export function buildQrMatrix(text: string): QrMatrix {
 	let n = 0;
 	let modules: Uint8Array;
 	try {
-		const qr = qrcode(0, 'L');
+		const qr = qrcode(0, level);
 		qr.addData(text, 'Byte');
 		qr.make();
 		n = qr.getModuleCount();
