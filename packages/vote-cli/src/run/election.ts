@@ -131,7 +131,7 @@ export async function runElection (opts: RunOptions, deps: RunDeps): Promise<Exi
     ...(opts.importFile !== undefined ? { importFile: opts.importFile } : {}),
     ...(deps.launcherOverrides ?? {})
   }
-  const launcher = (deps.launcherFactory ?? createDaemonLauncher)(launcherOptions)
+  const launcher = deps.launcherFactory !== undefined ? deps.launcherFactory(launcherOptions) : createDaemonLauncher(launcherOptions)
   const startedAt = new Date(nowMs()).toISOString()
   out.key('VT-START', `at=${startedAt} party=${opts.party} peers=${requested} maxPeers=${max}`)
   out.runMark('p1-start')
