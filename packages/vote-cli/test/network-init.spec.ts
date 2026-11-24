@@ -56,7 +56,7 @@ describe('network init: CLI-owned founding builders', () => {
   it("buildNetworkInit output has the engine fixture's NetworkInit shape, without media fields", () => {
     const built = buildNetworkInit({ name: 'T24 Net', relays: [RELAY] })
     expect(sameShape(shapeOf(built), golden.networkInit)).to.equal(true)
-    expect('imageUrl' in golden.networkInit).to.equal(false)
+    expect(Object.keys(golden.networkInit)).to.not.include('imageUrl')
     expect('imageUrl' in built).to.equal(false)
     expect('imageCid' in built).to.equal(false)
     expect('imageUrl' in built.primaryAuthority).to.equal(false)
@@ -70,7 +70,7 @@ describe('network init: CLI-owned founding builders', () => {
   it("buildAuthorityUser output has the engine fixture's User shape, without imageRef", () => {
     const built = buildAuthorityUser({ id: ID, name: 'Officer', publicKeyHex: KEY, nowMs: 1_700_000_000_000 })
     expect(sameShape(shapeOf(built), golden.user)).to.equal(true)
-    expect('imageRef' in golden.user).to.equal(false)
+    expect(Object.keys(golden.user)).to.not.include('imageRef')
     expect('imageRef' in built).to.equal(false)
     expect(built).to.deep.equal({ id: ID, name: 'Officer', activeKeys: [{ key: KEY, type: 'M', expiration: 1_700_000_000_000 + AUTHORITY_KEY_LIFETIME_MS }] })
   })
