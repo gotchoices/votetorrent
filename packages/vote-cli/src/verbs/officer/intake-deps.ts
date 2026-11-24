@@ -15,13 +15,14 @@
 
 import { AssociationEngine, IntakeEngine, RegistrationEngine, SignatureTasksEngine } from '@votetorrent/vote-engine/rn'
 import type { EngineContext, StagingDecisionSigner, StagingOpener } from '@votetorrent/vote-engine/rn'
+import type { VerbHandler } from '../../ctl/protocol.js'
 import { canonicalizeVerificationChecklist, type RegistrationVerificationChecklistItem } from '@votetorrent/vote-core'
 import type { NetworkReference } from '@votetorrent/vote-core'
 import { createPeerStagingTransports, createStrandPort, type PeerStagingTransports, type StrandSqlDatabase } from '@votetorrent/workflows/authority'
 import type { SignCallback } from '@votetorrent/workflows/platform'
 import { assertTokenSigningKeyHeld, createTokenSigner, type ApprovalScopedVault } from '../../approval/signer.js'
 import type { ApprovalContext } from '../../approval/token.js'
-import { withCallApproval } from '../../approval/call-approval.js'
+import { CALL_APPROVAL_ARG_KEYS, withCallApproval } from '../../approval/call-approval.js'
 import { PRODUCTION_PARTY_ID } from '../../attestation/marker.js'
 import {
   buildOfficerAssociationVerifier,
@@ -119,10 +120,13 @@ export class IntakeVerbRefusal extends Error {
 /** The colocation label 67-21 adds; the daemon strips it, a direct caller may still pass it. */
 const PEER_KEY = 'peer'
 
+const APPROVAL_KEYS: ReadonlySet<string> = new Set<string>(CALL_APPROVAL_ARG_KEYS)
+
 /**
  * Allow-list the verb's arguments: every own key must be in `allowed` (or be `peer`), else `bad-arg`;
  * a value that is neither a string nor a boolean is `bad-arg` too. Returns a shallow copy without
- * `peer`. Nothing here echoes a key or a value.
+ * `peer` and without the approval keys (those stay on the ORIGINAL args object, which is what
+ * `withCallApproval` reads and deletes the forwarded token from). Nothing here echoes a key or a value.
  */
 export function pickIntakeArgs(args: Record<string, unknown>, allowed: readonly string[]): Record<string, string | boolean> {
   const set = new Set<string>(allowed)
@@ -132,9 +136,16 @@ export function pickIntakeArgs(args: Record<string, unknown>, allowed: readonly 
     if (!set.has(key)) throw new IntakeVerbRefusal('bad-arg')
     const v = args[key]
     if (typeof v !== 'string' && typeof v !== 'boolean') throw new IntakeVerbRefusal('bad-arg')
+    if (APPROVAL_KEYS.has(key)) continue
     out[key] = v
   }
   return out
+}
+
+/** `select count(*) as n ...` coerced with Number (Quereus integer columns read back as bigint or number). */
+export async function countRows(db: EngineContext['db'], sql: string): Promise<number> {
+  const row = await db.prepare(sql).get()
+  return Number((row as { n?: unknown } | undefined)?.n ?? 0)
 }
 
 /** This plan's own copy of the rule (coordinator decision): empty is `party-missing`, `votetorrent` (trimmed, any case) is `production-party`. */
@@ -355,6 +366,16 @@ export function intakeDepsFor(ctx: OfficerVerbContext, args: Record<string, unkn
       return { userId: user.id, signerKey: key }
     }
   }
+}
+
+/** A verb body over its deps: the unit specs call these directly with fakes. */
+export type IntakeVerbRun = (deps: IntakeDeps, args: Record<string, unknown>) => Promise<Record<string, unknown>>
+
+export type IntakeDepsFor = (ctx: OfficerVerbContext, args: Record<string, unknown>) => IntakeDeps
+
+/** The ctl handler over a verb body; `depsFor` is the test seam (defaults to `intakeDepsFor`). */
+export function bindIntakeVerb(run: IntakeVerbRun, depsFor: IntakeDepsFor = intakeDepsFor): VerbHandler<OfficerVerbContext> {
+  return async (ctx, args) => run(depsFor(ctx, args), args)
 }
 
 // ---------------------------------------------------------------------------------------------
