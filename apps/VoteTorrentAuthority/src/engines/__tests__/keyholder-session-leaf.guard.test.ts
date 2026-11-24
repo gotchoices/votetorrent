@@ -7,12 +7,18 @@
  *
  * Jest cannot catch it by running the modules (moduleNameMapper and mocks supply react-native), so this walks
  * the static import graph. `import type` / `export type` are erased at compile time and are skipped.
+ *
+ * Phase 67 plan 05: the session and identity modules now live in `@votetorrent/workflows` and the app paths
+ * are thin bindings, so the no-value-import check reads the SHARED session file, each binding's value
+ * specifiers are pinned exactly, and the purity of the shared files is also guarded inside that package (67-04).
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 
 const SRC = resolve(__dirname, '..', '..');
+/** The shared package's authority sources: `apps/VoteTorrentAuthority/src` -> repo root -> `packages/workflows/src/authority`. */
+const WORKFLOWS_AUTHORITY = resolve(SRC, '..', '..', '..', 'packages/workflows/src/authority');
 
 const ROOTS = [
 	'screens/keyholder/keyholder-accept.ts',
@@ -82,8 +88,26 @@ describe('host-loaded keyholder modules stay Node-loadable', () => {
 		expect(forbiddenReach(ROOTS)).toEqual([]);
 	});
 
-	it('keyholder-session.ts has no value import at all', () => {
-		expect(valueSpecifiers(readFileSync(join(SRC, 'engines/keyholder-session.ts'), 'utf8'))).toEqual([]);
+	it('shared keyholder-session.ts has no value import at all', () => {
+		expect(valueSpecifiers(readFileSync(join(WORKFLOWS_AUTHORITY, 'keyholder-session.ts'), 'utf8'))).toEqual([]);
+	});
+
+	it('app keyholder-session.ts binding value-imports only @votetorrent/workflows/authority', () => {
+		expect(valueSpecifiers(readFileSync(join(SRC, 'engines/keyholder-session.ts'), 'utf8'))).toEqual(['@votetorrent/workflows/authority']);
+	});
+
+	it('app keyholder-identity.ts binding value-imports only AsyncStorage and the shared package', () => {
+		expect([...new Set(valueSpecifiers(readFileSync(join(SRC, 'engines/keyholder-identity.ts'), 'utf8')))].sort()).toEqual([
+			'@react-native-async-storage/async-storage',
+			'@votetorrent/workflows/authority',
+		]);
+	});
+
+	it('self-test: a value import planted into the shared keyholder-session.ts text is caught', () => {
+		const sharedSession = readFileSync(join(WORKFLOWS_AUTHORITY, 'keyholder-session.ts'), 'utf8');
+		expect(valueSpecifiers(sharedSession)).toEqual([]);
+		const plantedShared = "import { putSecret } from './keyholder-seat-vault.js'\n" + sharedSession;
+		expect(valueSpecifiers(plantedShared)).toEqual(['./keyholder-seat-vault.js']);
 	});
 
 	it('self-test: the bcbf1902 import shape is caught, and a type-only import is not', () => {
