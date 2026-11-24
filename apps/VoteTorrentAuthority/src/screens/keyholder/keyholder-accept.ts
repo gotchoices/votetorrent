@@ -33,13 +33,18 @@
  *     An orphan (unknown-outcome accept, or a kill between provisioning and responding) is skipped, and it
  *     is discarded once its slot's answer is known to be some other outcome. A failing read of the held
  *     slot's status propagates (fail closed, zero wraps) rather than guessing.
+ *  7. Bounded reads: with `readTimeoutMs`, every engine read made BEFORE provisioning (the slot
+ *     lookup and the seat reads) rejects with InviteLookupTimeoutError when it does not settle in
+ *     time, so an offline network fails the accept with zero prompts instead of hanging. Nothing
+ *     after provisioning is bounded: `respondToInvite` is a write, and abandoning it could let it land
+ *     after the officer was told it failed; the reconcile re-read decides what happens to the keys.
  */
 
 import type { IInvitationEngine } from '@votetorrent/vote-core';
 import type { IKeyVault } from '@votetorrent/vote-engine/rn';
 import { discardKeyholderIdentity, listKeyholderIdentities, provisionKeyholderIdentity } from '../../engines/keyholder-identity';
 import type { KeyVaultStorage } from '../../engines/key-vault';
-import { InviteShareError, resolveInviteFromShare } from '../invitations/invite-share';
+import { InviteShareError, resolveInviteFromShare, withInviteLookupTimeout } from '../invitations/invite-share';
 
 function keyholderAcceptError(message: string, code: 'self-invite' | 'seat-already-held'): Error {
 	return Object.assign(new Error(message), { name: 'KeyholderAcceptError', code });
@@ -51,6 +56,8 @@ export interface KeyholderAcceptDeps {
 	storage?: KeyVaultStorage;
 	/** The election's current-revision seat facts (the DKG status read). Absent or failing means no proof. */
 	readKeyholderSeatFacts?: (electionId: string) => Promise<SeatFacts | undefined>;
+	/** Bound on each engine read before provisioning (point 7). Absent means unbounded. */
+	readTimeoutMs?: number;
 }
 
 export interface SeatFacts {
@@ -75,9 +82,11 @@ export async function acceptKeyholderInvitation(
 	deps: KeyholderAcceptDeps,
 	shareText: string
 ): Promise<{ userId: string; slotCid: string }> {
+	const bounded = <T>(work: Promise<T>): Promise<T> =>
+		deps.readTimeoutMs === undefined ? work : withInviteLookupTimeout(work, deps.readTimeoutMs);
 	// Step 0: resolve and validate the slot BEFORE any identity is provisioned (zero prompts on failure).
-	const { slotCid, invitePrivate } = await resolveInviteFromShare(deps.invitationEngine, shareText, 'k');
-	const seat = await deps.invitationEngine.getKeyholderSlotSeat(slotCid);
+	const { slotCid, invitePrivate } = await bounded(resolveInviteFromShare(deps.invitationEngine, shareText, 'k'));
+	const seat = await bounded(deps.invitationEngine.getKeyholderSlotSeat(slotCid));
 	if (!seat) throw new InviteShareError('not-found');
 	if (seat.selfInvite) {
 		throw keyholderAcceptError('The officer who sent this keyholder invitation cannot accept it', 'self-invite');
@@ -85,13 +94,13 @@ export async function acceptKeyholderInvitation(
 	let facts: SeatFacts | undefined;
 	let factsRead = false;
 	for (const held of await listKeyholderIdentities(deps.storage)) {
-		const heldSeat = await deps.invitationEngine.getKeyholderSlotSeat(held.inviteSlotCid);
+		const heldSeat = await bounded(deps.invitationEngine.getKeyholderSlotSeat(held.inviteSlotCid));
 		if (heldSeat && heldSeat.electionId === seat.electionId) {
 			// A held identity is a seat only on positive evidence that its accept committed: the slot's
 			// result is an acceptance invoking THIS identity. An identity left behind by an accept whose
 			// outcome was unknown (respond and re-read both failed) or by a kill between provisioning and
 			// responding never became a seat, so it must not lock the keyholder out of the election.
-			const heldStatus = await deps.invitationEngine.getKeyholderInvite(held.inviteSlotCid);
+			const heldStatus = await bounded(deps.invitationEngine.getKeyholderInvite(held.inviteSlotCid));
 			const committed = heldStatus?.result?.isAccepted === true && heldStatus.result.invokedId === held.userId;
 			if (!committed) {
 				// Discard only when the slot's answer is known and is not this identity; an unanswered slot

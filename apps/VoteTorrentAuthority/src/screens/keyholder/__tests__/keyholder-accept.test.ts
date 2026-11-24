@@ -152,6 +152,30 @@ describe('acceptKeyholderInvitation (D-21/D-26, real schema)', () => {
 			};
 		};
 
+		it('bounded reads: a hung slot lookup or seat read fails with invite-lookup-timeout, 0 wraps and no answer', async () => {
+			const hang = () => new Promise<never>(() => undefined);
+			for (const which of ['resolveInviteSlot', 'getKeyholderSlotSeat'] as const) {
+				const { vault, storage, wrapper } = makeVaultHarness();
+				const { engine, respondToInvite } = stubEngine({ 'new-slot': { electionId: 'e1', selfInvite: false } });
+				(engine[which] as jest.Mock).mockImplementation(hang);
+				await expect(
+					acceptKeyholderInvitation({ invitationEngine: engine as never, vault, storage, readTimeoutMs: 20 }, makeShare('Zed').text)
+				).rejects.toMatchObject({ code: 'invite-lookup-timeout' });
+				expect(wrapper.authWraps).toBe(0);
+				expect(await listKeyholderIdentities(storage)).toHaveLength(0);
+				expect(respondToInvite).not.toHaveBeenCalled();
+			}
+		});
+
+		it('bounded reads never bound the write: a respondToInvite slower than readTimeoutMs still completes', async () => {
+			const { vault, storage } = makeVaultHarness();
+			const { engine, respondToInvite } = stubEngine({ 'new-slot': { electionId: 'e1', selfInvite: false } });
+			respondToInvite.mockImplementation(() => new Promise((r) => setTimeout(() => r(undefined), 60)));
+			const result = await acceptKeyholderInvitation({ invitationEngine: engine as never, vault, storage, readTimeoutMs: 20 }, makeShare('Zed').text);
+			expect(result.slotCid).toBe('new-slot');
+			expect(respondToInvite).toHaveBeenCalledTimes(1);
+		});
+
 		it('refuses self-invite before provisioning', async () => {
 			const { vault, storage, wrapper } = makeVaultHarness();
 			const { engine, respondToInvite } = stubEngine({ 'new-slot': { electionId: 'e1', selfInvite: true } });
