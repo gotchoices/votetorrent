@@ -195,6 +195,13 @@ describe('isBootstrapAddr', () => {
 
 // ---------------------------------------------------------------------------
 // Cross-app anti-drift gates (D-14). Both gates run ONLY in this suite.
+//
+// The validator moved to `packages/workflows/src/common/bootstrap-config.ts`
+// (phase 67 plan 08); both app paths are now byte-identical re-export-only
+// bindings over `@votetorrent/workflows`. The parity gate below keeps guarding
+// that the two bindings stay identical AND that they stay pure bindings (no
+// validator logic may grow back in either app), and the sentinel gate scans
+// the shared file, which is where the real code now lives.
 // ---------------------------------------------------------------------------
 
 const AUTHORITY_CONFIG_PATH = path.resolve(__dirname, '../bootstrap-config.ts');
@@ -202,6 +209,27 @@ const VOTER_CONFIG_PATH = path.resolve(
   __dirname,
   '../../../../../apps/VoteTorrentVoter/src/config/bootstrap-config.ts',
 );
+const SHARED_CONFIG_PATH = path.resolve(
+  __dirname,
+  '../../../../../packages/workflows/src/common/bootstrap-config.ts',
+);
+
+// Comment lines are stripped from every scanned file. The scanner (this test
+// file) and the scanned files are different files, so these checks cannot
+// self-trip — but strip comments anyway and say why: `project_self_tripping_checker_headers`
+// (a checker whose own text carries the pattern it greps for is permanently
+// green) recurred three times in Phase 53, so this suite treats
+// comment-stripping as the default hygiene rather than an exception reserved
+// for self-scanning checkers. Shared by both describes below.
+function stripComments(contents: string): string {
+  return contents
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim();
+      return !trimmed.startsWith('//') && !trimmed.startsWith('*') && !trimmed.startsWith('/**');
+    })
+    .join('\n');
+}
 
 function normalizeNewlines(contents: string): string {
   return contents.replace(/\r\n/g, '\n');
@@ -233,32 +261,28 @@ describe('sibling parity (D-14 anti-drift)', () => {
 
     expect(authoritySource).toBe(voterSource);
   });
+
+  it('both app paths are re-export-only bindings of @votetorrent/workflows', () => {
+    for (const configPath of [AUTHORITY_CONFIG_PATH, VOTER_CONFIG_PATH]) {
+      const code = stripComments(fs.readFileSync(configPath, 'utf8'));
+      expect(code).toContain("from '@votetorrent/workflows'");
+      for (const logic of [/\bfunction\b/, /\bconst\b/, /\blet\b/, /\bclass\b/, /=>/]) {
+        expect(code).not.toMatch(logic);
+      }
+    }
+  });
 });
 
 describe('sentinel absence (D-14)', () => {
-  // Comment lines are stripped from BOTH copies before scanning. The scanner
-  // (this test file) and the scanned files (the two bootstrap-config.ts
-  // copies) are different files, so this specific check cannot self-trip —
-  // but strip comments anyway and say why: `project_self_tripping_checker_headers`
-  // (a checker whose own text carries the pattern it greps for is
-  // permanently green) recurred three times in Phase 53, so this suite
-  // treats comment-stripping as the default hygiene rather than an
-  // exception reserved for self-scanning checkers.
-  function stripComments(contents: string): string {
-    return contents
-      .split('\n')
-      .filter((line) => {
-        const trimmed = line.trim();
-        return !trimmed.startsWith('//') && !trimmed.startsWith('*') && !trimmed.startsWith('/**');
-      })
-      .join('\n');
-  }
-
-  it('neither copy contains the old CONTROL_ADDR sentinel, in code or comments', () => {
+  it('neither binding nor the shared validator contains the old CONTROL_ADDR sentinel, in code or comments', () => {
     const authoritySource = fs.readFileSync(AUTHORITY_CONFIG_PATH, 'utf8');
     const voterSource = fs.readFileSync(VOTER_CONFIG_PATH, 'utf8');
+    const sharedSource = fs.readFileSync(SHARED_CONFIG_PATH, 'utf8');
 
     expect(stripComments(authoritySource)).not.toContain(OLD_SENTINEL);
     expect(stripComments(voterSource)).not.toContain(OLD_SENTINEL);
+    expect(stripComments(sharedSource)).not.toContain(OLD_SENTINEL);
+    // the gate is not vacuous: the shared file is the one that carries the validator
+    expect(sharedSource).toContain('export function readBootstrapConfig');
   });
 });
