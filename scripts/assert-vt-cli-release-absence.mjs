@@ -188,6 +188,63 @@ export function classifySources (sources, appDir) {
 }
 
 /**
+ * Every source listed in a sourcemap given as BYTES. Metro 0.87 writes an INDEX map (`sections`, one
+ * per module, each with its own one-element `sources`), and an unminified release bundle's map carries
+ * `sourcesContent` for every module and can exceed Node's maximum string length, so the map is never
+ * decoded whole and no single array is trusted: every `"sources"` key is found (inside JSON string
+ * content a quote is escaped, so `"sources"` followed by `:` is always a key), the array after it is
+ * scanned to its matching `]` with string state tracked, and only those slices are parsed. The union
+ * is returned in file order. A flat map yields its one array.
+ */
+export function sourcemapSources (buf) {
+  const key = Buffer.from('"sources"')
+  const out = []
+  let arrays = 0
+  let keyAt = buf.indexOf(key)
+  while (keyAt !== -1) {
+    let i = keyAt + key.length
+    while (i < buf.length && (buf[i] === 0x20 || buf[i] === 0x0a || buf[i] === 0x09)) i += 1
+    if (buf[i] !== 0x3a) {
+      keyAt = buf.indexOf(key, keyAt + key.length)
+      continue
+    }
+    i += 1
+    while (i < buf.length && (buf[i] === 0x20 || buf[i] === 0x0a || buf[i] === 0x09)) i += 1
+    if (buf[i] !== 0x5b) throw new Error('sourcemap "sources" is not an array')
+    let inString = false
+    let escaped = false
+    let depth = 0
+    let end = -1
+    for (let j = i; j < buf.length; j += 1) {
+      const c = buf[j]
+      if (inString) {
+        if (escaped) escaped = false
+        else if (c === 0x5c) escaped = true
+        else if (c === 0x22) inString = false
+        continue
+      }
+      if (c === 0x22) inString = true
+      else if (c === 0x5b) depth += 1
+      else if (c === 0x5d) {
+        depth -= 1
+        if (depth === 0) {
+          end = j
+          break
+        }
+      }
+    }
+    if (end === -1) throw new Error('sourcemap "sources" array is unterminated')
+    const arr = JSON.parse(buf.subarray(i, end + 1).toString('utf8'))
+    if (!Array.isArray(arr)) throw new Error('sourcemap "sources" did not parse to an array')
+    out.push(...arr)
+    arrays += 1
+    keyAt = buf.indexOf(key, end + 1)
+  }
+  if (arrays === 0) throw new Error('sourcemap has no "sources" key')
+  return out
+}
+
+/**
  * The positive arm's probe: a CommonJS entry that requires the app's real index.js and the two built
  * vote-cli modules, referencing each sentinel export in an object-literal property position, and a
  * CommonJS Metro config that wraps the app's real config, adds the probe's own directory to watchFolders
@@ -307,6 +364,32 @@ function runSelftest () {
     probe.configText.includes('watchFolders') &&
     probe.configText.includes('polyfills/empty.js')
   check('S8', s8, 'probe entry must carry the nonce and both plant paths, no sentinel; config must carry watchFolders and the empty shim')
+
+  let s9 = false
+  let s9Detail = ''
+  try {
+    const syntheticMap = Buffer.from(
+      JSON.stringify({ version: 3, sources: ['a]b.js', 'c\\"d.js', '../../packages/vote-cli/dist/x.js'], sourcesContent: ['"sources":[1]', 'x'], names: [], mappings: '' })
+    )
+    const got = sourcemapSources(syntheticMap)
+    const indexMap = Buffer.from(
+      JSON.stringify({
+        version: 3,
+        sections: [
+          { offset: { line: 0, column: 0 }, map: { version: 3, sources: ['App.tsx'], sourcesContent: ['const k = "sources": 1'], names: [], mappings: '' } },
+          { offset: { line: 9, column: 0 }, map: { version: 3, sources: ['../../packages/workflows/dist/index.js'], names: [], mappings: '' } }
+        ]
+      })
+    )
+    const gotIndex = sourcemapSources(indexMap)
+    s9 =
+      got.length === 3 && got[0] === 'a]b.js' && got[1] === 'c\\"d.js' && got[2] === '../../packages/vote-cli/dist/x.js' &&
+      gotIndex.length === 2 && gotIndex[0] === 'App.tsx' && gotIndex[1] === '../../packages/workflows/dist/index.js'
+    s9Detail = JSON.stringify({ flat: got, index: gotIndex })
+  } catch (err) {
+    s9Detail = err instanceof Error ? err.message : String(err)
+  }
+  check('S9', s9, `sourcemap byte scan must return the 3 synthetic sources: ${s9Detail}`)
 
   for (const n of notes) process.stdout.write(`NOTE ${n}\n`)
   const passed = checks.filter((c) => c.ok).length
@@ -446,7 +529,9 @@ function runArm (appKey, arm, scratch, keep) {
     wallMs,
     bundleBytes: 0,
     bundleSha256: null,
+    mapBytes: 0,
     mapParsed: false,
+    mapError: null,
     mapSources: 0,
     appEntry: false,
     workflowsDist: 0,
@@ -469,18 +554,20 @@ function runArm (appKey, arm, scratch, keep) {
     offsets = { s1: offsetsOf(text, SENTINELS[0].value), s2: offsetsOf(text, SENTINELS[1].value) }
     if (nonce) rec.nonceSeen = countOccurrences(text, nonce)
   }
+  const mapStat = statSync(map, { throwIfNoEntry: false })
+  rec.mapBytes = mapStat && mapStat.isFile() ? mapStat.size : 0
   try {
-    const parsed = JSON.parse(readFileSync(map, 'utf8'))
-    if (Array.isArray(parsed.sources)) {
-      rec.mapParsed = true
-      const c = classifySources(parsed.sources, appDir)
-      rec.mapSources = c.total
-      rec.appEntry = c.appEntry
-      rec.workflowsDist = c.workflowsDist
-      rec.cliSources = c.cli
-    }
-  } catch {
+    if (rec.mapBytes === 0) throw new Error('sourcemap file missing or empty')
+    const sources = sourcemapSources(readFileSync(map))
+    rec.mapParsed = true
+    const c = classifySources(sources, appDir)
+    rec.mapSources = c.total
+    rec.appEntry = c.appEntry
+    rec.workflowsDist = c.workflowsDist
+    rec.cliSources = c.cli
+  } catch (err) {
     rec.mapParsed = false
+    rec.mapError = err instanceof Error ? err.message : String(err)
   }
 
   if (arm === 'subject') {
@@ -491,7 +578,7 @@ function runArm (appKey, arm, scratch, keep) {
       if (r.signal !== null) rec.problems.push(`signal=${r.signal}`)
       if (r.error) rec.problems.push(`spawn: ${r.error.message}`)
       if (rec.bundleBytes < MIN_BUNDLE_BYTES) rec.problems.push(`bundleBytes=${rec.bundleBytes} < ${MIN_BUNDLE_BYTES}`)
-      if (!rec.mapParsed) rec.problems.push('sourcemap missing or unparseable')
+      if (!rec.mapParsed) rec.problems.push(`sourcemap unusable (${rec.mapBytes} bytes): ${rec.mapError}`)
       if (rec.isolatedCacheEntries === 0) rec.problems.push('isolated temp dir stayed empty (cache did not go there)')
       if (!rec.appEntry) rec.problems.push('sourcemap does not list App.tsx')
       if (rec.workflowsDist < 1) rec.problems.push('sourcemap lists no packages/workflows/dist source')
