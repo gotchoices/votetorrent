@@ -326,7 +326,9 @@ function RegistrationStackNavigator() {
 	);
 }
 
-// --- Scan stack (D-09): single root screen, no modals ---
+// --- Scan stack (D-09): single root screen, no modal routes. The root is the Join a network
+// screen with its scanner (an RN Modal inside the screen, not a route), so a scanned code stays in
+// that screen's state and never enters navigation params. ---
 const ScanStack = createNativeStackNavigator<ScanStackParamList>();
 
 function ScanStackNavigator() {
