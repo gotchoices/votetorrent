@@ -76,12 +76,16 @@ function buildAad(alias: string, requireUserAuth: boolean): Uint8Array {
 }
 
 /** Structural mapping only — never `instanceof` (survives Metro module duplication). The message
- * carries only the alias and the native code, never bytes. Also used by `keyholder-seat-vault.ts`. */
+ * carries only the alias and the native code, never bytes. Also used by `keyholder-seat-vault.ts`.
+ * An auth-denied refusal also carries the native code as `nativeCode`, so a screen can tell a
+ * dismissed prompt (CANCELED) from a lockout without reading the message. */
 export function mapWrapError(err: unknown, alias: string, phase: 'put' | 'get'): KeyVaultError {
 	const code = (err as { code?: unknown } | undefined)?.code;
 	if (typeof code === 'string') {
 		if (AUTH_DENIED_CODES.has(code)) {
-			return new KeyVaultError('auth-denied', `key-vault: native wrap denied for alias '${alias}' (${code})`);
+			return Object.assign(new KeyVaultError('auth-denied', `key-vault: native wrap denied for alias '${alias}' (${code})`), {
+				nativeCode: code,
+			});
 		}
 		if (code === 'INVALID_ARGUMENT' && phase === 'put') {
 			return new KeyVaultError('invalid-secret', `key-vault: native wrap rejected the secret for alias '${alias}' (${code})`);

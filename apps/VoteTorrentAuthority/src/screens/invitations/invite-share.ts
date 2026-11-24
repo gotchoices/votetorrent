@@ -22,6 +22,7 @@
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js';
 import type { IInvitationEngine, InviteType } from '@votetorrent/vote-core';
+import { classifyPeerReadFailure } from '../../engines/peer-read-unavailable';
 
 export type InviteShareErrorCode = 'malformed' | 'wrong-type' | 'not-found' | 'already-answered' | 'no-longer-valid';
 
@@ -209,6 +210,87 @@ export function inviteShareErrorKey(err: unknown): string | undefined {
 	}
 }
 
+/**
+ * How long the accept screens wait for the invitation lookup (and for the reads an answer makes
+ * before it writes anything) before they explain that nobody answered. A lookup of a slot whose rows
+ * are not yet on this phone goes to the network, and with the sender's phone offline it can hang for
+ * minutes. 25 s covers a slow but working network (a few RPC round trips through a relay).
+ */
+export const INVITE_LOOKUP_TIMEOUT_MS = 25_000;
+
+/** Code of the error `withInviteLookupTimeout` rejects with. */
+export const INVITE_LOOKUP_TIMEOUT_CODE = 'invite-lookup-timeout';
+
+/** The lookup did not settle in time. Fixed message, never any share content. */
+export class InviteLookupTimeoutError extends Error {
+	readonly code = INVITE_LOOKUP_TIMEOUT_CODE;
+	constructor(ms: number) {
+		super(`Invitation lookup did not finish within ${ms} ms`);
+		this.name = 'InviteLookupTimeoutError';
+	}
+}
+
+/**
+ * Settle with `work`, or reject with InviteLookupTimeoutError after `ms`. For READS only: the work
+ * itself cannot be cancelled and runs on, so it must never be a write (an abandoned write could land
+ * after the caller has moved on). The timer is always cleared.
+ */
+export function withInviteLookupTimeout<T>(work: Promise<T>, ms: number = INVITE_LOOKUP_TIMEOUT_MS): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new InviteLookupTimeoutError(ms)), ms);
+	});
+	return Promise.race([work, timeout]).finally(() => {
+		if (timer !== undefined) clearTimeout(timer);
+	});
+}
+
+/** Network codes (optimystic db-p2p) that mean a peer did not answer. Carried across rethrow by `code`. */
+const NO_ANSWER_CODES = new Set([
+	INVITE_LOOKUP_TIMEOUT_CODE,
+	'DIAL_TIMEOUT',
+	'RESPONSE_TIMEOUT',
+	'REQUEST_BUDGET_EXCEEDED',
+	'NO_NETWORK_COORDINATOR',
+	'SELF_RELAY_ONLY_ADDRESSES',
+]);
+/** The same failures by text, for a wrap that kept the message but not the code. Never rendered. */
+const NO_ANSWER_TEXT = /\b(timed out|dial timeout|response timeout|request budget exceeded)\b/i;
+
+/**
+ * True when the network, or the members holding the invitation, did not answer: our own lookup
+ * timeout, a peer dial/response timeout, no coordinator, or a cohort-unreachable / possibly-stale
+ * block. Structural (name, code, message shape, up to five causes), so it survives Metro module
+ * duplication and the engine's rethrow.
+ */
+export function isNetworkNoAnswerError(err: unknown): boolean {
+	if (classifyPeerReadFailure(err)) return true;
+	const seen = new Set<unknown>();
+	let cur: unknown = err;
+	for (let depth = 0; depth <= 5 && cur !== null && typeof cur === 'object' && !seen.has(cur); depth++) {
+		seen.add(cur);
+		const c = cur as { code?: unknown; name?: unknown; message?: unknown; cause?: unknown };
+		if (typeof c.code === 'string' && NO_ANSWER_CODES.has(c.code)) return true;
+		if (c.name === 'TimeoutError' || c.name === 'InviteLookupTimeoutError') return true;
+		if (typeof c.message === 'string' && NO_ANSWER_TEXT.test(c.message)) return true;
+		cur = c.cause;
+	}
+	return false;
+}
+
+/** Native biometric codes for the officer (or the system) dismissing the prompt. */
+const BIOMETRIC_CANCEL_CODES = new Set(['CANCELED', 'SYSTEM_CANCELED']);
+
+/**
+ * True when the fingerprint / face prompt was dismissed: a device-signing reject carrying the native
+ * code directly, or a vault refusal ('auth-denied') carrying it as `nativeCode`.
+ */
+export function isBiometricCancelError(err: unknown): boolean {
+	const e = err as { code?: unknown; nativeCode?: unknown } | null | undefined;
+	if (typeof e?.code === 'string' && BIOMETRIC_CANCEL_CODES.has(e.code)) return true;
+	return typeof e?.nativeCode === 'string' && BIOMETRIC_CANCEL_CODES.has(e.nativeCode);
+}
+
 const ENGINE_CODE_KEYS: Record<string, string> = {
 	'invite-already-answered': 'invitationAcceptAlreadyAnswered',
 	'invite-no-longer-valid': 'invitationAcceptNoLongerValid',
@@ -218,12 +300,19 @@ const ENGINE_CODE_KEYS: Record<string, string> = {
 	'seat-already-held': 'keyholderAcceptSeatHeld',
 };
 
-/** Copy key for a share error or a coded engine/app refusal; undefined for anything else. */
+/**
+ * Copy key for a known failure class; undefined for anything else (the caller's generic copy).
+ * Order: a share error, a coded engine/app refusal (already answered, withdrawn or expired, ...), a
+ * cancelled biometric prompt, then the network or members not answering in time.
+ */
 export function inviteAcceptErrorKey(err: unknown): string | undefined {
 	const shareKey = inviteShareErrorKey(err);
 	if (shareKey) return shareKey;
 	const code = (err as { code?: unknown } | null | undefined)?.code;
-	return typeof code === 'string' && Object.prototype.hasOwnProperty.call(ENGINE_CODE_KEYS, code) ? ENGINE_CODE_KEYS[code] : undefined;
+	if (typeof code === 'string' && Object.prototype.hasOwnProperty.call(ENGINE_CODE_KEYS, code)) return ENGINE_CODE_KEYS[code];
+	if (isBiometricCancelError(err)) return 'invitationAcceptBiometricCancelled';
+	if (isNetworkNoAnswerError(err)) return 'invitationNetworkNoAnswer';
+	return undefined;
 }
 
 /**
