@@ -36,6 +36,10 @@
 //   HV_MAX_RUNTIME_MS    default 3600000, an internal deadline that writes results (FAIL runtime-budget) and exits
 //   HV_STOP_AFTER        joined | associated | vote-built; the verdict is then PARTIAL unless HIT
 //   HV_MODE              selfcheck: runs I1, the redact self-test and the synthetic-shape self-test; starts NO node
+//   HV_RESULTS_GATE_FILE when set (2026-11-24): after STAGE committed, write <HV_RESULTS minus .json>.committed.json (the result so far),
+//                        STAGE results-wait, wait (bounded) for this file, then read the results as the Voter's Results screen does
+//                        (ElectionResultsEngine.getElectionResults + TallyPublicationEngine.readPublishedTally), STAGE results-read
+//   HV_RESULTS_WAIT_MS   default 1800000, the bound for the results gate; the results read itself is bounded by HV_SYNC_WAIT_MS
 //
 // Rules: no product edits; the 1 MiB cap is only READ by a size probe; nothing failed is re-submitted; secrets never
 // logged; synthetic association only; never used in the hardware runs (D-06, D-14, D-15, D-19, D-21, D-23).
@@ -72,6 +76,8 @@ import { makeVoteNonce, buildVoteEntry, voterEntryDigest } from '../../../packag
 import { canonicalJson } from '../../../packages/vote-engine/src/voting/canonical.js'
 import { encryptVoteEntry } from '../../../packages/vote-engine/src/key-release/election-block.js'
 import { PoolAgent, createLibp2pRendezvousClient, createPoolIdentity, commitPoolBlock } from '../../../packages/vote-engine/src/pool/index.js'
+import { ElectionResultsEngine } from '../../../packages/vote-engine/src/results/index.js'
+import { TallyPublicationEngine } from '../../../packages/vote-engine/src/tally/index.js'
 import { digestToBytes } from '../../../packages/vote-engine/src/utils.js'
 import { VOTETORRENT_SCHEMA_SQL } from '../../../packages/vote-engine/src/database/schema-sql.js'
 import { createEdgeReaderRefusal, EDGE_READER_PROTOCOL } from '../../../packages/vote-engine/src/network/edge-reader-refusal.js'
@@ -86,6 +92,8 @@ export const HOST_VOTER_STAGES: readonly string[] = [
   'started', 'joined', 'intake-ready', 'registration-staged', 'association-staged', 'challenge-received',
   'challenge-answered', 'associated', 'eligible', 'vote-built', 'voting-open', 'ready-to-send', 'pooling', 'committed'
 ]
+/** 2026-11-24: the two stages a host voter adds after committed when HV_RESULTS_GATE_FILE is set (not part of the COMMITTED verdict). */
+export const HOST_VOTER_RESULT_STAGES: readonly string[] = ['results-wait', 'results-read']
 export type HostVoterVerdict = 'COMMITTED' | 'PARTIAL' | 'FAIL' | 'HIT' | 'VOID' | 'SELFCHECK-PASS' | 'SELFCHECK-FAIL'
 
 const b64 = (s: string): string => Buffer.from(s, 'utf8').toString('base64')
@@ -327,7 +335,8 @@ function classifierSelfTest (): boolean {
 const LABEL_RE = /^hv[1-9]$/
 const env = process.env
 const KNOWN_ENV = new Set(['HV_RESULTS', 'HV_CODE_FILE', 'HV_RELAY', 'HV_LABEL', 'HV_PARTY_ID', 'HV_VOTE_OUT', 'HV_ELECTION_ID', 'HV_REGISTRANT_FILE',
-  'HV_SELECTIONS_FILE', 'HV_SEND_GATE_FILE', 'HV_CLOCK_OFFSET_MS', 'HV_DECISION_WAIT_MS', 'HV_SYNC_WAIT_MS', 'HV_ADMISSION_TIMEOUT_MS', 'HV_MAX_RUNTIME_MS', 'HV_STOP_AFTER', 'HV_MODE'])
+  'HV_SELECTIONS_FILE', 'HV_SEND_GATE_FILE', 'HV_CLOCK_OFFSET_MS', 'HV_DECISION_WAIT_MS', 'HV_SYNC_WAIT_MS', 'HV_ADMISSION_TIMEOUT_MS', 'HV_MAX_RUNTIME_MS', 'HV_STOP_AFTER', 'HV_MODE',
+  'HV_RESULTS_GATE_FILE', 'HV_RESULTS_WAIT_MS'])
 const numEnv = (v: string | undefined, d: number) => (v !== undefined && Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d)
 const RESULTS_PATH = env.HV_RESULTS ?? ''
 const LABEL = env.HV_LABEL ?? ''
@@ -336,6 +345,8 @@ const DECISION_WAIT_MS = numEnv(env.HV_DECISION_WAIT_MS, 900_000)
 const SYNC_WAIT_MS = numEnv(env.HV_SYNC_WAIT_MS, 180_000)
 const ADMISSION_TIMEOUT_MS = env.HV_ADMISSION_TIMEOUT_MS === undefined ? undefined : numEnv(env.HV_ADMISSION_TIMEOUT_MS, 20_000)
 const MAX_RUNTIME_MS = numEnv(env.HV_MAX_RUNTIME_MS, 3_600_000)
+const RESULTS_WAIT_MS = numEnv(env.HV_RESULTS_WAIT_MS, 1_800_000)
+const committedSnapshotPath = (p: string) => p.replace(/\.json$/, '') + '.committed.json'
 const lateResultsPath = (p: string) => p.replace(/\.json$/, '') + '.late.json'
 
 const stagesMs: Record<string, number> = {}
@@ -356,7 +367,8 @@ const res: any = {
   association: { staged: false, challenge: null, answered: false, decision: null, attestation: 'synthetic-android', acceptableBy: 'dev-stub-verifier-only' },
   eligibility: { ok: false },
   vote: { ballots: 0, entrySha256: [] as string[], voteOutWritten: false },
-  pool: { ballots: [] as any[] }
+  pool: { ballots: [] as any[] },
+  results: null as any
 }
 const instrumentRes = { I1: false, I2: false }
 let failReason: string | null = null
@@ -398,7 +410,7 @@ function buildResult (v: { verdict: HostVoterVerdict, reason?: string }, secretL
   return {
     tool: 'host-voter', label: LABEL, verdict: v.verdict, ...(v.reason ? { reason: v.reason } : {}), stage: lastStage, stages: stagesMs,
     code: res.code, join: res.join, rendezvous: res.rendezvous, registration: res.registration, association: res.association,
-    eligibility: res.eligibility, vote: res.vote, pool: res.pool,
+    eligibility: res.eligibility, vote: res.vote, pool: res.pool, results: res.results,
     wall: { ...wall }, pollErrors, transferLimitErrors, lateErrors: { count: lateErrors.length, names: [...new Set(lateErrors.flatMap((l: any) => l.names ?? []))].slice(0, 12) },
     clock: { offsetMs: clk.offsetMs, applied: clk.applied }, stallMaxMs, secretLeaks, instrument: instrumentRes, ignoredEnv: unknownEnv,
     totalMs: Math.round(performance.now() - T0)
@@ -1032,6 +1044,31 @@ async function main (): Promise<void> {
       stage('committed')
     } else {
       fail('pool-not-committed')
+    }
+
+    // ---- results (2026-11-24 rig gap audit), mirrors apps/VoteTorrentVoter/src/screens/timeline/ResultsScreen.tsx:76-95 and readPublication
+    if (env.HV_RESULTS_GATE_FILE !== undefined) {
+      {
+        const sc = scanSecrets('')
+        writeFileSync(committedSnapshotPath(RESULTS_PATH), JSON.stringify(buildResult(computeVerdict(), sc.whole + sc.windows), null, 2), { flag: 'wx' })
+      }
+      stage('results-wait')
+      const rgate = await boundedPoll('results-gate', async () => existsSync(env.HV_RESULTS_GATE_FILE!), (b: boolean) => b, { timeoutMs: RESULTS_WAIT_MS, intervalMs: 1000 })
+      if (!rgate.ok) fail('results-gate-timeout')
+      const sR = performance.now()
+      const resultsEngine = new ElectionResultsEngine(ctx)
+      const publication = new TallyPublicationEngine(ctx)
+      let firstTalliedMs: number | null = null
+      const read = await boundedPoll('results', async () => {
+        const r: any = await resultsEngine.getElectionResults(electionId!)
+        if (r?.status === 'tallied' && firstTalliedMs === null) firstTalliedMs = Math.round(performance.now() - sR)
+        const p: any = r?.status === 'tallied' ? await publication.readPublishedTally(r.electionId, r.revision, r.tally) : null
+        return { status: String(r?.status), reason: r?.reason ?? null, valid: r?.totals?.valid ?? null, published: p !== null, signatureValid: p?.signatureValid === true, treeOk: p?.treeCheck?.ok === true, matches: p?.matchesRecomputed === true }
+      }, (v: any) => v.status === 'tallied' && v.published && v.signatureValid && v.treeOk && v.matches, { timeoutMs: SYNC_WAIT_MS, intervalMs: 2000 })
+      res.results = { ok: read.ok, ...(read.value ?? {}), firstTalliedMs, ms: Math.round(performance.now() - sR), polls: read.polls }
+      check('R1', 'the Results screen read: tallied, and the published tally verifies (signature, tree) and equals this voter\'s own count', read.ok, res.results)
+      if (!read.ok) fail('results-unread')
+      stage('results-read')
     }
   } catch (e) {
     if (e instanceof HvStop) {

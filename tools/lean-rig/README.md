@@ -53,7 +53,7 @@ export VT_LEAN_RELAY_ENV=/abs/relay.env
 tools/lean-rig/lean/lean-part1.sh /abs/run-dir with-khb          # prints LEAN-P1: PASS
 LEAN_TITLE=t LEAN_BALLOT=b HR5_LEAD_MS=2340000 HR5_WINDOW_MS=900000 \
   tools/lean-rig/lean/run-lean.sh run /abs/run-dir/ev /abs/run-dir   # ends with SUMMARY PASS|FAIL <leg> <token>
-tools/lean-rig/lean/run-lean.sh selfcheck /abs/empty-dir         # offline, no network: SELFCHECK PASS 21/21
+tools/lean-rig/lean/run-lean.sh selfcheck /abs/empty-dir         # offline, no network: SELFCHECK: PASS 22/22
 ```
 
 Driver knobs (env):
@@ -61,6 +61,8 @@ Driver knobs (env):
 - **Names:** `LEAN_TITLE` / `LEAN_BALLOT` (must be unique per run), `LEAN_NET_NAME` (part 1).
 - **Time limits:** `LEAN_ALARM_S` (driver hard limit), `LEAN_HV_ALARM_S` and `HV_MAX_RUNTIME_MS` (host voters).
 - **Debug:** `LEAN_DEBUG` (debug namespaces to `ev/debug.log`).
+- **Voters read results:** in a full all-host run the host voters stay up after their vote and, once the officer has published,
+  read the results as the Voter's Results screen does (leg check X5). `LEAN_HV_READ_RESULTS=0` makes them exit after the vote as before.
 - **Stop early:** `SEED_STOP=<network|election|keyholders|dkg|voters>` stops after that stage and holds the peers live until SIGINT or
   SIGTERM, `<run>/secrets/flag-seed-stop`, or the hold deadline (`SEED_HOLD_MIN`, else the election's close + 10 min).
   `SEED_HV_N` sets the number of host voters for `voters`.

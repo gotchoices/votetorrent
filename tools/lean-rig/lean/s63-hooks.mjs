@@ -5,10 +5,13 @@
 // protocol-limits path.
 let authSrc = ''
 export function initialize (data) { authSrc = data?.authSrc ?? '' }
+// 2026-11-24: the officer's Enable Encrypted Intake step (officer-intake-key.ts) and the approval screen's publish-after-decide
+// (continuity-review.ts) take the same stub; both get their vault injected by the driver.
+const STUB_PARENTS = ['screens/registration/attach-peer-sync-binding.ts', 'screens/registration/officer-intake-key.ts', 'screens/registration/continuity-review.ts']
 const STUB = 'data:text/javascript,' + encodeURIComponent("export function resolveAuthorityKeyVault () { throw new Error('hr5-part2: resolveVault must be injected') }")
 
 export async function resolve (specifier, context, nextResolve) {
-  if (context.parentURL === authSrc + 'screens/registration/attach-peer-sync-binding.ts' && specifier === '../../engines/key-vault') {
+  if (STUB_PARENTS.some((f) => context.parentURL === authSrc + f) && specifier === '../../engines/key-vault') {
     return { url: STUB, shortCircuit: true, format: 'module' }
   }
   return nextResolve(specifier, context)

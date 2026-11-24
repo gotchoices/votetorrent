@@ -197,6 +197,7 @@ register('./s63-hooks.mjs', { parentURL: import.meta.url, data: { authSrc: R('ap
 const AUTH = (p: string): string => R('apps/VoteTorrentAuthority/src/' + p)
 const VEs = (p: string): string => R('packages/vote-engine/src/' + p)
 const cadre: any = await import('@serfab/cadre-core')
+const voteCore: any = await import('@votetorrent/vote-core')
 const dbP2p: any = await import('@optimystic/db-p2p')
 const ClusterClient: any = dbP2p.ClusterClient
 const controlLeaf: any = await import(U(join(LIB, 'control-leaf.mjs')))
@@ -250,6 +251,12 @@ const poolHostMod: any = await import(AUTH('engines/pool-rendezvous-host.ts'))
 const syncMod: any = await import(AUTH('screens/registration/attach-peer-sync-binding.ts'))
 const portMod: any = await import(AUTH('engines/strand-port-adapter.ts'))
 const ownerTrustMod: any = await import(AUTH('engines/owner-trust.ts'))
+// 2026-11-24 (rig gap audit): the officer's Enable Encrypted Intake step and the approval screen's publish-after-decide, both shipped modules
+// (s63-hooks.mjs stubs their key-vault import; the driver injects the vault)
+const intakeKeyMod: any = await import(AUTH('screens/registration/officer-intake-key.ts'))
+const reviewMod: any = await import(AUTH('screens/registration/continuity-review.ts'))
+const { enableOfficerEncryptedIntake } = intakeKeyMod
+const { publishRegistrationDecisionAfterDecide } = reviewMod
 const { acceptKeyholderInvitation } = acceptMod
 const { driveKeyholderDkg } = driverMod
 const { releaseKeyholderShare } = ceremonyMod
@@ -317,13 +324,13 @@ const KEEP_RE = /^[a-z0-9][a-z0-9-]*$/
 // ----------------------------------------------------------------------------------------------------------------
 class LegFail extends Error { constructor (readonly kind: 'FAIL' | 'VOID', readonly token: string) { super(token) } }
 // LEAN E92: outcome checks the later legs do not depend on. A failure is recorded and the run goes on.
-const SOFT_TOKENS = new Set(['officer-loop', 'join-outcome', 'cid-disagree', 'entry-hash', 'block', 'pre-release', 'needle-control'])
+const SOFT_TOKENS = new Set(['officer-loop', 'join-outcome', 'cid-disagree', 'entry-hash', 'block', 'pre-release', 'needle-control', 'voter-results'])
 export const FAIL_TOKENS: string[] = ['phone-join', 'phone-vote',
   'precondition-part1', 'precondition-part1-handoff', 'precondition-head', 'precondition-relay', 'precondition-copies', 'precondition-cap', 'precondition-intake',
   'reopen-peers', 'reopen-sibling', 'reopen-circuit', 'reopen-start', 'reopen-open', 'fork-precheck-role-missing', 'fork-precheck-digest-mismatch-logged', 'fork-precheck-fork-leaf',
   'fork-precheck-fork-tail', 'fork-precheck-unreadable', 'solo-own-row', 'founder-reopen', 'intake', 'election', 'slots', 'self-invite', 'ballot', 'accept', 'seats', 'dkg-bound',
   'dkg-error', 'dkg-key', 'code', 'n0', 'join-outcome', 'hv-joined', 'hv-association-staged', 'hv-ready-to-send', 'hv-exit', 'officer-loop', 'timeline-missed', 'send-window', 'block-size',
-  'block', 'cid-disagree', 'entry-hash', 'release-wait', 'pre-release', 'release', 'decrypt', 'needle-control', 'd14-hit', 'secret-leak', 'crash', 'no-result', 'host-not-quiet'
+  'block', 'cid-disagree', 'entry-hash', 'release-wait', 'pre-release', 'release', 'decrypt', 'voter-results', 'needle-control', 'd14-hit', 'secret-leak', 'crash', 'no-result', 'host-not-quiet'
 ]
 interface LegStatus { leg: string, status: 'PASS' | 'FAIL' | 'VOID', token: string, inScriptD14: 'CLEAN' | 'HIT', reason: string, checks: string[] }
 const legStatuses: LegStatus[] = []
@@ -442,7 +449,20 @@ const STATE = process.env.HR5_STATE_DIR ?? join(S, 'state')
 const party: any = existsSync(join(STATE, 'party.json')) ? JSON.parse(readFileSync(join(STATE, 'party.json'), 'utf8')) : {}
 const preEnv: Record<string, string> = {}
 if (process.env.HR5_PRECHECK_ENV && existsSync(process.env.HR5_PRECHECK_ENV)) for (const l of readFileSync(process.env.HR5_PRECHECK_ENV, 'utf8').split('\n')) { const i = l.indexOf('='); if (i > 0) preEnv[l.slice(0, i)] = l.slice(i + 1) }
-if (preEnv.RELAY_MULTIADDR) { secret(preEnv.RELAY_MULTIADDR); secret(preEnv.RELAY_PEER); secret(preEnv.LAN_IP) }
+// A relay address is only sensitive when it names this machine's own network: a LAN or loopback relay, or one that holds
+// LAN_IP. A public relay (a dns4 name or a public IP) is shipped in the apps' bootstrap.config.json, and the debug
+// namespaces print it on every dial, so marking it secret failed the final scan on logs that held nothing secret
+// (profile-20261124-1046: all 8 hits were the public relay address and peer id). LAN_IP itself always stays secret.
+function relayIsPrivate (addr: string, lanIp?: string): boolean {
+  if (lanIp !== undefined && lanIp.length > 0 && addr.includes(lanIp)) return true
+  return /\/ip4\/(?:10\.|127\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|169\.254\.)/.test(addr) ||
+    /\/ip6\/(?:::1(?:\/|$)|f[cd][0-9a-f]{2}:|fe[89ab][0-9a-f]:)/i.test(addr) ||
+    /\/dns[46]?\/(?:localhost|[^/]*\.local)(?:\/|$)/i.test(addr)
+}
+if (preEnv.RELAY_MULTIADDR) {
+  if (relayIsPrivate(preEnv.RELAY_MULTIADDR, preEnv.LAN_IP)) { secret(preEnv.RELAY_MULTIADDR); secret(preEnv.RELAY_PEER) }
+  secret(preEnv.LAN_IP)
+}
 const N7: string = party.networks?.n7?.hash ?? ''
 const AUTHORITY_ID: string = party.authorityId ?? ''
 const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000
@@ -458,6 +478,10 @@ const SEED_VOTERS = SEED_STOP === 'voters'
 const HV_N = SEED_VOTERS ? Number(process.env.SEED_HV_N ?? 2) : (PHONE_VOTER ? 2 : 3)
 // registrations/associations the officer loop waits for: 3 in a full run (2 host + the phone, or 3 host); the seeded host voters otherwise
 const REG_TARGET = SEED_VOTERS ? HV_N : 3
+// 2026-11-24 (rig gap audit): in a full all-host run the host voters stay up after their vote and, once the officer has published,
+// read the results as the Voter's Results screen does (host-voter HV_RESULTS_GATE_FILE). LEAN_HV_READ_RESULTS=0 restores the old exit.
+const HV_READ_RESULTS = !SEED_VOTERS && !PHONE_VOTER && process.env.LEAN_HV_READ_RESULTS !== '0'
+const RESULTS_GATE = join(SEC, 'results-gate')
 let seedStopRequested = false
 async function waitFlag (name: string, ms = PHONE_MS): Promise<boolean> {
   const p = join(SEC, `flag-${name}`)
@@ -678,14 +702,17 @@ async function legElection (L: LegCtx): Promise<void> {
   S_.officerSign = sign
   const before = Number((await one(ctx.db, 'select count(*) as n from UserEncryptionKey where UserId = :u', { u: ctx.user.id }).catch(() => ({ n: -1 })))?.n)
   L.need('intake', 'E0', PHONE ? 'officer intake keys before (a re-run keeps the earlier one)' : 'zero officer intake keys before', PHONE ? before >= 0 : before === 0, { before })
-  // mirrors test-context.ts provisionTestIntakeRecipient (1459-1484) with the persisted officer signer
+  // mirrors BulkImportSyncScreen's Enable Encrypted Intake button (2026-11-24): the shipped officer-intake-key.ts step registers the key,
+  // then reads the state back and refuses anything but enabled, with the persisted officer signer and an in-memory vault
   const vault = new InMemoryTestKeyVault()
   const intakeEngine = new IntakeEngine(ctx)
-  const registration = await intakeEngine.registerOfficerEncryptionKey(AUTHORITY_ID, vault, sign)
+  const sIntake = Date.now()
+  const intakeState = await enableOfficerEncryptedIntake({ getEngine: async (n: string) => { if (n !== 'intake') throw new Error(`getEngine: unknown engine ${n}`); return intakeEngine }, vault, createSigner: async () => sign }, AUTHORITY_ID)
+  durations.intakeMs = Date.now() - sIntake
   ctx.intakeOpener = intakeEngine.createOpener(vault)
-  S_.intake = { vault, opener: ctx.intakeOpener, publicKey: registration.publicKey }
+  S_.intake = { vault, opener: ctx.intakeOpener, state: intakeState }
   const after = Number((await one(ctx.db, 'select count(*) as n from UserEncryptionKey where UserId = :u', { u: ctx.user.id }))?.n)
-  L.need('intake', 'E0b', 'one officer intake key registered', after === before + 1, { after })
+  L.need('intake', 'E0b', 'Enable Encrypted Intake (officer-intake-key.ts) reads back enabled and one officer intake key is registered', after === before + 1 && intakeState === 'enabled', { after, state: intakeState, ms: durations.intakeMs })
 
   const electionId = `election-${Date.now()}`
   S_.electionId = electionId
@@ -767,8 +794,10 @@ async function legElection (L: LegCtx): Promise<void> {
     id: S_.ballotId, electionId, authorityId: AUTHORITY_ID, description: 'hr5-ballot', districts: [],
     questions: [{ code: 'hr5-q1', title: 'hr5-q1', instructions: 'Choose one option.', type: 'select', options: [{ code: needle, title: 'hr5 option one' }, { code: 'hr5-opt-b', title: 'hr5-opt-b' }] }]
   }
+  const sBallot = Date.now()
   await electionEngine.proposeBallot(ballot)
-  await electionEngine.submitBallotForConfirmation(S_.ballotId)
+  // mirrors EditBallotScreen's Submit for Confirmation (2026-11-24): the lazy signer is passed (the engine calls it only above a ceb threshold of 1)
+  await electionEngine.submitBallotForConfirmation(S_.ballotId, sign)
   const recents: any[] = await off.engine.getRecentNetworks()
   const ref = recents.find((r: any) => r.hash === N7)
   const tasksEngine = new SignatureTasksEngine(ref, ctx)
@@ -778,8 +807,11 @@ async function legElection (L: LegCtx): Promise<void> {
   const ballotTask = ballotTasks.find((t: any) => t.signatureType === 'ballot' && t.ballot?.proposed?.id === S_.ballotId)
   if (ballotTask !== undefined) {
     const digest = await tasksEngine.getSignatureDigest(ballotTask)
-    await tasksEngine.completeSignature(ballotTask, { isAccepted: true, signature: await sign(digest) })
+    // mirrors SignatureTaskScreen.tsx sign(): a ballot task passes the re-invocable signer, so finalizeBallot REAL-signs each promoted
+    // Question/Option row (without it the engine falls back to the legacy placeholder signature, which the app never writes)
+    await tasksEngine.completeSignature(ballotTask, { isAccepted: true, signature: await sign(digest), sign })
   }
+  durations.ballotMs = Date.now() - sBallot
   const confirmedState = await electionEngine.getBallotConfirmationState(S_.ballotId)
   const details = await electionEngine.getBallotDetails(S_.ballotId)
   const q = details?.ballot?.questions?.find((x: any) => x.code === 'hr5-q1')
@@ -1004,7 +1036,8 @@ async function legVoters (L: LegCtx): Promise<void> {
     const env: Record<string, string | undefined> = {
       ...process.env, FORCE_COLOR: '0', NODE_OPTIONS: undefined, TS_NODE_PROJECT: './tsconfig.test.json',
       HV_LABEL: label, HV_CODE_FILE: S_.codePath, HV_RELAY: preEnv.RELAY_MULTIADDR, HV_PARTY_ID: party.partyId, HV_ELECTION_ID: S_.electionId,
-      HV_RESULTS: jsonPath, HV_VOTE_OUT: votePath, HV_SEND_GATE_FILE: gate, HV_CLOCK_OFFSET_MS: '0'
+      HV_RESULTS: jsonPath, HV_VOTE_OUT: votePath, HV_SEND_GATE_FILE: gate, HV_CLOCK_OFFSET_MS: '0',
+      ...(HV_READ_RESULTS ? { HV_RESULTS_GATE_FILE: RESULTS_GATE } : {})
     }
     delete env.NODE_OPTIONS
     const spawnedAt = Date.now()
@@ -1028,7 +1061,7 @@ async function legVoters (L: LegCtx): Promise<void> {
   const staged = await poll('children.association-staged', async () => kids.every((c) => stageSeen(c.logPath, 'association-staged')), (v) => v === true || kids.some((c) => c.exited), { timeoutMs: 900_000, intervalMs: 2000 })
   L.need('hv-association-staged', 'V-staged', 'every host child prints STAGE association-staged within 900 s', kids.every((c) => stageSeen(c.logPath, 'association-staged')), { waitedMs: staged.waitedMs })
   // officer loop (mirrors selftest.ts:497-558)
-  const officer = { syncs: 0, approvals: 0, challenges: 0, associated: 0, syncErrors: 0 }
+  const officer = { syncs: 0, approvals: 0, challenges: 0, associated: 0, syncErrors: 0, unreadable: 0, publishedAfterDecide: 0, approvalSteps: [] as any[] }
   const engines = new Map<string, any>()
   const getEngine = async (name: string): Promise<any> => {
     if (!engines.has(name)) {
@@ -1053,16 +1086,42 @@ async function legVoters (L: LegCtx): Promise<void> {
   const tasksEngine = (S_ as any).tasksEngine
   const approved = new Set<string>()
   const officerSync = async (): Promise<void> => { try { const r = await binding.syncNow({ authorityId: AUTHORITY_ID }); officer.syncs++; if (officer.syncs % 6 === 1) say('OFFICER', `sync imported=${r.imported} pending=${r.pending} errors=${r.errorItemIds.length} approvals=${officer.approvals} challenges=${officer.challenges} associated=${officer.associated}`) } catch (err) { officer.syncErrors++; recordError('officer.syncNow', err, 'thrown') } }
+  // mirrors RegistrationRequestApprovalScreen.tsx (2026-11-24 rig gap audit): load() reads the request (its sealed details opened with the
+  // officer's intake key), the prior rejections, the duplicate closure, the likely duplicates, the signing status and the stale-close
+  // availability; handleApprove() re-checks the D-07 checklist gate, signs the engine digest, completes the task with the checklist bound
+  // into the decision, and then publishes the decision right away (continuity-review.ts publishRegistrationDecisionAfterDecide).
+  const CHECKLIST = ['id']
+  const reviewDeps = { getEngine, createPeerStagingTransports: createTransports, authorityId: AUTHORITY_ID, sign, resolveVault: () => S_.intake.vault }
   const approvePending = async (): Promise<void> => {
     try {
       const tasks: any[] = await tasksEngine.getRequestedSignatures(true)
       for (const task of tasks) {
         if (task.signatureType !== 'registrant' || approved.has(task.requestId)) continue
+        const sA = Date.now()
+        const reg = await getEngine('registration')
+        const r: any = await reg.getRegistrationRequest(task.requestId)
+        if (r === undefined || r.status !== 'p') continue
+        const readable = r.payloadAccess === undefined || !['not-a-recipient', 'no-opener', 'unreadable', 'tampered'].includes(r.payloadAccess)
+        if (!readable) { officer.unreadable++; recordError('officer.approve.read', Object.assign(new Error('registration content unreadable'), { code: String(r.payloadAccess) }), 'thrown'); continue }
+        await reg.getPriorRejections(r.requesterKey, r.requestId)
+        await reg.getDuplicateClosure(task.requestId)
+        await reg.getLikelyDuplicateRequests(task.requestId)
+        await tasksEngine.getRegistrantSigningStatus(task.requestId).catch(() => null)
+        await reg.getStaleCloseAvailability(task.requestId).catch(() => undefined)
+        const readMs = Date.now() - sA
+        if (!voteCore.isChecklistGateMet(CHECKLIST)) throw new Error('checklist-incomplete')
+        const sD = Date.now()
         const digestBytes = await tasksEngine.getSignatureDigest(task)
         const signature = await sign(digestBytes)
-        await tasksEngine.completeSignature(task, { isAccepted: true, signature, sign, decision: { checklist: ['id'] } } as any)
+        await tasksEngine.completeSignature(task, { isAccepted: true, signature, sign, decision: { checklist: CHECKLIST } } as any)
+        const decideMs = Date.now() - sD
         approved.add(task.requestId)
         officer.approvals++
+        const sP = Date.now()
+        const pub: any = await publishRegistrationDecisionAfterDecide(reviewDeps, task.requestId, null)
+        if (pub?.kind === 'published') officer.publishedAfterDecide++
+        officer.approvalSteps.push({ readMs, decideMs, publishMs: Date.now() - sP, publish: String(pub?.kind) + (pub?.code ? ':' + String(pub.code) : '') })
+        say('APPROVE', `registration ${officer.approvals} readMs=${readMs} decideMs=${decideMs} publishMs=${Date.now() - sP} publish=${String(pub?.kind)}${pub?.code ? ':' + String(pub.code) : ''}`)
       }
     } catch (err) { recordError('officer.approve', err, 'thrown') }
   }
@@ -1080,7 +1139,7 @@ async function legVoters (L: LegCtx): Promise<void> {
   const regReqs = await countA('select count(*) as n from RegistrationRequest').catch(() => -1)
   const assocReqs = await countA('select count(*) as n from AssociationRequest').catch(() => -1)
   L.need('officer-loop', 'G1', `the officer Sync Now intaked ${REG_TARGET} registration and ${REG_TARGET} association requests`, regReqs === REG_TARGET && assocReqs === REG_TARGET, { registrationRequests: regReqs, associationRequests: assocReqs, loopOk })
-  L.need('officer-loop', 'G2', `${REG_TARGET} registrations approved through SignatureTasksEngine`, officer.approvals === REG_TARGET, { approvals: officer.approvals })
+  L.need('officer-loop', 'G2', `${REG_TARGET} registrations approved through SignatureTasksEngine after the approval screen's reads, each published at decide time`, officer.approvals === REG_TARGET && officer.unreadable === 0 && officer.publishedAfterDecide === REG_TARGET, { approvals: officer.approvals, unreadable: officer.unreadable, publishedAfterDecide: officer.publishedAfterDecide, steps: officer.approvalSteps })
   L.need('officer-loop', 'G3', `${REG_TARGET} challenges issued`, officer.challenges >= REG_TARGET, { challenges: officer.challenges })
   const assocRows = await poll('officer.associationRows', () => countA('select count(*) as n from Association'), (n) => n === REG_TARGET, { timeoutMs: 60_000, intervalMs: 2000 })
   L.need('officer-loop', 'G4', `${REG_TARGET} Association rows on the officer`, assocRows.ok, { rows: assocRows.value })
@@ -1112,10 +1171,17 @@ async function legVoters (L: LegCtx): Promise<void> {
   writeFileSync(gate, '', { flag: 'wx', mode: 0o600 })
   say('SEND', 'send gate opened')
   if (PHONE_VOTER) rawLog(`LEAN-WAIT iphone-vote at=${new Date().toISOString()}`)
-  // children exit (bounded 900 s)
-  await Promise.race([Promise.all(kids.map((c) => c.exit)), sleep(900_000)])
-  L.need('hv-exit', 'P0', 'every host child exited within 900 s of the Send window', kids.every((c) => c.exited), kids.map((c) => c.exited))
-  const childJson: any[] = kids.map((c) => { try { return JSON.parse(readFileSync(c.jsonPath, 'utf8')) } catch (err) { recordError(`${c.label}.results`, err, 'hidden'); return null } })
+  if (HV_READ_RESULTS) {
+    // the children stay up to read the results later: wait for each one's vote (STAGE results-wait, after committed; bounded 900 s)
+    const w = await poll('children.results-wait', async () => kids.every((c) => stageSeen(c.logPath, 'results-wait')), (v) => v === true || kids.some((c) => c.exited), { timeoutMs: 900_000, intervalMs: 1000 })
+    L.need('hv-exit', 'P0', 'every host child committed its vote and waits to read the results (STAGE results-wait) within 900 s of the Send window', kids.every((c) => stageSeen(c.logPath, 'results-wait')), { waitedMs: w.waitedMs, exited: kids.map((c) => c.exited) })
+  } else {
+    // children exit (bounded 900 s)
+    await Promise.race([Promise.all(kids.map((c) => c.exit)), sleep(900_000)])
+    L.need('hv-exit', 'P0', 'every host child exited within 900 s of the Send window', kids.every((c) => c.exited), kids.map((c) => c.exited))
+  }
+  // with HV_READ_RESULTS the result so far is the child's <label>.committed.json snapshot; its final <label>.json comes after the results read
+  const childJson: any[] = kids.map((c) => { try { return JSON.parse(readFileSync(HV_READ_RESULTS ? c.jsonPath.replace(/\.json$/, '.committed.json') : c.jsonPath, 'utf8')) } catch (err) { recordError(`${c.label}.results`, err, 'hidden'); return null } })
   S_.hvResults = childJson
   const hvInfo = childJson.map((j, i) => ({ label: kids[i].label, verdict: j?.verdict ?? 'NO-RESULT', stage: j?.stage ?? null, joinMs: j?.join?.ms ?? null, outcome: j?.join?.outcome ?? null, admittedVia: j?.join?.admittedVia ?? null, associatedMs: j?.stages?.associated ?? null, poolMs: j?.pool?.ballots?.[0]?.ms ?? null, cidPrefix: j?.pool?.ballots?.[0]?.cidPrefix ?? null }))
   const hit = childJson.some((j) => j?.verdict === 'HIT' || (j?.wall?.oversized ?? 0) > 0 || (j?.wall?.superMajority ?? 0) > 0 || (j?.wall?.torn ?? 0) > 0 || (j?.join?.hiddenOpenFailures ?? 0) > 0)
@@ -1341,6 +1407,19 @@ async function legRelease (L: LegCtx): Promise<void> {
     L.check('X4c', 'a keyholder peer reads the published row within 120 s: signature valid, tree consistent, matches its own tally', khRead !== null && khRead.signatureValid === true && khRead.treeCheck?.ok === true && khRead.matchesRecomputed === true,
       { found: khRead !== null, signatureValid: khRead?.signatureValid, treeOk: khRead?.treeCheck?.ok, matches: khRead?.matchesRecomputed, blockCount: khRead?.blockCount, reads: khReads, waitedMs: Date.now() - sKh })
     key('HR5P2-PUBLISH', `first=${first?.outcome} second=${second?.outcome} rows=${rows} khMatches=${khRead?.matchesRecomputed} at=${firstAt}`)
+  }
+  // X5 (2026-11-24 rig gap audit): every host voter reads the results after the publish, as the Voter's Results screen does
+  if (HV_READ_RESULTS) {
+    const kids: any[] = S_.children
+    const sV = Date.now()
+    writeFileSync(RESULTS_GATE, '', { flag: 'wx', mode: 0o600 })
+    say('RESULTS', 'results gate opened: the host voters read the results')
+    await Promise.race([Promise.all(kids.map((c) => c.exit)), sleep(600_000)])
+    const finals: any[] = kids.map((c) => { try { return JSON.parse(readFileSync(c.jsonPath, 'utf8')) } catch (err) { recordError(`${c.label}.results-final`, err, 'hidden'); return null } })
+    const info = finals.map((j, i) => ({ label: kids[i].label, exited: kids[i].exited, verdict: j?.verdict ?? 'NO-RESULT', stage: j?.stage ?? null, ok: j?.results?.ok === true, valid: j?.results?.valid ?? null, ms: j?.results?.ms ?? null, firstTalliedMs: j?.results?.firstTalliedMs ?? null, polls: j?.results?.polls ?? null }))
+    durations.voterResultsMs = Date.now() - sV
+    L.need('voter-results', 'X5', `every host voter reads the results within 600 s of the publish: tallied, ${openedCount} valid votes, and the published tally verifies and equals its own count`, info.every((v) => v.ok && v.valid === openedCount && v.verdict === 'COMMITTED'), info)
+    for (const v of info) key(`HR5P2-VOTER-RESULTS-${v.label.toUpperCase()}`, `ok=${v.ok} valid=${v.valid} ms=${v.ms} firstTalliedMs=${v.firstTalliedMs} polls=${v.polls} verdict=${v.verdict}`)
   }
   // LEAN_POST_PUBLISH_HOLD_MS (2026-11-16): keep the host peers live after the publish so a web page can read the published
   // results; touching <SEC>/flag-post-publish ends the hold early. Unset = unchanged (no wait).
@@ -1584,7 +1663,8 @@ async function selfcheck (): Promise<void> {
     ['acceptKeyholderInvitation', acceptKeyholderInvitation], ['driveKeyholderDkg', driveKeyholderDkg], ['releaseKeyholderShare', releaseKeyholderShare], ['listKeyholderIdentities', listKeyholderIdentities],
     ['keyholderSigningKeyAlias', keyholderSigningKeyAlias], ['keyholderInviteExpiration', keyholderInviteExpiration], ['ensureVoterInviteOwner', ensureVoterInviteOwner], ['hostPoolRendezvous', hostPoolRendezvous],
     ['createPeerSyncBinding', createPeerSyncBinding], ['createStrandPort', createStrandPort], ['buildRoleNode', opener.buildRoleNode], ['roleNetworksEngine', opener.roleNetworksEngine], ['openRoleNetwork', opener.openRoleNetwork],
-    ['readControlLeaf', readControlLeaf], ['classifyRound', classifyRound], ['forkPrecheckLine', forkPrecheckLine], ['forkPrecheck', forkPrecheck], ['openedSetPreimage', openedSetPreimage]
+    ['readControlLeaf', readControlLeaf], ['classifyRound', classifyRound], ['forkPrecheckLine', forkPrecheckLine], ['forkPrecheck', forkPrecheck], ['openedSetPreimage', openedSetPreimage],
+    ['enableOfficerEncryptedIntake', enableOfficerEncryptedIntake], ['publishRegistrationDecisionAfterDecide', publishRegistrationDecisionAfterDecide], ['isChecklistGateMet', voteCore.isChecklistGateMet]
   ]
   const bad = fnExports.filter(([, f]) => typeof f !== 'function').map(([n]) => n)
   if (typeof DEFAULT_KEYHOLDER_INVITE_EXPIRY_HOURS !== 'number') bad.push('DEFAULT_KEYHOLDER_INVITE_EXPIRY_HOURS')
@@ -1713,6 +1793,13 @@ async function selfcheck (): Promise<void> {
     void neg; void clk
     ok('H-negative', swapped !== good1 && swapped.includes(' FAIL '), 'a line with its verdict token swapped is reported unequal')
     ok('H', allEqual, 'six cases equal')
+  }
+  // (i) 2026-11-24 rig gap audit: the host voter's results stages sit outside its COMMITTED verdict, and the driver's approval checklist meets the gate
+  {
+    const rs: unknown = hvMod.HOST_VOTER_RESULT_STAGES
+    const stagesOk = Array.isArray(rs) && JSON.stringify(rs) === JSON.stringify(['results-wait', 'results-read']) && rs.every((x: string) => !hvMod.HOST_VOTER_STAGES.includes(x))
+    const gateOk = voteCore.isChecklistGateMet(['id']) === true && voteCore.isChecklistGateMet(['id', 'none']) === false
+    ok('I', stagesOk && gateOk && SOFT_TOKENS.has('voter-results') && FAIL_TOKENS.includes('voter-results'), `resultStages=${stagesOk} checklistGate=${gateOk}`)
   }
   const failed = results.filter(([, p]) => !p).map(([id]) => id)
   rawLog(failed.length === 0 ? `SELFCHECK: PASS ${results.length}/${results.length}` : `SELFCHECK: FAIL ${failed.join(',')}`)
