@@ -1010,6 +1010,7 @@ describe('CadreNodeProvider — saved owner trust (D-08..D-11)', () => {
 // `controlNetwork.bootstrapNodes` at boot, config addresses first, and never become relay targets.
 // ---------------------------------------------------------------------------
 import { captureConsole, expectNoSecretInConsole } from '../../engines/__fixtures__/console-leak';
+import { readBootstrapConfig } from '../../config/bootstrap-config';
 
 describe('CadreNodeProvider — join bootstrap merged at boot (D-26)', () => {
   const JB_KEY = '@votetorrent/authorityJoinBootstrap';
@@ -1027,6 +1028,13 @@ describe('CadreNodeProvider — join bootstrap merged at boot (D-26)', () => {
     network: { relayAddrs: string[] };
   };
   const optionsOf = (n: FakeCadreNode) => n.receivedOptions as Received;
+  // The provider read the checkout's real bootstrap.config.json at module load. A developer with local relays in it
+  // (the file is committed empty) used to fail JBP-1/3/4, so derive the config part of each expectation from that
+  // same document, exactly as the provider does: config addresses first, then the join hints, deduplicated; relayAddrs
+  // is the config list alone, so a join hint must never appear there.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const CFG: string[] = readBootstrapConfig(require('../../../bootstrap.config.json')).addrs.flatMap(resolveBootstrapNodes);
+  const merged = (...join: string[]) => [...new Set([...CFG, ...join])];
 
   beforeEach(async () => {
     priorGetItem = getItemMock.getMockImplementation();
@@ -1041,15 +1049,15 @@ describe('CadreNodeProvider — join bootstrap merged at boot (D-26)', () => {
     jest.dontMock('react');
   });
 
-  it('JBP-1 merges the stored circuit addresses (sanitized, deduplicated) and leaves relayAddrs empty', async () => {
+  it('JBP-1 merges the stored circuit addresses (sanitized, deduplicated) and never adds them to relayAddrs', async () => {
     await AsyncStorage.setItem(JB_KEY, JSON.stringify([C1, ` ${C1} `, DIRECT, C2]));
     const c = captureConsole();
     try {
       const { captured } = renderProvider();
       await flushBoot();
       expect(mockConstructedNodes).toHaveLength(1);
-      expect(optionsOf(mockConstructedNodes[0]).controlNetwork.bootstrapNodes).toEqual([C1, C2]);
-      expect(optionsOf(mockConstructedNodes[0]).network.relayAddrs).toEqual([]);
+      expect(optionsOf(mockConstructedNodes[0]).controlNetwork.bootstrapNodes).toEqual(merged(C1, C2));
+      expect(optionsOf(mockConstructedNodes[0]).network.relayAddrs).toEqual(CFG);
       await expect(captured.value!.nodeSettled).resolves.toMatchObject({ status: 'ready' });
       expectNoSecretInConsole(c, [C1, C2, 'planted-jb-text']);
     } finally {
@@ -1115,7 +1123,7 @@ describe('CadreNodeProvider — join bootstrap merged at boot (D-26)', () => {
       await flushBoot();
       expect(mockConstructedNodes).toHaveLength(1);
       expect(mockConstructedNodes[0].start).toHaveBeenCalledTimes(1);
-      expect(optionsOf(mockConstructedNodes[0]).controlNetwork.bootstrapNodes).toEqual([]);
+      expect(optionsOf(mockConstructedNodes[0]).controlNetwork.bootstrapNodes).toEqual(merged());
       await expect(captured.value!.nodeSettled).resolves.toMatchObject({ status: 'ready' });
       expectNoSecretInConsole(c, [C1, C2, 'planted-jb-text']);
     } finally {
@@ -1132,8 +1140,8 @@ describe('CadreNodeProvider — join bootstrap merged at boot (D-26)', () => {
       await flushBoot();
       expect(mockConstructedNodes).toHaveLength(2);
       const [first, second] = mockConstructedNodes;
-      expect(optionsOf(first).controlNetwork.bootstrapNodes).toEqual([C1]);
-      expect(optionsOf(second).controlNetwork.bootstrapNodes).toEqual([C1]);
+      expect(optionsOf(first).controlNetwork.bootstrapNodes).toEqual(merged(C1));
+      expect(optionsOf(second).controlNetwork.bootstrapNodes).toEqual(merged(C1));
       await expect(captured.value!.nodeSettled).resolves.toMatchObject({ status: 'ready' });
       expectNoSecretInConsole(c, [C1, C2, 'planted-jb-text']);
     } finally {
