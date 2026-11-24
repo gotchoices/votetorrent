@@ -5,8 +5,11 @@
  * D-08: vote signing uses the real producer in every build. The resolver that eligibility uses is
  * real-only, but it returns an injected override unchanged, so this gate is what keeps the dev stub
  * out of the vote path. It bans the stub producer name, the legacy resolver name and the stub
- * signature placeholder (all named here only in words) in vote-casting.ts, every vote-record-*.ts
- * (current and future, by filename pattern), and every non-test file that imports vote-casting. The
+ * signature placeholder (all named here only in words) in the app's vote-casting binding, every
+ * vote-record-*.ts (current and future, by filename pattern), every `vote-*.ts` and `run-vote-send.ts`
+ * under the SHARED voter directory (`packages/workflows/src/voter`, phase 67 plan 22), and every
+ * non-test file under either root that imports vote-casting (with or without a `.js` suffix). The
+ * castVote shape rules read the SHARED vote-casting.ts; R5 pins the app binding to no logic. The
  * device proof's `producer-real` leg is the runtime counterpart.
  *
  * The castVote shape rules: exactly one sign call on the eligibility producer, a single producer
@@ -24,7 +27,9 @@ import { join } from 'node:path'
 
 const ENGINES = join(__dirname, '../engines')
 const SRC = join(__dirname, '..')
-const CASTING = join(ENGINES, 'vote-casting.ts')
+const SHARED_VOTER = join(__dirname, '../../../../packages/workflows/src/voter')
+const CASTING = join(SHARED_VOTER, 'vote-casting.ts')
+const BINDING = join(ENGINES, 'vote-casting.ts')
 
 const STUB_PRODUCER = 'Stub' + 'AttestationProducer'
 const LEGACY_RESOLVER = 'resolveAttestation' + 'Producer'
@@ -87,6 +92,15 @@ function voteSigningTargets (enginesDir: string): string[] {
 		.sort()
 }
 
+/** The shared voter directory's vote files: every non-test `vote-*.ts` plus `run-vote-send.ts`. */
+function sharedVoteTargets (sharedDir: string): string[] {
+	return readdirSync(sharedDir)
+		.filter(n => /^vote-.*\.ts$/.test(n) || n === 'run-vote-send.ts')
+		.filter(n => !TEST_FILE_PATTERN.test(n))
+		.map(n => join(sharedDir, n))
+		.sort()
+}
+
 /** D8-1 */
 function scanProducerTokens (files: readonly string[]): Violation[] {
 	const out: Violation[] = []
@@ -102,11 +116,23 @@ function scanProducerTokens (files: readonly string[]): Violation[] {
 	return out
 }
 
-/** D8-2 */
-function scanImporters (srcRoot: string): { importers: string[], violations: Violation[] } {
-	const importers = walkSourceFiles(srcRoot).filter(f => /from\s+['"][^'"]*\/vote-casting['"]/.test(stripCommentsPreservingLines(readFileSync(f, 'utf8'))))
+/** D8-2: every non-test file under any root that imports vote-casting (an optional `.js` suffix included). */
+function scanImporters (roots: readonly string[]): { importers: string[], violations: Violation[] } {
+	const importers = roots.flatMap(root => walkSourceFiles(root)).filter(f => /from\s+['"][^'"]*\/vote-casting(\.js)?['"]/.test(stripCommentsPreservingLines(readFileSync(f, 'utf8'))))
 	return { importers, violations: scanProducerTokens(importers).map(v => ({ ...v, rule: 'D8-2' })) }
 }
+
+/** R5: the tokens of a build, nonce, sign, verify or read-chain call; the app binding must contain none. */
+const BINDING_LOGIC_TOKENS = [
+	'signDeviceKey' + 'Digest(',
+	'makeVote' + 'Nonce(',
+	'buildVote' + 'Entry(',
+	'voterEntry' + 'Digest(',
+	'verifySig' + 'P256(',
+	'getRandom' + 'Values(',
+	'checkVoting' + 'Key(',
+	'getAssociationsBy' + 'DeviceKey(',
+] as const
 
 /** Counts the top-level arguments of the call whose `(` is at `openIndex`. */
 function callArgCount (src: string, openIndex: number): number {
@@ -268,9 +294,23 @@ describe('planted fixtures (the scanners can fail)', () => {
 		writeFileSync(join(dir, 'other.tsx'), 'const r = ' + LEGACY_RESOLVER + '()\n')
 		mkdirSync(join(dir, 'node_modules'))
 		writeFileSync(join(dir, 'node_modules', 'dep.ts'), "import x from './vote-casting'\n" + LEGACY_RESOLVER + '\n')
-		const { importers, violations } = scanImporters(dir)
+		const { importers, violations } = scanImporters([dir])
 		expect(importers).toEqual([screen])
 		expect(violations.map(v => [v.rule, v.file, v.line])).toEqual([['D8-2', screen, 2]])
+	})
+
+	it('P6 an importer with a .js suffix under a second root is scanned', () => {
+		const second = join(dir, 'shared-voter')
+		mkdirSync(second)
+		const runner = join(second, 'run-vote-send.ts')
+		writeFileSync(runner, ["import { digestBytesFromBase64Url } from './vote-casting.js'", 'const r = ' + LEGACY_RESOLVER + '()', ''].join('\n'))
+		writeFileSync(join(second, 'quiet.ts'), 'const r = ' + LEGACY_RESOLVER + '()\n')
+		const first = join(dir, 'first')
+		mkdirSync(first)
+		writeFileSync(join(first, 'other.ts'), 'const ok = 1\n')
+		const { importers, violations } = scanImporters([first, second])
+		expect(importers).toEqual([runner])
+		expect(violations.map(v => [v.rule, v.file, v.line])).toEqual([['D8-2', runner, 2]])
 	})
 
 	it('P5a the good fixture has no shape violations', () => {
@@ -309,20 +349,30 @@ describe('real targets', () => {
 	it('R1 the target set is non-vacuous', () => {
 		const names = voteSigningTargets(ENGINES).map(f => f.slice(ENGINES.length + 1))
 		for (const n of ['vote-casting.ts', 'vote-record-store.ts', 'vote-record-vault.ts', 'vote-record-wrap.ts']) expect(names).toContain(n)
+		const shared = sharedVoteTargets(SHARED_VOTER).map(f => f.slice(SHARED_VOTER.length + 1))
+		for (const n of ['vote-casting.ts', 'vote-sending.ts', 'vote-sending-port.ts', 'run-vote-send.ts']) expect(shared).toContain(n)
 	})
 
-	it('R2 D8-1: no stub producer, legacy resolver or stub placeholder in vote-casting or vote-record-*', () => {
-		const v = scanProducerTokens(voteSigningTargets(ENGINES))
+	it('R2 D8-1: no stub producer, legacy resolver or stub placeholder in vote-casting, vote-record-* or the shared vote files', () => {
+		const v = scanProducerTokens([...voteSigningTargets(ENGINES), ...sharedVoteTargets(SHARED_VOTER)])
 		expect({ counts: countsBy(v), detail: v.map(x => `${x.file}:${x.line}`) }).toEqual({ counts: ZERO_COUNTS, detail: [] })
 	})
 
-	it('R3 D8-2: no importer of vote-casting names the banned tokens', () => {
-		const { importers, violations } = scanImporters(SRC)
+	it('R3 D8-2: no importer of vote-casting under the app or the shared voter directory names the banned tokens', () => {
+		const { importers, violations } = scanImporters([SRC, SHARED_VOTER])
 		expect({ counts: countsBy(violations), detail: violations.map(x => `${x.file}:${x.line}`), importers: importers.length >= 0 }).toEqual({ counts: ZERO_COUNTS, detail: [], importers: true })
 	})
 
 	it('R4 D8-3: castVote keeps its signing shape', () => {
 		const v = scanCastVoteShape(readFileSync(CASTING, 'utf8'), CASTING)
 		expect(v.map(x => `${x.token} ${x.text} @${x.line}`)).toEqual([])
+	})
+
+	it('R5 the app binding at engines/vote-casting.ts makes no build, nonce, sign, verify or read-chain call', () => {
+		const stripped = stripCommentsPreservingLines(readFileSync(BINDING, 'utf8'))
+		const counts = Object.fromEntries(BINDING_LOGIC_TOKENS.map(t => [t, countOf(stripped, t)]))
+		expect(counts).toEqual(Object.fromEntries(BINDING_LOGIC_TOKENS.map(t => [t, 0])))
+		// not vacuous: the binding forwards to the shared castVote with the app seams
+		expect(countOf(stripped, 'appVoteCastingSeams()')).toBe(2)
 	})
 })

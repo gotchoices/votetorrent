@@ -1,6 +1,8 @@
 /**
  * vote-casting.source-gate.test.ts - pins the never-signs and lazy-producer rules for eligibility
- * (D-06, D-07, D-08 layering) over comment-stripped vote-casting.ts.
+ * (D-06, D-07, D-08 layering) over the comment-stripped SHARED vote-casting.ts
+ * (`packages/workflows/src/voter/vote-casting.ts`, phase 67 plan 22), and pins the app binding at
+ * `engines/vote-casting.ts` to no gated function and no read-chain call (SG5).
  *
  * The separate D-08 producer-token gate over the whole vote-casting module arrives with `castVote`.
  * Function slices make this gate survive `castVote` being appended later, so that plan must not
@@ -64,9 +66,21 @@ const BANNED_TOKENS = [
 
 const GATED_FUNCTIONS = ['evaluateVoteEligibility', 'resolveVotingRegistrant', 'findUnvotableReason', 'resolveVoteSelections'] as const
 
-const SOURCE = stripCommentsPreservingLines(readFileSync(join(__dirname, '..', 'vote-casting.ts'), 'utf8'))
+const SOURCE = stripCommentsPreservingLines(readFileSync(join(__dirname, '../../../../../packages/workflows/src/voter/vote-casting.ts'), 'utf8'))
+const BINDING = stripCommentsPreservingLines(readFileSync(join(__dirname, '..', 'vote-casting.ts'), 'utf8'))
 
-describe('vote-casting eligibility source gate', () => {
+/** The app binding must define none of the gated functions and make none of the read-chain calls. */
+const BINDING_BANNED = [
+	'function ' + 'resolveVotingRegistrant',
+	'function ' + 'findUnvotableReason',
+	'function ' + 'resolveVoteSelections',
+	'getCurrentDevice' + 'Key(',
+	'getAssociationsBy' + 'DeviceKey(',
+	'getRegis' + 'trant(',
+	'checkVoting' + 'Key(',
+] as const
+
+describe('vote-casting eligibility source gate (shared packages/workflows/src/voter/vote-casting.ts)', () => {
 	it.each(GATED_FUNCTIONS)('SG1 %s never signs, seals, writes, logs or reads the wall clock', (name) => {
 		const counts = countsByToken(scan(sliceFunction(SOURCE, name), SIGN_TOKENS), SIGN_TOKENS)
 		expect(counts).toEqual(Object.fromEntries(SIGN_TOKENS.map(t => [t, 0])))
@@ -95,6 +109,13 @@ describe('vote-casting eligibility source gate', () => {
 
 	it('SG4 the gated slices are non-trivial (the gate is not vacuous)', () => {
 		for (const name of GATED_FUNCTIONS) expect(sliceFunction(SOURCE, name).split('\n').length).toBeGreaterThan(5)
+	})
+
+	it('SG5 the app binding defines no gated function and makes no read-chain call', () => {
+		const counts = countsByToken(scan(BINDING, BINDING_BANNED), BINDING_BANNED)
+		expect(counts).toEqual(Object.fromEntries(BINDING_BANNED.map(t => [t, 0])))
+		// not vacuous: the binding is the file that forwards to the shared castVote
+		expect(BINDING).toContain('appVoteCastingSeams()')
 	})
 
 	describe('planted self-checks', () => {
