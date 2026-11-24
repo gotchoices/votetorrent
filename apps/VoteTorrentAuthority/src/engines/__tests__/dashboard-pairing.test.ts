@@ -491,12 +491,15 @@ describe('requestPairingCode flows', () => {
 		expect(signer).not.toHaveBeenCalled();
 		expect(localMint).not.toHaveBeenCalled();
 
-		// A concurrent call while one is in flight: cancelled at once, no second prompt.
+		// A concurrent call while one is in flight: cancelled at once, no second prompt. The guard is per
+		// node (67-17: colocated nodes of one process never block each other), so both calls carry this
+		// phone's one node.
 		let release: (r: PairMintReply) => void = () => undefined;
 		const slowMint = jest.fn(() => new Promise<PairMintReply>((resolve) => { release = resolve; }));
 		const busySigner = countingSigner();
-		const first = requestPairingCode(args({ signer: busySigner, localMint: slowMint }));
-		const second = await requestPairingCode(args({ signer: busySigner, localMint: slowMint }));
+		const busyNode = fakeNode();
+		const first = requestPairingCode(args({ signer: busySigner, localMint: slowMint, node: busyNode }));
+		const second = await requestPairingCode(args({ signer: busySigner, localMint: slowMint, node: busyNode }));
 		expect(second).toEqual({ ok: false, reason: 'cancelled' });
 		for (let i = 0; i < 50 && slowMint.mock.calls.length === 0; i++) await new Promise((r) => setTimeout(r, 0));
 		expect(slowMint).toHaveBeenCalledTimes(1);
@@ -848,9 +851,18 @@ describe('real database (D-26)', () => {
 				if (stored.includes(w) || failures.includes(w)) throw new Error(`LEAK-1: a 16-char window at offset ${o} leaked`);
 			}
 		}
-		for (const file of ['dashboard-pairing.ts', 'pair-mint-client.ts', 'paired-browsers-store.ts']) {
-			const src = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+		// The pairing workflow body lives in the shared package (67-17); its app path is a binding. Both are
+		// scanned, and the marker pins the scan to the file that holds `runPairingAttempt`.
+		const SOURCES: ReadonlyArray<{ file: string; marker?: string }> = [
+			{ file: path.join(__dirname, '../../../../../packages/workflows/src/authority/dashboard-pairing.ts'), marker: 'async function runPairingAttempt' },
+			{ file: path.join(__dirname, '..', 'pair-mint-client.ts') },
+			{ file: path.join(__dirname, '..', 'paired-browsers-store.ts') },
+			{ file: path.join(__dirname, '..', 'dashboard-pairing.ts') },
+		];
+		for (const { file, marker } of SOURCES) {
+			const src = fs.readFileSync(file, 'utf8');
 			expect(nonLiteralConsoleFirstArgs(src)).toEqual([]);
+			if (marker) expect(src).toContain(marker);
 		}
 	});
 });

@@ -637,15 +637,24 @@ describe('console contract (D-06)', () => {
 		}
 	});
 
-	it('LK-2 the glue source has only closed literal console tags and class-name arguments', () => {
-		const source = fs.readFileSync(path.join(__dirname, '../authority-network-join.ts'), 'utf8');
+	// The join body moved to @votetorrent/workflows (67-17); the shared package writes no semicolons, so a call
+	// is one whole line ending in `)`. The app path is a binding and must log nothing itself.
+	const SHARED_JOIN = path.join(__dirname, '../../../../../packages/workflows/src/authority/authority-network-join.ts');
+
+	it('LK-2 the shared join source has exactly six closed literal console tags with class-name arguments', () => {
+		const source = fs.readFileSync(SHARED_JOIN, 'utf8');
 		expect(nonLiteralConsoleFirstArgs(source)).toEqual([]);
 		const allowed = new Set([TAG_NOT_RECORDED, TAG_NOT_VOUCHED, TAG_REFRESH_FAILED, TAG_GUARD_REFUSED, TAG_GUARD_UNREADABLE]);
 		for (const tag of consoleTags(source)) expect(allowed.has(tag)).toBe(true);
-		const calls = source.match(/console\.[a-z]+\([^;]*\);/g) ?? [];
-		expect(calls.length).toBeGreaterThan(0);
+		const calls = source.match(/console\.[a-z]+\([^\n]*\)$/gm) ?? [];
+		expect(calls.length).toBe(6);
 		for (const call of calls) {
-			expect(call).toMatch(/^console\.(?:warn|error)\('[^']*'(?:, errorClassName\([A-Za-z_$][\w$]*\))?\);$/);
+			expect(call).toMatch(/^console\.(?:warn|error)\('[^']*'(?:, errorClassName\([A-Za-z_$][\w$]*\))?\)$/);
 		}
+	});
+
+	it('LK-2b the app binding has no console call of its own', () => {
+		const binding = fs.readFileSync(path.join(__dirname, '../authority-network-join.ts'), 'utf8');
+		expect(binding.match(/console\./g) ?? []).toHaveLength(0);
 	});
 });

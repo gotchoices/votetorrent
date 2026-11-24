@@ -65,7 +65,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decodeNetworkJoinCode } from "@votetorrent/vote-engine/rn";
 import type { NetworkJoinCodeDecodeFailure, NetworkJoinFailureReason, NetworkJoinStep } from "@votetorrent/vote-engine/rn";
 import type { NetworkReference } from "@votetorrent/vote-core";
-import type { AuthorityJoinNode } from "../../engines/authority-network-join";
+import { completeAuthorityJoin, runAuthorityNetworkJoin, type AuthorityJoinNode } from "../../engines/authority-network-join";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { useApp } from "../../providers/AppProvider";
@@ -144,16 +144,6 @@ type Phase =
 
 const resolvedNoop = (): Promise<void> => Promise.resolve();
 
-/**
- * The glue statically imports `@serfab/cadre-core`, which the RN jest suites that load the whole
- * navigation tree cannot load. A RELATIVE lazy require is unaffected by Metro's import-only exports
- * trap. This file must never lazily require `@serfab/cadre-core` itself.
- */
-function loadJoinGlue(): typeof import("../../engines/authority-network-join") {
-	// eslint-disable-next-line @typescript-eslint/no-var-requires
-	return require("../../engines/authority-network-join") as typeof import("../../engines/authority-network-join");
-}
-
 export interface JoinNetworkScreenProps {
 	/** True on the `JoinNetworkByScan` route: the scanner opens as the screen arrives. */
 	openScannerOnMount?: boolean;
@@ -221,7 +211,6 @@ export default function JoinNetworkScreen({ openScannerOnMount = false }: JoinNe
 	}, [scanCount, scannedOk, t]);
 
 	async function finishJoin(joinNode: AuthorityJoinNode, networkRef: NetworkReference, mayRoute: boolean): Promise<void> {
-		const { completeAuthorityJoin } = loadJoinGlue();
 		const refreshOwnerTrust = typeof refreshRef.current === "function" ? refreshRef.current : resolvedNoop;
 		try {
 			const { trustSaved } = await completeAuthorityJoin({
@@ -365,9 +354,8 @@ export default function JoinNetworkScreen({ openScannerOnMount = false }: JoinNe
 			let joinNode: AuthorityJoinNode;
 			try {
 				const user = await getDeviceUser();
-				const glue = loadJoinGlue();
 				joinNode = node as unknown as AuthorityJoinNode;
-				result = await glue.runAuthorityNetworkJoin({
+				result = await runAuthorityNetworkJoin({
 					node: joinNode,
 					networksEngine,
 					user,

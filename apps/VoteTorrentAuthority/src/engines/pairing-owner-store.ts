@@ -20,6 +20,7 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { PairMintLogEntry, PairMintPorts } from '@votetorrent/vote-engine/rn';
+import { REVOCATION_GRACE_MS, REVOCATION_RESULTS, type OwnerMintLogEntry, type RevocationResult } from '@votetorrent/workflows/authority';
 import { inviteExpiryMs } from './voter-invite';
 
 export const PAIRING_SWITCH_KEY = '@votetorrent/settings/allowBrowserPairing';
@@ -61,15 +62,12 @@ export const PAIRING_REFUSAL_CODES = Object.freeze([
  */
 export const PRE_REPLAY_REFUSALS = Object.freeze(['refused:switched-off', 'refused:expired', 'refused:requester-mismatch'] as const);
 
-/** What the owner's revocation sweep (R-D) did for an approved entry. Only `withdrawn` is not final. */
-export const REVOCATION_RESULTS = Object.freeze(['removed', 'gone', 'not-owner', 'refused', 'withdrawn', 'expired'] as const);
-export type RevocationResult = (typeof REVOCATION_RESULTS)[number];
-
-/** A withdrawn code stays a candidate this long past its expiry: a redemption may have raced the withdrawal. */
-export const REVOCATION_GRACE_MS = 10 * 60_000;
-
-/** The stored entry: the service's six fields plus the sweep's mark (approved entries only). */
-export type OwnerMintLogEntry = PairMintLogEntry & { revocation?: { result: RevocationResult; at: number } };
+/**
+ * The revocation results, the grace and the stored-entry type live in the shared pair-mint host
+ * (`packages/workflows/src/authority/pair-mint-host.ts`, phase 67 plan 17) and are re-exported here by name.
+ */
+export { REVOCATION_RESULTS, REVOCATION_GRACE_MS } from '@votetorrent/workflows/authority';
+export type { RevocationResult, OwnerMintLogEntry } from '@votetorrent/workflows/authority';
 
 export class PairingOwnerStoreError extends Error {
 	readonly reason: 'unreadable';

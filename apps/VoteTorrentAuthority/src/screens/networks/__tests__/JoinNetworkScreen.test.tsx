@@ -324,7 +324,10 @@ describe("K: the pure key maps and the source (D-06)", () => {
 		expect(code.match(/goBack\(/g) ?? []).toHaveLength(1);
 		expect(code.match(/<ScrollView/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
 		expect(code.match(/"founder-cannot-join"/g) ?? []).toHaveLength(2);
-		expect(code.match(/require\("\.\.\/\.\.\/engines\/authority-network-join"\)/g) ?? []).toHaveLength(1);
+		// 67-17: the join binding is imported statically (the lazy relative require is gone); the screen
+		// still never requires anything itself.
+		expect(code.match(/require\(/g) ?? []).toHaveLength(0);
+		expect(code.match(/from "\.\.\/\.\.\/engines\/authority-network-join"/g) ?? []).toHaveLength(1);
 	});
 });
 

@@ -324,10 +324,24 @@ const PAIRING_SOURCES: readonly string[] = Object.freeze([
 	'engines/pair-mint-client.ts',
 	'engines/dashboard-pairing.ts',
 	'engines/paired-browsers-store.ts',
+	'engines/lazy-cadre-invitation-codec.ts',
 	'screens/dashboard/PairBrowserScreen.tsx',
 	'engines/paired-browsers.ts',
 	'screens/dashboard/PairedBrowsersScreen.tsx',
 ]);
+
+/**
+ * The three pairing workflow bodies moved into `@votetorrent/workflows` (67-17); the `engines/` paths above
+ * are bindings that must still log nothing. Each shared file is pinned by a marker that only the moved body
+ * carries, so a scan of the wrong file (the binding) is caught.
+ */
+const WORKFLOWS_SRC = path.join(__dirname, '..', '..', '..', '..', '..', 'packages', 'workflows', 'src');
+const SHARED_PAIRING_SOURCES: Readonly<Record<string, string>> = Object.freeze({
+	'authority/voter-invite.ts': 'function withoutEdgeReaders',
+	'authority/pair-mint-host.ts': 'function sweepOnce',
+	'authority/dashboard-pairing.ts': 'function runPairingAttempt',
+});
+const sharedPairingSource = (rel: string): string => path.join(WORKFLOWS_SRC, rel);
 
 /** Source with comments removed; string and template literals are kept intact. */
 function stripComments(src: string): string {
@@ -449,6 +463,17 @@ describe('pairing sources log closed tags only', () => {
 		const file = path.join(SRC_ROOT, rel);
 		expect(fs.existsSync(file)).toBe(true);
 		const raw = fs.readFileSync(file, 'utf8');
+		expect(nonLiteralConsoleFirstArgs(raw)).toEqual([]);
+		const src = stripComments(raw);
+		expect((src.match(/console\.(log|debug)\(/g) ?? []).length).toBe(0);
+		expect(pairingLogViolations(raw)).toEqual([]);
+	});
+
+	it.each(Object.keys(SHARED_PAIRING_SOURCES))('%s (shared) logs closed tags and error class names only', (rel) => {
+		const file = sharedPairingSource(rel);
+		expect(fs.existsSync(file)).toBe(true);
+		const raw = fs.readFileSync(file, 'utf8');
+		expect(raw).toContain(SHARED_PAIRING_SOURCES[rel]);
 		expect(nonLiteralConsoleFirstArgs(raw)).toEqual([]);
 		const src = stripComments(raw);
 		expect((src.match(/console\.(log|debug)\(/g) ?? []).length).toBe(0);
