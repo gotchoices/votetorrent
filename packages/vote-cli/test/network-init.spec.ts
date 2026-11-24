@@ -1,13 +1,14 @@
 // network-init.spec.ts: the CLI-owned founding builders (buildNetworkInit / buildAuthorityUser) have the
 // engine fixtures' NetworkInit / User shapes minus the media fields, carry the schema's nine Scope codes,
-// the app's founding threshold policies, and refuse bad inputs with bad-arg. Phase A compares against the
-// engine fixtures directly and pins their shapes in test/golden/network-init-shape.json.
+// the app's founding threshold policies, and refuse bad inputs with bad-arg. The shapes are pinned in
+// test/golden/network-init-shape.json, which was proven equal to the engine fixtures' shapes (minus
+// imageUrl / imageRef) in the commit "founding builders match the engine fixture shapes"; the fixture
+// import was dropped in the next one, so nothing under vote-cli depends on the engine's test fixtures.
 
 import { expect } from 'chai'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ElectionType, UserKeyType } from '@votetorrent/vote-core'
-import { makeTestNetworkInit, makeTestUser } from '../../vote-engine/test/fixtures/test-context.js'
 import { AUTHORITY_KEY_LIFETIME_MS, FOUNDING_SCOPES, FOUNDING_THRESHOLD_POLICIES, buildAuthorityUser, buildNetworkInit } from '../src/network/network-init.js'
 import { REPO_ROOT } from '../src/run/options.js'
 
@@ -41,11 +42,6 @@ const RELAY = '/ip4/127.0.0.1/tcp/4001/ws/p2p/12D3KooWFixtureRelayPeerIdFixtureR
 const KEY = '02' + 'ab'.repeat(32)
 const ID = '0f6d1a2e-5c3b-4d7e-8f90-1234567890ab'
 
-function withoutKey<T extends object>(v: T, key: string): Record<string, unknown> {
-  const { [key]: _dropped, ...rest } = v as Record<string, unknown>
-  return rest
-}
-
 async function codeOf(fn: () => unknown): Promise<string> {
   try {
     await fn()
@@ -58,10 +54,9 @@ async function codeOf(fn: () => unknown): Promise<string> {
 
 describe('network init: CLI-owned founding builders', () => {
   it("buildNetworkInit output has the engine fixture's NetworkInit shape, without media fields", () => {
-    const fixture = withoutKey(makeTestNetworkInit(), 'imageUrl')
     const built = buildNetworkInit({ name: 'T24 Net', relays: [RELAY] })
-    expect(sameShape(shapeOf(built), shapeOf(fixture))).to.equal(true)
     expect(sameShape(shapeOf(built), golden.networkInit)).to.equal(true)
+    expect('imageUrl' in golden.networkInit).to.equal(false)
     expect('imageUrl' in built).to.equal(false)
     expect('imageCid' in built).to.equal(false)
     expect('imageUrl' in built.primaryAuthority).to.equal(false)
@@ -73,10 +68,9 @@ describe('network init: CLI-owned founding builders', () => {
   })
 
   it("buildAuthorityUser output has the engine fixture's User shape, without imageRef", () => {
-    const fixture = withoutKey(makeTestUser(), 'imageRef')
     const built = buildAuthorityUser({ id: ID, name: 'Officer', publicKeyHex: KEY, nowMs: 1_700_000_000_000 })
-    expect(sameShape(shapeOf(built), shapeOf(fixture))).to.equal(true)
     expect(sameShape(shapeOf(built), golden.user)).to.equal(true)
+    expect('imageRef' in golden.user).to.equal(false)
     expect('imageRef' in built).to.equal(false)
     expect(built).to.deep.equal({ id: ID, name: 'Officer', activeKeys: [{ key: KEY, type: 'M', expiration: 1_700_000_000_000 + AUTHORITY_KEY_LIFETIME_MS }] })
   })
@@ -147,11 +141,5 @@ describe('network init: CLI-owned founding builders', () => {
     expect(built.activeKeys[0]!.type).to.equal(UserKeyType.mobile)
     expect(built.activeKeys[0]!.type).to.equal('M')
     expect(built.activeKeys[0]!.expiration - 1_700_000_000_000).to.equal(AUTHORITY_KEY_LIFETIME_MS)
-  })
-
-  it('the golden file equals the fixture shapes', () => {
-    expect(golden.networkInit).to.deep.equal(shapeOf(withoutKey(makeTestNetworkInit(), 'imageUrl')))
-    expect(golden.user).to.deep.equal(shapeOf(withoutKey(makeTestUser(), 'imageRef')))
-    expect(golden.scopes).to.have.lengthOf(9)
   })
 })
