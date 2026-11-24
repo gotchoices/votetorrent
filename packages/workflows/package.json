@@ -1,0 +1,63 @@
+{
+	"name": "@votetorrent/workflows",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"description": "Node-safe Authority and Voter workflow drivers shared by both apps and the vt CLI. Platform dependencies are injected, never imported.",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"files": [
+		"src",
+		"dist",
+		"!dist/test",
+		"!**/*.tsbuildinfo"
+	],
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"default": "./dist/index.js"
+		},
+		"./authority": {
+			"types": "./dist/authority/index.d.ts",
+			"import": "./dist/authority/index.js",
+			"default": "./dist/authority/index.js"
+		},
+		"./voter": {
+			"types": "./dist/voter/index.d.ts",
+			"import": "./dist/voter/index.js",
+			"default": "./dist/voter/index.js"
+		},
+		"./platform": {
+			"types": "./dist/platform/index.d.ts",
+			"import": "./dist/platform/index.js",
+			"default": "./dist/platform/index.js"
+		}
+	},
+	"scripts": {
+		"clean": "rm -rf dist",
+		"build": "tsc -p tsconfig.build.json",
+		"test": "TS_NODE_PROJECT=./tsconfig.test.json mocha --node-option=import=./register-ts-node.mjs --node-option=experimental-specifier-resolution=node \"test/**/*.spec.ts\""
+	},
+	"dependencies": {
+		"@libp2p/interface": "^3.1.0",
+		"@multiformats/multiaddr": "^13.0.1",
+		"@noble/ciphers": "2.2.0",
+		"@noble/curves": "2.2.0",
+		"@noble/hashes": "2.2.0",
+		"@quereus/quereus": "patch:@quereus/quereus@npm%3A5.6.1#~/.yarn/patches/@quereus-quereus-npm-5.6.1-votetorrent.patch",
+		"@quereus/store": "^5.6.1",
+		"@serfab/cadre-core": "patch:@serfab/cadre-core@npm%3A1.24.0#~/.yarn/patches/@serfab-cadre-core-npm-1.24.0-votetorrent.patch",
+		"@votetorrent/ui-web": "workspace:*",
+		"@votetorrent/vote-core": "workspace:*",
+		"@votetorrent/vote-engine": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/mocha": "^10.0.10",
+		"@types/node": "^22.13.10",
+		"chai": "^5.2.0",
+		"mocha": "^11.5.0",
+		"ts-node": "^10.8.1",
+		"typescript": "^5.6.3"
+	}
+}

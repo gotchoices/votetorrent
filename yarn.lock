@@ -7313,6 +7313,39 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@votetorrent/vote-cli@workspace:packages/vote-cli":
+  version: 0.0.0-use.local
+  resolution: "@votetorrent/vote-cli@workspace:packages/vote-cli"
+  dependencies:
+    "@libp2p/circuit-relay-v2": "npm:^4"
+    "@libp2p/crypto": "npm:^5.1.13"
+    "@libp2p/interface": "npm:^3.1.0"
+    "@libp2p/peer-id": "npm:^6.0.0"
+    "@libp2p/websockets": "npm:^10"
+    "@multiformats/multiaddr": "npm:^13.0.1"
+    "@noble/ciphers": "npm:2.2.0"
+    "@noble/curves": "npm:2.2.0"
+    "@noble/hashes": "npm:2.2.0"
+    "@optimystic/db-core": "npm:^1.29.0"
+    "@optimystic/db-p2p": "npm:^1.29.0"
+    "@optimystic/db-p2p-storage-fs": "npm:^1.29.0"
+    "@quereus/quereus": "patch:@quereus/quereus@npm%3A5.6.1#~/.yarn/patches/@quereus-quereus-npm-5.6.1-votetorrent.patch"
+    "@serfab/cadre-core": "patch:@serfab/cadre-core@npm%3A1.24.0#~/.yarn/patches/@serfab-cadre-core-npm-1.24.0-votetorrent.patch"
+    "@types/mocha": "npm:^10.0.10"
+    "@types/node": "npm:^22.13.10"
+    "@votetorrent/ui-web": "workspace:*"
+    "@votetorrent/vote-core": "workspace:*"
+    "@votetorrent/vote-engine": "workspace:*"
+    "@votetorrent/workflows": "workspace:*"
+    chai: "npm:^5.2.0"
+    mocha: "npm:^11.5.0"
+    ts-node: "npm:^10.8.1"
+    typescript: "npm:^5.6.3"
+  bin:
+    vt: ./dist/bin/vt.js
+  languageName: unknown
+  linkType: soft
+
 "@votetorrent/vote-core@npm:^0.0.1, @votetorrent/vote-core@workspace:*, @votetorrent/vote-core@workspace:packages/vote-core":
   version: 0.0.0-use.local
   resolution: "@votetorrent/vote-core@workspace:packages/vote-core"
@@ -7384,6 +7417,30 @@ __metadata:
     "@quereus/plugin-indexeddb": 5.6.1
     "@quereus/quereus": 5.6.1
     "@votetorrent/vote-engine": "workspace:*"
+  languageName: unknown
+  linkType: soft
+
+"@votetorrent/workflows@workspace:*, @votetorrent/workflows@workspace:packages/workflows":
+  version: 0.0.0-use.local
+  resolution: "@votetorrent/workflows@workspace:packages/workflows"
+  dependencies:
+    "@libp2p/interface": "npm:^3.1.0"
+    "@multiformats/multiaddr": "npm:^13.0.1"
+    "@noble/ciphers": "npm:2.2.0"
+    "@noble/curves": "npm:2.2.0"
+    "@noble/hashes": "npm:2.2.0"
+    "@quereus/quereus": "patch:@quereus/quereus@npm%3A5.6.1#~/.yarn/patches/@quereus-quereus-npm-5.6.1-votetorrent.patch"
+    "@quereus/store": "npm:^5.6.1"
+    "@serfab/cadre-core": "patch:@serfab/cadre-core@npm%3A1.24.0#~/.yarn/patches/@serfab-cadre-core-npm-1.24.0-votetorrent.patch"
+    "@types/mocha": "npm:^10.0.10"
+    "@types/node": "npm:^22.13.10"
+    "@votetorrent/ui-web": "workspace:*"
+    "@votetorrent/vote-core": "workspace:*"
+    "@votetorrent/vote-engine": "workspace:*"
+    chai: "npm:^5.2.0"
+    mocha: "npm:^11.5.0"
+    ts-node: "npm:^10.8.1"
+    typescript: "npm:^5.6.3"
   languageName: unknown
   linkType: soft
 
@@ -22822,6 +22879,7 @@ __metadata:
     "@votetorrent/attestation-native": "workspace:*"
     "@votetorrent/vote-core": "workspace:*"
     "@votetorrent/vote-engine": "workspace:*"
+    "@votetorrent/workflows": "workspace:*"
     buffer: "npm:^6.0.3"
     debug: "npm:^4.4.3"
     eslint: "npm:^8.19.0"
@@ -22983,6 +23041,7 @@ __metadata:
     "@votetorrent/ui-web": "workspace:*"
     "@votetorrent/vote-core": "workspace:*"
     "@votetorrent/vote-engine": "workspace:*"
+    "@votetorrent/workflows": "workspace:*"
     buffer: "npm:^6.0.3"
     eslint: "npm:^8.19.0"
     event-target-polyfill: "npm:^0.0.4"
