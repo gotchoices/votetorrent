@@ -56,7 +56,8 @@ export type RegistrationStackParamList = {
 	JoinNetwork: undefined;
 };
 
-// Scan tab: single root screen, no modals.
+// Scan tab: single root screen (the Join a network screen with its scanner), no modal routes. No
+// params: a scanned join code stays in that screen's state.
 export type ScanStackParamList = {
 	ScanHome: undefined;
 };

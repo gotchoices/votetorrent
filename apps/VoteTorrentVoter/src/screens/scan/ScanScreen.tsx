@@ -1,76 +1,45 @@
 /**
- * ScanScreen — Scan tab root (D-07 per-domain screen file). Branded "not available yet"
- * placeholder this phase: reads through `useVoterApp()` (D-06 / SHELL-03), renders its own
- * `scan.*` copy (title + body) instead of the generic `common.placeholderBody` stub, giving the
- * Scan tab its own identity (D-01). No modals owned by this tab (per D-08/D-09 topology) — no
- * navigation triggers here.
+ * ScanScreen — the Scan tab's root: scan an election authority's join-code QR and join its network.
  *
- * Real Scan content (camera/QR) lands in a future phase (SCAN-01 covers the placeholder only).
+ * It is the Join a network screen (`JoinNetworkScreen`, the one Settings and Registration open),
+ * hosted on this tab with its scanner, so there is one scanner and one join flow in the app:
+ *  - Each time the tab comes into view, the scanner opens, as long as the form is empty and the
+ *    camera can be used. Camera permission, no camera, a refused or failed camera, "Paste
+ *    instead" and a QR that is not a join code are all handled there, exactly as from Settings.
+ *  - A scan only fills the code field. The voter sees the network name and fingerprint and joins
+ *    with one tap on Join network; nothing joins on its own.
+ *  - The scanned code stays in that screen's state: it never enters navigation params.
+ *  - Leaving the tab closes the scanner (the camera never runs behind another tab). A code waiting
+ *    in the field, or a join in progress, is still there on return; a finished join clears.
+ *  - Done after a join opens the Vote tab, where the joined network's election shows.
+ *
+ * A phone that already joined a network gets the same screen the Settings entry shows: joining a
+ * different authority's network is refused with the screen's own "already belongs to another
+ * network" message.
  */
-import React from 'react';
-import {ScrollView, StyleSheet, Text} from 'react-native';
-import {useTheme} from '@react-navigation/native';
-import type {ExtendedTheme} from '@react-navigation/native';
-import {useTranslation} from 'react-i18next';
-import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
+import React, {useCallback, useState} from 'react';
+import {useFocusEffect, useIsFocused, useNavigation} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useVoterApp} from '../../providers/VoterAppProvider';
-import {globalStyles} from '../../theme/styles';
+import type {ScanStackParamList} from '../../navigation/types';
+import JoinNetworkScreen from '../settings/JoinNetworkScreen';
 
 export default function ScanScreen() {
-	// D-06/SHELL-03: every placeholder screen routes through useVoterApp() — no inline fixture-module import.
+	// SHELL-03: every screen routes through useVoterApp(); the join itself reads it inside JoinNetworkScreen.
 	useVoterApp();
-	const {colors, fonts, type: typeScale} = useTheme() as ExtendedTheme;
-	const {t} = useTranslation('scan');
+	const navigation = useNavigation<NativeStackNavigationProp<ScanStackParamList, 'ScanHome'>>();
+	const isFocused = useIsFocused();
+	const [scanRequest, setScanRequest] = useState(0);
 
-	return (
-		<ScrollView
-			style={[styles.screen, {backgroundColor: colors.background}]}
-			contentContainerStyle={[globalStyles.container, styles.centerColumn]}>
-			<FontAwesome6 name="qrcode" size={48} color={colors.muted} />
-			<Text
-				style={[
-					styles.title,
-					{
-						color: colors.text,
-						fontFamily: fonts.bold.fontFamily,
-						fontWeight: fonts.bold.fontWeight,
-						fontSize: typeScale.h4.fontSize,
-						lineHeight: typeScale.h4.lineHeight,
-					},
-				]}>
-				{t('notAvailableTitle')}
-			</Text>
-			<Text
-				style={[
-					styles.placeholderBody,
-					{
-						color: colors.textSecondary,
-						fontFamily: fonts.regular.fontFamily,
-						fontWeight: fonts.regular.fontWeight,
-						fontSize: typeScale.body.fontSize,
-						lineHeight: typeScale.body.lineHeight,
-					},
-				]}>
-				{t('notAvailableBody')}
-			</Text>
-		</ScrollView>
+	useFocusEffect(
+		useCallback(() => {
+			setScanRequest(count => count + 1);
+		}, []),
 	);
-}
 
-const styles = StyleSheet.create({
-	screen: {
-		flex: 1,
-	},
-	centerColumn: {
-		flexGrow: 1,
-		justifyContent: 'center',
-		alignItems: 'center',
-		gap: 24, // lg spacing token (39-UI-SPEC.md Spacing Scale)
-	},
-	title: {
-		textAlign: 'center',
-	},
-	placeholderBody: {
-		textAlign: 'center',
-	},
-});
+	const onDone = useCallback(() => {
+		navigation.getParent()?.navigate('Vote');
+	}, [navigation]);
+
+	return <JoinNetworkScreen scanRequest={scanRequest} active={isFocused} onDone={onDone} />;
+}
