@@ -3,7 +3,7 @@
 // never a path, so they can be logged as they are.
 
 import { randomBytes } from 'node:crypto'
-import { chmodSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, type Stats } from 'node:fs'
 import { join } from 'node:path'
 import { CTL_PORT_FILE, CTL_TOKEN_FILE } from './protocol.js'
 
@@ -25,7 +25,7 @@ export type CtlPortReadCode = 'no-port-file' | 'port-shape'
 const TOKEN_RE = /^[0-9a-f]{64}$/
 const PORT_RE = /^\d{1,5}\n?$/
 
-function lstatOrUndefined(path: string): ReturnType<typeof lstatSync> | undefined {
+function lstatOrUndefined(path: string): Stats | undefined {
   try {
     return lstatSync(path)
   } catch {

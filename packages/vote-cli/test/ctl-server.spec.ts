@@ -115,7 +115,9 @@ describe('ctl server', function () {
     const t = await start()
     rejection(await ctlPost(t, 'echo', {}, { extraBody: { module: '/etc/hosts' } }), 400, 'BadRequest')
     rejection(await ctlPost(t, 'echo', {}, { extraBody: { extra: 1 } }), 400, 'BadRequest')
-    rejection(await ctlPost(t, 'echo', {}, { extraBody: { __proto__: { x: 1 } } }), 400, 'BadRequest')
+    // an own `__proto__` key can only be sent as raw text: an object literal would set the prototype instead
+    const headers = { 'content-type': 'application/json', 'x-vt-token': t.readToken(), 'x-vt-role': t.role }
+    rejection(await rawRequest({ port: t.port, headers, body: '{"verb":"echo","args":{},"__proto__":{"x":1}}' }), 400, 'BadRequest')
     expect(t.calls.echo ?? 0).to.equal(0)
   })
 
