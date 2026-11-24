@@ -78,4 +78,40 @@ describe('SignatureTaskFooter', () => {
       expect(buttonStyle(tr, id).opacity).toBe(0.5);
     }
   });
+
+  describe('busy', () => {
+    const titleOf = (tr: renderer.ReactTestRenderer, testID: string) =>
+      tr.root.findAll((n) => n.props.testID === testID && typeof n.props.title === 'string')[0].props.title;
+    const spinners = (tr: renderer.ReactTestRenderer) =>
+      tr.root.findAll((n) => (n.type as unknown) === 'ActivityIndicator');
+    const touchables = (tr: renderer.ReactTestRenderer) =>
+      tr.root.findAll((n) => n.props.accessibilityRole === 'button' && typeof n.props.onPress === 'function' && n.props.accessibilityState);
+
+    it('nothing in flight: no spinner, normal labels', () => {
+      const tr = renderFooter({ acceptLabel: 'accept', rejectLabel: 'decline' });
+      expect(spinners(tr)).toHaveLength(0);
+      expect(titleOf(tr, 'signature-task-footer-accept')).toBe('accept');
+      expect(titleOf(tr, 'signature-task-footer-reject')).toBe('decline');
+    });
+
+    it('busy accept: spinner and busy label on Accept only, both disabled', () => {
+      const tr = renderFooter({ acceptLabel: 'accept', rejectLabel: 'decline', busy: 'accept' });
+      expect(titleOf(tr, 'signature-task-footer-accept')).toBe('acceptingBusy');
+      expect(titleOf(tr, 'signature-task-footer-reject')).toBe('decline');
+      expect(spinners(tr)).toHaveLength(1);
+      expect(tr.root.findAll((n) => n.props.testID === 'signature-task-footer-accept-busy').length).toBeGreaterThan(0);
+      for (const b of touchables(tr)) expect(b.props.disabled).toBe(true);
+      const accept = touchables(tr).find((b) => b.props.testID === 'signature-task-footer-accept')!;
+      expect(accept.props.accessibilityState).toEqual({ disabled: true, busy: true });
+    });
+
+    it('busy reject uses the given busy label, and the default when none is given', () => {
+      let tr = renderFooter({ rejectLabel: 'decline', busy: 'reject', rejectBusyLabel: 'decliningBusy' });
+      expect(titleOf(tr, 'signature-task-footer-reject')).toBe('decliningBusy');
+      expect(tr.root.findAll((n) => n.props.testID === 'signature-task-footer-reject-busy').length).toBeGreaterThan(0);
+      tr = renderFooter({ busy: 'reject' });
+      expect(titleOf(tr, 'signature-task-footer-reject')).toBe('rejectingBusy');
+      for (const b of touchables(tr)) expect(b.props.disabled).toBe(true);
+    });
+  });
 });

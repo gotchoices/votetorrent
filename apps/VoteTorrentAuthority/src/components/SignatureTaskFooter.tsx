@@ -14,6 +14,14 @@ export interface SignatureTaskFooterProps {
 	// this shared footer (KeyholderInvitationScreen, AuthorityInvitationScreen,
 	// AdministratorInvitationScreen) is unaffected unless it opts in.
 	disabled?: boolean;
+	/**
+	 * Which answer is in flight. That button shows a spinner and its busy label ("Accepting…" /
+	 * "Rejecting…" unless given); BOTH buttons stay disabled so a second tap cannot start a second
+	 * answer. Undefined means nothing is in flight.
+	 */
+	busy?: "accept" | "reject";
+	acceptBusyLabel?: string;
+	rejectBusyLabel?: string;
 }
 
 export function SignatureTaskFooter({
@@ -22,9 +30,13 @@ export function SignatureTaskFooter({
 	acceptLabel,
 	rejectLabel,
 	disabled,
+	busy,
+	acceptBusyLabel,
+	rejectBusyLabel,
 }: SignatureTaskFooterProps) {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
+	const off = disabled || busy !== undefined;
 	return (
 		<Footer row>
 			{/* Each button sits in a ROW slot (CustomButton's `flex` is built for a row parent) with a
@@ -32,24 +44,28 @@ export function SignatureTaskFooter({
 			    48dp touch target. Same recipe as RejectReasonCard's buttonSlot. */}
 			<View testID="signature-task-footer-accept-slot" style={styles.buttonSlot}>
 				<CustomButton
-					title={acceptLabel ?? t("accept")}
+					testID="signature-task-footer-accept"
+					title={busy === "accept" ? (acceptBusyLabel ?? t("acceptingBusy")) : (acceptLabel ?? t("accept"))}
 					icon="check"
 					backgroundColor={colors.success}
 					size="thin"
 					flex={true}
 					onPress={onAccept}
-					disabled={disabled}
+					disabled={off}
+					busy={busy === "accept"}
 				/>
 			</View>
 			<View testID="signature-task-footer-reject-slot" style={styles.buttonSlot}>
 				<CustomButton
-					title={rejectLabel ?? t("reject")}
+					testID="signature-task-footer-reject"
+					title={busy === "reject" ? (rejectBusyLabel ?? t("rejectingBusy")) : (rejectLabel ?? t("reject"))}
 					icon="xmark"
 					backgroundColor={colors.error}
 					size="thin"
 					flex={true}
 					onPress={onReject}
-					disabled={disabled}
+					disabled={off}
+					busy={busy === "reject"}
 				/>
 			</View>
 		</Footer>

@@ -1,4 +1,4 @@
-import { StyleSheet, TouchableOpacity, View, type HostInstance } from "react-native";
+import { ActivityIndicator, StyleSheet, TouchableOpacity, View, type HostInstance } from "react-native";
 import { ThemedText } from "./ThemedText";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { ExtendedTheme, useTheme } from "@react-navigation/native";
@@ -9,6 +9,8 @@ interface FullButtonProps {
 	/** Optional trailing glyph pinned to the right edge (e.g. SELECT's network symbol). */
 	rightIcon?: string;
 	disabled?: boolean;
+	/** Work started by this button is in flight: a spinner replaces the icon and the button is disabled. */
+	busy?: boolean;
 	backgroundColor?: string;
 	forceDarkText?: boolean;
 	size?: "tall" | "thin";
@@ -23,7 +25,8 @@ export function CustomButton({
 	title,
 	icon,
 	rightIcon,
-	disabled = false,
+	disabled: disabledProp = false,
+	busy = false,
 	backgroundColor,
 	forceDarkText,
 	size = "tall",
@@ -33,6 +36,7 @@ export function CustomButton({
 	onPress,
 }: FullButtonProps) {
 	const { colors } = useTheme() as ExtendedTheme;
+	const disabled = disabledProp || busy;
 	const buttonColor = backgroundColor ?? colors.accent;
 	let textColor = forceDarkText ? colors.dark : colors.text;
 	if (backgroundColor && (backgroundColor === colors.success || backgroundColor === colors.error || backgroundColor === colors.primary)) {
@@ -56,7 +60,7 @@ export function CustomButton({
 			// with the title and screen readers announce ", TITLE".
 			accessibilityRole="button"
 			accessibilityLabel={title}
-			accessibilityState={{ disabled }}
+			accessibilityState={{ disabled, busy }}
 			// The thin box is 6*2 + minHeight 24 = 36pt, below the 44pt floor.
 			// Raising paddingVertical would reflow every thin call site
 			// (LifecycleConfirmCard's width-constrained slots, both
@@ -68,7 +72,11 @@ export function CustomButton({
 			hitSlop={size === "thin" ? { top: 6, bottom: 6, left: 0, right: 0 } : undefined}
 		>
 			<View style={styles.buttonContent}>
-				{icon && <FontAwesome6 name={icon} size={20} color={textColor} />}
+				{busy ? (
+					<ActivityIndicator testID={testID ? `${testID}-busy` : undefined} size="small" color={textColor} />
+				) : (
+					icon && <FontAwesome6 name={icon} size={20} color={textColor} />
+				)}
 				<ThemedText style={[styles.text, { color: textColor }]}>{title.toUpperCase()}</ThemedText>
 			</View>
 			{rightIcon && (
