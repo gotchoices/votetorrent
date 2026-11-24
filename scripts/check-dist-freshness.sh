@@ -5,6 +5,14 @@
 # Purpose : D-16 (47-01 Task 4) — fail closed when the BUILT vote-engine package
 #           disagrees with the canonical schema source.
 #
+#           Phase 67 (plan 04, CLI-02): it ALSO checks packages/workflows file by
+#           file through scripts/lib/dist-freshness.mjs (missing, stale or
+#           leftover dist/*.js against src/*.ts), because both apps and the vt
+#           CLI bundle or load @votetorrent/workflows from dist exactly as they
+#           do vote-engine. The workflows section runs whether or not a
+#           vote-engine build is present: the vote-engine SKIP below only skips
+#           the schema compare, it no longer ends the script.
+#
 # Why this exists (the hole the other D-16 locks do not cover):
 #   schema-type-regression.spec.ts already asserts that votetorrent.qsql is
 #   byte-identical to packages/vote-engine/src/database/schema-sql.ts. That is
@@ -24,7 +32,8 @@
 # Exit codes:
 #   0 — the built schema matches votetorrent.qsql (fresh), OR no build is present
 #       (see SKIP rationale below)
-#   1 — a build IS present and disagrees with votetorrent.qsql (stale)
+#   1 — a build IS present and disagrees with votetorrent.qsql (stale), OR the
+#       workflows dist is present and has a missing, stale or leftover file
 #
 # SKIP rationale: an ABSENT dist is not this guard's failure mode. Metro fails
 # loudly at module resolution when the package is unbuilt, so an absent build
@@ -46,12 +55,16 @@ if [ ! -f "${QSQL_PATH}" ]; then
   exit 1
 fi
 
+# VE_SKIP=1 skips the vote-engine schema compare only; the workflows section
+# below still runs (a bare `exit 0` here used to end the whole script).
+VE_SKIP=0
 if [ ! -f "${DIST_PATH}" ]; then
   echo "[dist-check] SKIP: no build present at ${DIST_PATH} — nothing stale can be served."
   echo "[dist-check]       (An unbuilt package fails loudly at Metro module resolution.)"
-  exit 0
+  VE_SKIP=1
 fi
 
+if [ "${VE_SKIP}" = 0 ]; then
 # Compare the schema the BUILT package actually exports against the .qsql source.
 # Dynamic-import the module rather than regex-scraping the emitted JS, so this
 # check cannot rot against a codegen/bundler format change.
@@ -84,3 +97,8 @@ if (actual !== expected) {
 }
 
 echo "[dist-check] OK: built vote-engine schema matches ${QSQL_PATH}"
+fi
+
+# Phase 67 (CLI-02): the shared workflows package, file by file. Exit 0 when its
+# dist is absent (same SKIP rationale as above), 1 on any missing/stale/leftover.
+node scripts/lib/dist-freshness.mjs packages/workflows workflows || exit 1
