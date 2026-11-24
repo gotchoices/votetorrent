@@ -10,11 +10,19 @@ Times are **Nepal time (NPT)**. Read the whole guide once before you start.
 
 ## 0. Status of this test build (read first)
 
+Use the **REHEARSAL** APKs the organizer sends (for example `VoteTorrentAuthority-REHEARSAL-bcfa9c6e.apk`). A normal
+release build refuses every Android voter, because Google Play Integrity is not set up yet. The rehearsal builds skip
+only that Google check; the phone's own keys and its hardware key check still run. Never share these APKs outside the
+test group.
+
+**Every phone must install the same build.** A phone on an older build is refused with "Update VoteTorrent … to open
+this network" once a newer build has opened the network.
+
 | Step | Status in this build |
 |---|---|
-| Create network, invite, join | Works. Proven on phones over the internet relay. |
+| Create network, invite, join | Works. Proven on phones over the internet relay. Joins stall if other members' apps are closed (step 5). |
 | Create ballot and election, keyholder setup (key generation) | Works in the app. Done by hand in the UI only partly before. |
-| Voter registration | **Unproven on release APKs.** Registration has only ever passed with test builds. |
+| Voter registration | Needs the **REHEARSAL** APKs. Not yet proven on Android phones with them. |
 | Voting (sending votes in groups of 3) | Proven on phones with test builds. Needs **3 voters sending at the same time**. |
 | Releasing election keys | Works in the app ("Release My Share"). |
 | Decrypting votes and showing results | New in this build: a **Results** screen in both apps (section 11b). Proven on the computer; this is its first phone test. |
@@ -26,7 +34,8 @@ Then tell the organizer.
 
 ## 1. Roles and phones
 
-You need **at least 6 Android phones**:
+You need **6 roles**. That is at least **4 Android phones** if the keyholders also vote (see the rules below), or 6
+phones with one role each:
 
 | Role | App | How many | What they do |
 |---|---|---|---|
@@ -38,7 +47,9 @@ You need **at least 6 Android phones**:
 Rules:
 
 - The Officer **cannot** also be a keyholder (the app refuses an invitation you sent yourself).
-- Each phone should do **one role**. Do not install the Voter app on the Officer's phone.
+- A **Keyholder phone may also be a Voter**: install both apps on it, join the network with each, and do both roles.
+  That phone then counts as two members, so **both apps must stay open** for the whole test (see step 2).
+- Do not install the Voter app on the Officer's phone.
 - Each phone can be in **only one VoteTorrent network**. For a second test, uninstall and reinstall the app first.
 
 ---
@@ -53,14 +64,19 @@ Rules:
    - Use good **Wi-Fi or mobile data**. If the app seems stuck, check your internet first.
    - Turn off **Battery saver** for the VoteTorrent app.
 2. **Install the APK** the organizer sends you:
-   - Officer and Keyholders: `VoteTorrent Authority` (about 130 MB).
+   - Officer and Keyholders: `VoteTorrent Authority` (about 185 MB).
    - Voters: `VoteTorrent Voter` (about 180 MB).
+   - A Keyholder who also votes installs both.
+   - If an older VoteTorrent build is on the phone, **uninstall it first**. Installing over it keeps old network data.
    - Open the file. If asked, allow **Install unknown apps** for your browser or file manager.
    - If Play Protect warns you, tap **More details > Install anyway**. These are test builds that are not on the Play Store.
-3. Open the app once and allow any permission it asks for (camera, local network).
+3. Open the app once and allow any permission it asks for (camera, local network). Both apps can now scan the join QR
+   code, so allow the camera.
 
-> **Most important rule:** keep the app **open on screen** whenever you are in a step. Many steps need two phones
-> talking to each other. A phone with the app in the background or the screen locked cannot answer.
+> **Most important rule:** keep the app **open on screen, with the screen on, for the whole test**, not only during
+> your own steps. Every change to the network (a phone joining, an approval, key generation) waits for the members to
+> answer. One closed or locked app slows everyone down, and new phones get "did not accept this code". In a test on
+> 23 Nov, joins failed for 19 minutes until the testers reopened their apps.
 
 ---
 
@@ -105,6 +121,8 @@ App: **VoteTorrent Authority** on the Officer phone.
 | Initial Administrator | **SIGN** | tap it so it is ticked |
 
    Copy and paste the relay address. Do not type it. It must be exactly one line with no spaces.
+   Optional backup relay: tap **Add Relay** and paste
+   `/dns4/tunnel2.inspiringlab.com.np/tcp/443/wss/p2p/12D3KooWSV9Cxp3zns7Uvu7pHXgkPYgmM8KewyfCfy2XBM7nm2y7`.
 
 4. Tap **Create**.
    - **On a new install the first Create does not create the network.** It opens **Secure Signing Setup** instead.
@@ -126,12 +144,14 @@ App: **VoteTorrent Authority** on the Officer phone.
    Also send a screenshot of the **fingerprint**.
    - The same code works for everyone. It is valid for 30 days.
 4. **Keep the Authority app open on this screen (or any screen in the app) while people join.** If the Officer's app
-   is in the background, joins fail with "did not accept this code".
+   is in the background, joins fail with "did not accept this code". The same happens when phones that already joined
+   have closed their apps, so everyone who has joined keeps their app open too.
 
 ### 5b. Keyholders A and B (Authority app)
 
 1. Open the app > **cloud icon** > **Join a network**.
-2. In **Join code**, tap **Paste** (or paste by long-pressing).
+2. Either tap **Scan QR code** and point the camera at the Officer's QR code, or tap **Paste** in **Join code** (or
+   paste by long-pressing). On the Networks screen, **Scan QR Code** opens the camera straight away.
 3. Check that the **Network fingerprint** shown is **exactly the same** as the Officer's screenshot.
 4. Tap **Join network**. You will see "Joining the network…", then "Downloading the network…", then "Checking the
    network matches the code…". This can take **up to 10–15 minutes**. Keep the screen on.
@@ -140,7 +160,7 @@ App: **VoteTorrent Authority** on the Officer phone.
 
 ### 5c. Voters 1, 2, 3 (Voter app)
 
-1. Open the app > **Settings** tab > **Join a network**.
+1. Open the app. Before you join, the header says **"No network joined"**. Go to the **Settings** tab > **Join a network**.
 2. Either tap **Scan QR code** and point the camera at the Officer's QR code, or paste the code into **Join code**.
 3. Check the **Network fingerprint** matches the Officer's.
 4. Tap **Join network** and keep the screen on. It can take **up to 10–15 minutes** ("Downloading the network…").
@@ -150,7 +170,8 @@ If you see an error:
 
 | Message | What to do |
 |---|---|
-| "…did not accept this code…" | Ask the Officer to open the Authority app, then tap Join again. |
+| "…did not accept this code…" | Ask the Officer **and everyone who already joined** to open their apps and keep the screen on. Wait a minute, then tap Join again. |
+| "This join code needs a newer version of the app…" | Install the same APK build as the Officer. |
 | "…couldn't reach…" / "taking too long to download" | Check your internet, then try again. |
 | Fingerprint does not match | **Stop.** Tell the organizer. Do not join. |
 | "This phone founded its own network…" (Authority app) | This phone pressed Create before. Uninstall, reinstall, and join again. |
@@ -417,6 +438,8 @@ Check that the counts match the choices the group wrote down in step 10. Every p
 |---|---|
 | Stuck on "Downloading the network…" for over 15 min | Check internet. Make sure the Officer's app is open. Close and reopen the app, then try again. |
 | "Not configured" banner | The APK was built without the relay. Ask the organizer for a new APK. |
+| "Update VoteTorrent to open this voting network" (Voter) or "Update VoteTorrent Authority to open this network" | Another phone opened the network with a newer build. Install the APK build everyone else has. Do not uninstall first if you have already voted. |
+| Joins, approvals or key generation suddenly get very slow | Some member's app is closed or its screen is locked. Ask everyone to open their apps (both apps on a Keyholder-Voter phone). |
 | Voter sees "No election is available on this network yet." | The Officer has not created the election, the election dates are wrong, or the phone has not synced yet. Wait a few minutes. |
 | "Set up fingerprint or face unlock to continue" | Enroll a fingerprint in Android settings. |
 | Officer's **Approve Registration** is greyed out | Step 7b (Enable Encrypted Intake) was missed. |
