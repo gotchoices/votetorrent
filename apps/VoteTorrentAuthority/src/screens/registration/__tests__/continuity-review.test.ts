@@ -283,12 +283,21 @@ describe("CR5 signs", () => {
 		await expect(readOnlyReviewSign(new Uint8Array([1]))).rejects.toThrow();
 	});
 
-	it("continuity-review.ts never calls createDeviceSigner, the console or __DEV__", () => {
-		const src = stripComments(fs.readFileSync(path.join(SRC, "screens/registration/continuity-review.ts"), "utf8"));
+	it("shared continuity-review.ts never calls createDeviceSigner, the console or __DEV__", () => {
+		// 67-09: the review logic lives in the shared workflows package (SRC is the app `src`, three hops below the repo root).
+		const src = stripComments(fs.readFileSync(path.resolve(SRC, "../../../packages/workflows/src/authority/continuity-review.ts"), "utf8"));
 		expect(src).not.toMatch(/createDeviceSigner\(/);
 		expect(src).not.toMatch(/console\./);
 		expect(src).not.toMatch(/__DEV__/);
 		expect((src.match(/\.publishDecision\(/g) ?? []).length).toBe(1);
+	});
+
+	it("app continuity-review.ts binding carries no review logic", () => {
+		const src = stripComments(fs.readFileSync(path.join(SRC, "screens/registration/continuity-review.ts"), "utf8"));
+		expect((src.match(/\.publishDecision\(/g) ?? []).length).toBe(0);
+		expect((src.match(/createOpener\(/g) ?? []).length).toBe(0);
+		expect((src.match(/getEngine/g) ?? []).length).toBe(0);
+		expect((src.match(/@votetorrent\/workflows\/authority/g) ?? []).length).toBe(1);
 	});
 });
 

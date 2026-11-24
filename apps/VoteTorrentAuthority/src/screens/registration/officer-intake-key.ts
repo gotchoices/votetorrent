@@ -1,132 +1,68 @@
-import type { Signature } from '@votetorrent/vote-core';
+/**
+ * officer-intake-key.ts — Authority binding (67-09). The intake-key logic moved to
+ * `packages/workflows/src/authority/officer-intake-key.ts`; this path stays so existing imports,
+ * `jest.mock` paths and screens keep working. It is where the app supplies its native-wrapped vault
+ * (`resolveAuthorityKeyVault`), resolved per call and never cached at module scope. The never-throw
+ * contracts of the read and renew entry points still hold for a vault that cannot be built.
+ */
 import type { IKeyVault } from '@votetorrent/vote-engine/rn';
+import {
+	INTAKE_KEY_SUPERSEDED_CODE,
+	isIntakeKeySupersededError,
+	enableOfficerEncryptedIntake as enableShared,
+	readOfficerIntakeKeyState as readShared,
+	renewOfficerIntakeKeyAfterKeyReplacement as renewShared,
+	type OfficerIntakeKeyDeps as SharedOfficerIntakeKeyDeps,
+	type OfficerIntakeKeyState,
+	type OfficerKeyRenewalOutcome,
+	type OfficerKeyRenewalResult,
+} from '@votetorrent/workflows/authority';
 import { resolveAuthorityKeyVault } from '../../engines/key-vault';
 
-/**
- * officer-intake-key.ts — Phase 62 Plan 21 (D-04).
- *
- * `readOfficerIntakeKeyState`/`enableOfficerEncryptedIntake` — the officer's "enable encrypted
- * intake" registration step. Publishes a self-signed `UserEncryptionKey` row through 62-14's
- * `IntakeEngine.registerOfficerEncryptionKey`; the secret half is held only in the native-wrapped
- * Authority key vault (`key-vault.ts`).
- *
- * There is NO default signer and no `device-signer`/`device-user` import here: `createSigner` is a
- * REQUIRED injected dependency, supplied by the hosting screen from `useApp().resolveDeviceSigner`
- * (`AppProvider.tsx`'s lazy thunk). This keeps this file out of the `createDeviceSigner(` invoker
- * inventory (62-21 adds no new invoker; see `deviceSigningRollout.coverage.test.ts`). Its own doc
- * comments never spell out that literal call text — write "the injected signer factory" instead.
- *
- * No `@votetorrent/vote-engine` VALUE import — types only. Never logs.
- */
+export { INTAKE_KEY_SUPERSEDED_CODE, isIntakeKeySupersededError };
+export type { OfficerIntakeKeyState, OfficerKeyRenewalOutcome, OfficerKeyRenewalResult };
 
-/** `'enabled-contested'`: enabled, and another officer also published this key (a possible copy). */
-export type OfficerIntakeKeyState = 'enabled' | 'enabled-contested' | 'not-enabled' | 'unavailable';
-
-export interface OfficerIntakeKeyDeps {
-	getEngine: <T>(engineName: string) => Promise<T>;
+/** The old shape: `vault` is optional here and defaults to the app vault. */
+export interface OfficerIntakeKeyDeps extends Omit<SharedOfficerIntakeKeyDeps, 'vault'> {
 	vault?: IKeyVault;
-	/** REQUIRED — the injected signer factory (never a default, never `device-signer` imported
-	 * here). `readOfficerIntakeKeyState` never calls it. */
-	createSigner: () => Promise<(digest: Uint8Array) => Promise<Signature>>;
 }
 
-/** The minimal local structural type this file needs from `IntakeEngine`. */
-interface OfficerIntakeEngine {
-	getOfficerEncryptionKeyStatus(authorityId: string, vault: IKeyVault): Promise<{ isIntakeRecipient: boolean; isContested?: boolean }>;
-	registerOfficerEncryptionKey(
-		authorityId: string,
-		vault: IKeyVault,
-		sign: (digest: Uint8Array) => Promise<Signature>,
-	): Promise<unknown>;
-	/** Optional: absent on mock engines. */
-	renewStrandedOfficerEncryptionKey?(
-		vault: IKeyVault,
-		sign: (digest: Uint8Array) => Promise<Signature>,
-	): Promise<OfficerKeyRenewalResult>;
+/** Evaluated per call: the app vault is resolved only when the caller passed none. */
+function appDeps(deps: OfficerIntakeKeyDeps): SharedOfficerIntakeKeyDeps {
+	return { ...deps, vault: deps.vault ?? resolveAuthorityKeyVault() };
 }
 
-/** Local structural copy of the engine's renewal outcome (not exported from vote-engine). */
-export type OfficerKeyRenewalResult = 'not-an-officer' | 'no-local-key' | 'not-needed' | 'renewed';
-
-/** Outcome of `renewOfficerIntakeKeyAfterKeyReplacement`; never a rejection. */
-export type OfficerKeyRenewalOutcome = OfficerKeyRenewalResult | 'failed' | 'unsupported';
-
-/** Code carried by the error `enableOfficerEncryptedIntake` throws for a superseded key. */
-export const INTAKE_KEY_SUPERSEDED_CODE = 'intake-key-superseded';
-
-export function isIntakeKeySupersededError(err: unknown): boolean {
-	return (
-		typeof err === 'object' &&
-		err !== null &&
-		(err as { code?: unknown }).code === INTAKE_KEY_SUPERSEDED_CODE
-	);
-}
-
-function resolveVault(deps: OfficerIntakeKeyDeps): IKeyVault {
-	return deps.vault ?? resolveAuthorityKeyVault();
-}
-
-/** Never throws — any failure (no engine, no network, a rejected status read) reports `'unavailable'`. */
+/** Never throws — a vault that cannot be built reports `'unavailable'` like every other failure. */
 export async function readOfficerIntakeKeyState(
 	deps: OfficerIntakeKeyDeps,
 	authorityId: string,
 ): Promise<OfficerIntakeKeyState> {
+	let shared: SharedOfficerIntakeKeyDeps;
 	try {
-		const intake = await deps.getEngine<OfficerIntakeEngine>('intake');
-		const status = await intake.getOfficerEncryptionKeyStatus(authorityId, resolveVault(deps));
-		if (!status.isIntakeRecipient) return 'not-enabled';
-		return status.isContested === true ? 'enabled-contested' : 'enabled';
+		shared = appDeps(deps);
 	} catch {
 		return 'unavailable';
 	}
+	return readShared(shared, authorityId);
 }
 
-/**
- * Registers the officer's encryption key. A `createSigner()` rejection propagates UNCHANGED (no
- * wrapping, no re-throw of a new Error) so the hosting screen's `useDeviceSigningErrorHandler` can
- * classify it directly. After a successful registration call, re-reads the state; if it is not
- * `'enabled'`/`'enabled-contested'` (e.g. a newer key from another device of the same officer — 62-14's one-current-key
- * rule), this rejects rather than silently returning a wrong state.
- */
+/** A vault-construction failure rejects, as before. */
 export async function enableOfficerEncryptedIntake(
 	deps: OfficerIntakeKeyDeps,
 	authorityId: string,
 ): Promise<OfficerIntakeKeyState> {
-	const intake = await deps.getEngine<OfficerIntakeEngine>('intake');
-	const vault = resolveVault(deps);
-	const sign = await deps.createSigner();
-	const registered = await intake.registerOfficerEncryptionKey(authorityId, vault, sign);
-	if ((registered as { superseded?: unknown } | null | undefined)?.superseded === true) {
-		throw Object.assign(new Error('encrypted intake key superseded by another device'), {
-			code: INTAKE_KEY_SUPERSEDED_CODE,
-		});
-	}
-
-	const state = await readOfficerIntakeKeyState(deps, authorityId);
-	if (state !== 'enabled' && state !== 'enabled-contested') {
-		throw new Error('encrypted intake is not active for this device');
-	}
-	return state;
+	return enableShared(appDeps(deps), authorityId);
 }
 
-/**
- * Renews a stranded intake key right after a successful signing-key replacement. The injected
- * signer factory is invoked lazily, only inside the sign callback the engine calls, so the
- * common `not-needed` case costs no biometric prompt. Never rejects: any failure (engine, vault,
- * signer cancel) resolves `'failed'`; an engine without the method resolves `'unsupported'`.
- */
+/** Never rejects — a vault that cannot be built resolves `'failed'`. */
 export async function renewOfficerIntakeKeyAfterKeyReplacement(
 	deps: OfficerIntakeKeyDeps,
 ): Promise<OfficerKeyRenewalOutcome> {
+	let shared: SharedOfficerIntakeKeyDeps;
 	try {
-		const intake = await deps.getEngine<OfficerIntakeEngine>('intake');
-		if (typeof intake.renewStrandedOfficerEncryptionKey !== 'function') return 'unsupported';
-		const sign = async (digest: Uint8Array): Promise<Signature> => {
-			const signer = await deps.createSigner();
-			return signer(digest);
-		};
-		return await intake.renewStrandedOfficerEncryptionKey(resolveVault(deps), sign);
+		shared = appDeps(deps);
 	} catch {
 		return 'failed';
 	}
+	return renewShared(shared);
 }

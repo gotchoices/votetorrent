@@ -332,7 +332,6 @@ export const EXEMPT_LINES: ExemptLine[] = [
 	{ file: 'engines/device-signer.ts', key: 'e71aa10492f070ee', count: 1, reason: 'developer-facing text inside a thrown error for an unlinked native module; every screen maps it through the shared error copy' },
 	{ file: 'screens/authorities/AuthorityDetailsScreen.tsx', key: 'e5fdcc7f513d08cb', count: 1, reason: 'reads the failure only to detect the not-found case, never rendered' },
 	{ file: 'screens/elections/election-error-messages.ts', key: 'd7eb40dd0c9ea05d', count: 1, reason: 'matched against constraint patterns to classify, never returned' },
-	{ file: 'screens/registration/continuity-review.ts', key: '7c59e887d021bca7', count: 1, reason: 'error subclass constructor whose reason is a closed union of fixed tokens; the message is never rendered' },
 	{ file: 'screens/settings/SettingsScreen.tsx', key: 'f79afbba4990186c', count: 1, reason: 'debug seed control, rendered only in development builds' },
 	{ file: 'screens/users/RevokeKeyScreen.tsx', key: '1e730b284ab023c7', count: 1, reason: 'substring classification of the failure, never rendered' },
 	{ file: 'utils/errorLogSummary.ts', key: '5cd9b422092b1cca', count: 1, reason: 'log-only summary: the message is scrubbed of JSON, quoted text, hex, CIDs and ids before it is logged, and never rendered' },
@@ -343,6 +342,34 @@ describe('strict: no raw error text anywhere in the Authority app', () => {
 		const r = scanTree(SRC, { EXEMPT_FILES, EXEMPT_LINES });
 		expect(r.files).toBeGreaterThan(0);
 		expect(r.failures).toEqual([]);
+	});
+});
+
+// 67-09: the officer intake seams moved to the shared workflows package. The list is explicit, not a
+// directory walk, so a sibling extraction cannot turn this case red; widening it is the phase gate's job.
+const WORKFLOWS_SRC = path.resolve(SRC, '..', '..', '..', 'packages', 'workflows', 'src');
+export const WORKFLOWS_OFFICER_FILES: readonly string[] = [
+	'authority/sync-report.ts',
+	'authority/peer-staging-transports.ts',
+	'authority/attach-peer-sync-binding.ts',
+	'authority/officer-intake-key.ts',
+	'authority/continuity-review.ts',
+];
+export const WORKFLOWS_EXEMPT_LINES: ExemptLine[] = [
+	{ file: 'authority/continuity-review.ts', key: '51154928292ac062', count: 1, reason: 'error subclass constructor whose reason is a closed union of fixed tokens; the message is never rendered' },
+];
+
+describe('strict: no raw error text in the shared officer modules', () => {
+	it('has no unlisted, stale or miscounted raw error render in the shared officer modules', () => {
+		const hits: Hit[] = [];
+		const failures: string[] = [];
+		for (const rel of WORKFLOWS_OFFICER_FILES) {
+			const r = scanTextFull(rel, fs.readFileSync(path.join(WORKFLOWS_SRC, rel), 'utf8'));
+			hits.push(...r.hits);
+			if (r.unclosed > 0) failures.push(`unclosed console call in ${rel}`);
+		}
+		failures.push(...classify(hits, { EXEMPT_FILES: [], EXEMPT_LINES: WORKFLOWS_EXEMPT_LINES }, WORKFLOWS_OFFICER_FILES.length));
+		expect(failures).toEqual([]);
 	});
 });
 

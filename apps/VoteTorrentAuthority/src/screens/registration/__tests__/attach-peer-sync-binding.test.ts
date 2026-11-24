@@ -15,6 +15,9 @@ import {
 } from '../attach-peer-sync-binding';
 import { clearSyncBindings, resolveSyncBinding } from '../bulk-import-sync-model';
 
+// 67-09: the peer binding's logic lives in the shared workflows package; the text gates read it there.
+const WORKFLOWS_AUTHORITY = path.resolve(__dirname, '../../../../../../packages/workflows/src/authority');
+
 function regDoc(id: string, authorityId = 'auth-1') {
 	return {
 		requestId: id,
@@ -302,7 +305,7 @@ describe('createPeerSyncBinding — syncNow (D-28/D-32)', () => {
 		expect(transports.registration.publishDecision).toHaveBeenCalledTimes(1);
 
 		const stripped = fs
-			.readFileSync(path.resolve(__dirname, '../attach-peer-sync-binding.ts'), 'utf8')
+			.readFileSync(path.join(WORKFLOWS_AUTHORITY, 'attach-peer-sync-binding.ts'), 'utf8')
 			.replace(/\/\*[\s\S]*?\*\//g, '')
 			.split('\n')
 			.map((l) => l.replace(/\/\/.*$/, ''))
@@ -531,16 +534,35 @@ describe('attachPeerSyncBinding / registration (R1-R3, D-28)', () => {
 		expect(block).not.toContain('__DEV__');
 	});
 
-	it('R3: officer-intake-key.ts and attach-peer-sync-binding.ts carry zero createDeviceSigner(/getOrCreateDeviceUser; AppProvider wires createSigner: resolveDeviceSigner', () => {
-		function stripComments(s: string): string {
-			return s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
-		}
+	function stripComments(s: string): string {
+		return s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
+	}
+	const SIGNER_INVOKER = /createDeviceSigner\(|getOrCreateDeviceUser/g;
+
+	it('R3: officer-intake-key.ts and attach-peer-sync-binding.ts (shared and app binding) carry zero createDeviceSigner(/getOrCreateDeviceUser; AppProvider wires createSigner: resolveDeviceSigner', () => {
+		const sharedOfficer = stripComments(fs.readFileSync(path.join(WORKFLOWS_AUTHORITY, 'officer-intake-key.ts'), 'utf8'));
+		const sharedBinding = stripComments(fs.readFileSync(path.join(WORKFLOWS_AUTHORITY, 'attach-peer-sync-binding.ts'), 'utf8'));
 		const officer = stripComments(fs.readFileSync(path.resolve(__dirname, '../officer-intake-key.ts'), 'utf8'));
 		const binding = stripComments(fs.readFileSync(path.resolve(__dirname, '../attach-peer-sync-binding.ts'), 'utf8'));
-		expect((officer.match(/createDeviceSigner\(|getOrCreateDeviceUser/g) || []).length).toBe(0);
-		expect((binding.match(/createDeviceSigner\(|getOrCreateDeviceUser/g) || []).length).toBe(0);
+		expect((sharedOfficer.match(SIGNER_INVOKER) || []).length).toBe(0);
+		expect((sharedBinding.match(SIGNER_INVOKER) || []).length).toBe(0);
+		expect((officer.match(SIGNER_INVOKER) || []).length).toBe(0);
+		expect((binding.match(SIGNER_INVOKER) || []).length).toBe(0);
 
 		const appProvider = fs.readFileSync(path.resolve(__dirname, '../../../providers/AppProvider.tsx'), 'utf8');
 		expect(appProvider).toMatch(/createSigner:\s*resolveDeviceSigner/);
+	});
+
+	it('R3b: the createDeviceSigner pattern catches a planted call', () => {
+		const planted = stripComments('const s = ' + 'createDevice' + 'Signer("x");');
+		expect((planted.match(SIGNER_INVOKER) || []).length).toBe(1);
+	});
+
+	it('R4: the app binding carries no peer-sync logic', () => {
+		const binding = stripComments(fs.readFileSync(path.resolve(__dirname, '../attach-peer-sync-binding.ts'), 'utf8'));
+		expect((binding.match(/publishDecision\(/g) || []).length).toBe(0);
+		expect((binding.match(/createOpener\(/g) || []).length).toBe(0);
+		expect((binding.match(/processPending/g) || []).length).toBe(0);
+		expect((binding.match(/@votetorrent\/workflows\/authority/g) || []).length).toBe(1);
 	});
 });

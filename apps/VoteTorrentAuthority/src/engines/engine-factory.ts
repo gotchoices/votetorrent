@@ -42,13 +42,13 @@ import {
 	RegistrationEngine,
 	AuthorityConfigEngine,
 	IntakeEngine,
-	P2pRegistrationTransport,
-	P2pAssociationTransport,
 	KeyholderDkgEngine,
 	ElectionResultsEngine,
 	TallyPublicationEngine,
 } from '@votetorrent/vote-engine/rn';
 import type { DbFactory, DbFactoryOptions, EngineContext, ElectionSubject, StagingOpener, StagingDecisionSigner } from '@votetorrent/vote-engine/rn';
+import { createPeerStagingTransports as createSharedPeerStagingTransports } from '@votetorrent/workflows/authority';
+import type { PeerStagingTransports } from '@votetorrent/workflows/authority';
 import { createStrandDbFactory } from './rn-db-factory';
 import { wrapCreateWithFounding } from './founder-intent';
 import { isJoinedNetwork } from './joined-networks';
@@ -159,11 +159,7 @@ export function isPeerStrandUnavailableError(error: unknown): boolean {
 }
 
 /** `EngineFactory.createPeerStagingTransports`'s return shape (D-32). */
-export interface PeerStagingTransports {
-	strandId: string;
-	registration: P2pRegistrationTransport;
-	association: P2pAssociationTransport;
-}
+export type { PeerStagingTransports } from '@votetorrent/workflows/authority';
 
 export class EngineFactory {
 	private readonly networksEngine: NetworksEngine;
@@ -444,6 +440,10 @@ export class EngineFactory {
 	 * stubs that reject if ever called (submission is a REQUESTER-side-only operation). The strand
 	 * port is built and consumed entirely inside this method, under the no-raw-handle rule stated
 	 * above.
+	 *
+	 * 67-09: the transport construction lives in the shared `createPeerStagingTransports` of
+	 * `@votetorrent/workflows/authority`; the ctx, the guards and the `openStrand` closure stay here,
+	 * so `createStrandPort` is still called only from inside this method.
 	 */
 	createPeerStagingTransports(deps: { opener: StagingOpener; decisionSigner: StagingDecisionSigner }): PeerStagingTransports {
 		if (this.currentNetworkHash === undefined) {
@@ -456,10 +456,6 @@ export class EngineFactory {
 			);
 		}
 		const strandId = this.currentNetworkHash;
-
-		const refuseSubmit = async (..._args: unknown[]): Promise<Uint8Array> => {
-			throw new Error('The authority app never submits staged requests');
-		};
 
 		const openStrand = async () => {
 			const ctx = this.requireEstablishedCtx();
@@ -477,23 +473,7 @@ export class EngineFactory {
 			return createStrandPort(ctx.db as unknown as StrandSqlDatabase);
 		};
 
-		const registration = new P2pRegistrationTransport({
-			openStrand,
-			computeDigest: refuseSubmit,
-			strandId,
-			opener: deps.opener,
-			decisionSigner: deps.decisionSigner,
-		});
-		const association = new P2pAssociationTransport({
-			openStrand,
-			computeDigest: refuseSubmit,
-			computeAttestationDigest: refuseSubmit,
-			strandId,
-			opener: deps.opener,
-			decisionSigner: deps.decisionSigner,
-		});
-
-		return { strandId, registration, association };
+		return createSharedPeerStagingTransports({ strandId, openStrand, opener: deps.opener, decisionSigner: deps.decisionSigner });
 	}
 
 	// ---------- private helpers ----------
