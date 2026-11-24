@@ -3,7 +3,7 @@
 // build never shows in `git status` and would silently exercise old code. Every daemon start and
 // `vt run` calls assertFreshBuild() first; importing this module does nothing.
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -79,8 +79,37 @@ export const DEFAULT_TARGETS: readonly FreshnessTarget[] = Object.freeze([
   })
 ])
 
-/** Refuse a missing or stale dist for every target, in build order; return one mtime record each. */
+/** The newest mtime (ms) of any file below `dir`, recursively. */
+function newest (dir: string): number {
+  let max = 0
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name)
+    max = Math.max(max, entry.isDirectory() ? newest(p) : statSync(p).mtimeMs)
+  }
+  return max
+}
+
+function mtimeOrNull (path: string): number | null {
+  try {
+    return statSync(path).mtimeMs
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Refuse a missing or stale dist for every target, in build order; return one mtime record each.
+ * The sentinel is checked first, so a package that does not exist at all reads as `not-built`.
+ */
 export function assertFreshBuild (targets: readonly FreshnessTarget[] = DEFAULT_TARGETS): FreshnessRecord[] {
-  void targets
-  return []
+  const records: FreshnessRecord[] = []
+  for (const target of targets) {
+    const distMtimeMs = mtimeOrNull(target.distSentinel)
+    if (distMtimeMs === null) throw new StaleBuildError('not-built', target.name)
+    if (!existsSync(target.srcDir)) throw new StaleBuildError('src-missing', target.name)
+    const srcNewestMs = newest(target.srcDir)
+    if (distMtimeMs < srcNewestMs) throw new StaleBuildError('stale', target.name)
+    records.push({ name: target.name, srcNewestMs, distMtimeMs })
+  }
+  return records
 }
