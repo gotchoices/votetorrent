@@ -25,7 +25,13 @@
  * `useCameraPermission()` / `useCameraDevice()`, because two permission hooks do not share state
  * after a request; the screen learns availability and failures only through the callback.
  *
- * The join code is a bearer credential. This file never logs, stores or forwards a barcode object,
+ * Two kinds: `kind="join-code"` (the default; the Join a network screen) accepts only a join code,
+ * and `kind="invitation"` (Settings, Accept an Invitation) accepts only an invitation share. Each
+ * refuses the other with a banner that says which kind it saw and where it belongs, and refuses any
+ * other QR with the plain "not a ..." banner. The kind picks the copy, the testID prefix
+ * (`join-network-*` or `accept-invitation-*`) and the log tag (`[join]` or `[invite]`).
+ *
+ * The join code is a bearer credential, and an invitation holds its private key. This file never logs, stores or forwards a barcode object,
  * `rawValue` (other than the one accepted value handed to `onAccept`), corner points, raw bytes, or
  * an error object or message. Every console call is `console.info` with one closed literal token.
  * The scan callback reads refs only (the hook memoises on formats and resolution, so a captured
@@ -43,11 +49,64 @@ import type {CameraDevice} from 'react-native-vision-camera';
 import {useBarcodeScannerOutput} from 'react-native-vision-camera-barcode-scanner';
 import type {Barcode, BarcodeScannerOutputResolution, TargetBarcodeFormat} from 'react-native-vision-camera-barcode-scanner';
 import {looksLikeJoinCode} from '@votetorrent/vote-engine/rn';
+import {isInvitationQrText} from '../invitations/invite-share';
 
 export type JoinScanCameraState = 'ready' | 'blocked' | 'none' | 'denied' | 'failed';
 
+/** What the scanner is looking for. */
+export type ScanKind = 'join-code' | 'invitation';
+
+interface ScanKindConfig {
+	testIDPrefix: string;
+	logTag: string;
+	titleKey: string;
+	instructionKey: string;
+	slowKey: string;
+	pasteKey: string;
+	accepts(value: string): boolean;
+	/** The other VoteTorrent kind: refused with its own banner, which says where it belongs. */
+	isOtherKind(value: string): boolean;
+	otherKindKey: string;
+	otherKindToken: string;
+	notKindKey: string;
+	notKindToken: string;
+}
+
+export const SCAN_KINDS: Readonly<Record<ScanKind, ScanKindConfig>> = {
+	'join-code': {
+		testIDPrefix: 'join-network',
+		logTag: '[join]',
+		titleKey: 'joinScanTitle',
+		instructionKey: 'joinScanInstruction',
+		slowKey: 'joinScanSlow',
+		pasteKey: 'joinScanPasteInstead',
+		accepts: looksLikeJoinCode,
+		isOtherKind: isInvitationQrText,
+		otherKindKey: 'joinScanIsInvitation',
+		otherKindToken: 'rejected-invitation',
+		notKindKey: 'joinScanNotJoinCode',
+		notKindToken: 'rejected-not-join-code',
+	},
+	invitation: {
+		testIDPrefix: 'accept-invitation',
+		logTag: '[invite]',
+		titleKey: 'inviteScanTitle',
+		instructionKey: 'inviteScanInstruction',
+		slowKey: 'inviteScanSlow',
+		pasteKey: 'inviteScanPasteInstead',
+		accepts: isInvitationQrText,
+		isOtherKind: looksLikeJoinCode,
+		otherKindKey: 'inviteScanIsJoinCode',
+		otherKindToken: 'rejected-join-code',
+		notKindKey: 'inviteScanNotInvitation',
+		notKindToken: 'rejected-not-invitation',
+	},
+};
+
 export interface JoinCodeScannerProps {
 	visible: boolean;
+	/** What to accept; defaults to a join code. */
+	kind?: ScanKind;
 	onAccept(text: string): void;
 	onClose(): void;
 	onPasteInstead(): void;
@@ -108,6 +167,8 @@ function ScannerCamera({device, resolution, isActive, onBarcodes, onStarted, onC
 export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 	const {fonts} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation();
+	const config = SCAN_KINDS[props.kind ?? 'join-code'];
+	const prefix = config.testIDPrefix;
 	const insets = useSafeAreaInsets();
 	const {width, height} = useWindowDimensions();
 	const {status, requestPermission} = useCameraPermission();
@@ -116,7 +177,7 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 	const [phase, setPhase] = useState<Phase>('closed');
 	const [resolution, setResolution] = useState<BarcodeScannerOutputResolution>('preview');
 	const [slow, setSlow] = useState(false);
-	const [bannerVisible, setBannerVisible] = useState(false);
+	const [bannerKey, setBannerKey] = useState<string | null>(null);
 	const [appActive, setAppActive] = useState(true);
 
 	// Refs mirror the latest render, so the scan callback and the async open attempt never read stale values.
@@ -126,6 +187,8 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 	const visibleRef = useRef(props.visible);
 	const onAcceptRef = useRef(props.onAccept);
 	const onCameraStateRef = useRef(props.onCameraState);
+	const configRef = useRef(config);
+	configRef.current = config;
 	statusRef.current = status;
 	deviceRef.current = device;
 	requestPermissionRef.current = requestPermission;
@@ -179,7 +242,7 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 		if (!props.visible) {
 			clearTimers();
 			setPhase('closed');
-			setBannerVisible(false);
+			setBannerKey(null);
 			setSlow(false);
 			setResolution('preview');
 			return;
@@ -190,14 +253,14 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 		ignoreRejectRef.current = false;
 		slowStartedRef.current = false;
 		clearTimers();
-		setBannerVisible(false);
+		setBannerKey(null);
 		setSlow(false);
 		setResolution('preview');
 
 		const current = () => mountedRef.current && visibleRef.current && attemptRef.current === attempt;
 		const deviceCheck = () => {
 			if (deviceRef.current === undefined) {
-				console.info('[join] scan: no-camera');
+				console.info(`${configRef.current.logTag} scan: no-camera`);
 				report('none');
 				setPhase('closed');
 			} else {
@@ -207,7 +270,7 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 
 		const known = statusRef.current;
 		if (known === 'denied' || known === 'restricted') {
-			console.info('[join] scan: permission-blocked');
+			console.info(`${configRef.current.logTag} scan: permission-blocked`);
 			report('blocked');
 			setPhase('closed');
 			return;
@@ -223,7 +286,7 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 				} catch {
 					// The rejection (it can carry anything) is never read.
 					if (!current()) return;
-					console.info('[join] scan: permission-request-failed');
+					console.info(`${configRef.current.logTag} scan: permission-request-failed`);
 					report('failed');
 					setPhase('closed');
 				}
@@ -237,10 +300,10 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 	useEffect(() => {
 		if (phase !== 'refused') return;
 		if (status === 'denied' || status === 'restricted') {
-			console.info('[join] scan: permission-blocked');
+			console.info(`${configRef.current.logTag} scan: permission-blocked`);
 			report('blocked');
 		} else {
-			console.info('[join] scan: permission-denied');
+			console.info(`${configRef.current.logTag} scan: permission-denied`);
 			report('denied');
 		}
 		setPhase('closed');
@@ -249,29 +312,33 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 	// Stable (empty deps), refs only: the library memoises the output on formats and resolution.
 	const onBarcodes = useCallback((barcodes: Barcode[]) => {
 		if (lockRef.current) return;
+		const kind = configRef.current;
 		let accepted: string | undefined;
+		let otherKind = false;
 		for (const barcode of barcodes) {
 			const value = barcode.rawValue;
-			if (typeof value === 'string' && looksLikeJoinCode(value)) {
+			if (typeof value !== 'string') continue;
+			if (kind.accepts(value)) {
 				accepted = value;
 				break;
 			}
+			if (kind.isOtherKind(value)) otherKind = true;
 		}
 		if (accepted !== undefined) {
 			lockRef.current = true;
 			if (bannerTimerRef.current !== undefined) clearTimeout(bannerTimerRef.current);
-			setBannerVisible(false);
+			setBannerKey(null);
 			setPhase('accepted');
-			console.info('[join] scan: accepted');
+			console.info(`${configRef.current.logTag} scan: accepted`);
 			onAcceptRef.current(accepted);
 			return;
 		}
 		if (ignoreRejectRef.current) return;
 		ignoreRejectRef.current = true;
-		console.info('[join] scan: rejected-not-join-code');
-		setBannerVisible(true);
+		console.info(`${kind.logTag} scan: ${otherKind ? kind.otherKindToken : kind.notKindToken}`);
+		setBannerKey(otherKind ? kind.otherKindKey : kind.notKindKey);
 		if (bannerTimerRef.current !== undefined) clearTimeout(bannerTimerRef.current);
-		bannerTimerRef.current = setTimeout(() => setBannerVisible(false), JOIN_SCAN_BANNER_MS);
+		bannerTimerRef.current = setTimeout(() => setBannerKey(null), JOIN_SCAN_BANNER_MS);
 		if (ignoreTimerRef.current !== undefined) clearTimeout(ignoreTimerRef.current);
 		ignoreTimerRef.current = setTimeout(() => {
 			ignoreRejectRef.current = false;
@@ -289,13 +356,13 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 	}, []);
 
 	const onCameraError = useCallback(() => {
-		console.info('[join] scan: camera-failed');
+		console.info(`${configRef.current.logTag} scan: camera-failed`);
 		report('failed');
 		setPhase('closed');
 	}, [report]);
 
 	const onScannerError = useCallback(() => {
-		console.info('[join] scan: scanner-failed');
+		console.info(`${configRef.current.logTag} scan: scanner-failed`);
 		report('failed');
 		setPhase('closed');
 	}, [report]);
@@ -309,8 +376,9 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 	const showCamera = (phase === 'starting' || phase === 'scanning' || phase === 'accepted') && device !== undefined;
 	const cameraActive = (phase === 'starting' || phase === 'scanning') && appActive;
 	const waiting = phase === 'requesting' || phase === 'starting';
-	const boldText = {fontFamily: fonts.bold.fontFamily, fontWeight: fonts.bold.fontWeight};
-	const regularText = {fontFamily: fonts.regular.fontFamily, fontWeight: fonts.regular.fontWeight};
+	// Optional chaining: a theme without fonts (some screen tests mock only colors) keeps the defaults.
+	const boldText = {fontFamily: fonts?.bold?.fontFamily, fontWeight: fonts?.bold?.fontWeight};
+	const regularText = {fontFamily: fonts?.regular?.fontFamily, fontWeight: fonts?.regular?.fontWeight};
 
 	return (
 		<Modal
@@ -320,9 +388,9 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 			supportedOrientations={['portrait']}
 			animationType="slide"
 			onRequestClose={props.onClose}>
-			<View testID="join-network-scanner" style={styles.root}>
+			<View testID={`${prefix}-scanner`} style={styles.root}>
 				{showCamera && device !== undefined ? (
-					<View testID="join-network-scan-preview" style={StyleSheet.absoluteFill}>
+					<View testID={`${prefix}-scan-preview`} style={StyleSheet.absoluteFill}>
 						<ScannerCamera
 							key={resolution}
 							device={device}
@@ -341,7 +409,7 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 				<View pointerEvents="none" style={[styles.scrim, {top, left: 0, width: left, height: side}]} />
 				<View pointerEvents="none" style={[styles.scrim, {top, left: left + side, right: 0, height: side}]} />
 
-				<View testID="join-network-scan-viewfinder" pointerEvents="none" style={{position: 'absolute', top, left, width: side, height: side}}>
+				<View testID={`${prefix}-scan-viewfinder`} pointerEvents="none" style={{position: 'absolute', top, left, width: side, height: side}}>
 					<View style={[styles.corner, styles.cornerTL]} />
 					<View style={[styles.corner, styles.cornerTR]} />
 					<View style={[styles.corner, styles.cornerBL]} />
@@ -349,12 +417,12 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 				</View>
 
 				<View style={[styles.titleRow, {top: insets.top + 8}]} pointerEvents="none">
-					<Text testID="join-network-scan-title" style={[styles.title, boldText]}>
-						{t('joinScanTitle')}
+					<Text testID={`${prefix}-scan-title`} style={[styles.title, boldText]}>
+						{t(config.titleKey)}
 					</Text>
 				</View>
 				<Pressable
-					testID="join-network-scan-close"
+					testID={`${prefix}-scan-close`}
 					accessibilityRole="button"
 					accessibilityLabel={t('joinScanClose')}
 					onPress={props.onClose}
@@ -364,30 +432,30 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 
 				<View style={{position: 'absolute', top: top + side + 24, left: textLeft, width: textWidth, alignItems: 'center'}}>
 					{waiting ? (
-						<View testID="join-network-scan-starting" style={styles.startingRow}>
+						<View testID={`${prefix}-scan-starting`} style={styles.startingRow}>
 							<ActivityIndicator color={INK} />
 							<Text style={[styles.body, regularText, styles.startingText]}>{t('joinScanStarting')}</Text>
 						</View>
 					) : (
-						<Text testID="join-network-scan-instruction" style={[styles.body, regularText]}>
-							{slow ? t('joinScanSlow') : t('joinScanInstruction')}
+						<Text testID={`${prefix}-scan-instruction`} style={[styles.body, regularText]}>
+							{slow ? t(config.slowKey) : t(config.instructionKey)}
 						</Text>
 					)}
 				</View>
 
-				{bannerVisible ? (
-					<View testID="join-network-scan-banner" accessibilityRole="alert" style={[styles.banner, {bottom: pasteBottom + 44 + 16}]}>
+				{bannerKey !== null ? (
+					<View testID={`${prefix}-scan-banner`} accessibilityRole="alert" style={[styles.banner, {bottom: pasteBottom + 44 + 16}]}>
 						<FontAwesome6 name="circle-exclamation" size={16} color={INK} />
-						<Text style={[styles.body, regularText, styles.bannerText]}>{t('joinScanNotJoinCode')}</Text>
+						<Text style={[styles.body, regularText, styles.bannerText]}>{t(bannerKey)}</Text>
 					</View>
 				) : null}
 
 				<Pressable
-					testID="join-network-scan-paste"
+					testID={`${prefix}-scan-paste`}
 					accessibilityRole="button"
 					onPress={props.onPasteInstead}
 					style={[styles.pasteButton, {bottom: pasteBottom}]}>
-					<Text style={[styles.pasteLabel, boldText]}>{t('joinScanPasteInstead')}</Text>
+					<Text style={[styles.pasteLabel, boldText]}>{t(config.pasteKey)}</Text>
 				</Pressable>
 			</View>
 		</Modal>
