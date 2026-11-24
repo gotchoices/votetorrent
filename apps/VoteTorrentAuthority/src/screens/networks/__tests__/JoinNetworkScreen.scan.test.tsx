@@ -22,6 +22,9 @@ import { resources } from "../../../i18n";
 import { captureConsole, expectNoSecretInConsole } from "../../../engines/__fixtures__/console-leak";
 import { DISPLAYED_QR_TARGETS_PX, displayedQrBase64, readDisplayedQr } from "../../__fixtures__/displayed-qr";
 import { tryBuildQrPanel } from "../components/VoterInviteQrView";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { bytesToHex } from "@noble/curves/utils.js";
+import { serializeInviteShare } from "../../invitations/invite-share";
 
 jest.mock("react-native-vector-icons/FontAwesome6", () => "FontAwesome6");
 
@@ -266,6 +269,31 @@ describe("S: scan to join", () => {
 		expect(textById("join-network-scan-banner")).toBe(en.joinScanNotJoinCode);
 		expect(inputValue()).toBe("");
 		expect(mockRun).not.toHaveBeenCalled();
+	});
+
+	it("S-4b: an invitation QR is refused with a banner that points to Accept an Invitation", async () => {
+		const priv = secp256k1.utils.randomSecretKey();
+		const invitation = serializeInviteShare({
+			invitePrivate: bytesToHex(priv),
+			inviteKey: bytesToHex(secp256k1.getPublicKey(priv)),
+			expiration: "2026-11-25T09:30:00.000Z",
+			type: "k",
+			name: "Kay Holder",
+		});
+		const capture = captureConsole();
+		try {
+			await mount(<JoinNetworkScreen />);
+			await pressScan();
+			await emitScan(invitation);
+			expect(cams()).toHaveLength(1);
+			expect(textById("join-network-scan-banner")).toBe(en.joinScanIsInvitation);
+			expect(inputValue()).toBe("");
+			expect(mockRun).not.toHaveBeenCalled();
+			expect(capture.calls().some((c) => c[0] === "[join] scan: rejected-invitation")).toBe(true);
+			expectNoSecretInConsole(capture, [invitation]);
+		} finally {
+			capture.restore();
+		}
 	});
 
 	it("S-5: Paste instead and Close return to the screen with the field unchanged", async () => {
