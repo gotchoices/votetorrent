@@ -345,8 +345,12 @@ describe('no logging', () => {
 		expect(strip(`${TOKEN}log(1)`)).toContain(TOKEN)
 	})
 
-	it.each(['vote-record-vault.ts', 'vote-record-wrap.ts'])('%s has no console calls', (file) => {
-		const src = readFileSync(resolve(__dirname, '..', file), 'utf8')
+	it.each([
+		resolve(__dirname, '../../../../../packages/workflows/src/voter/vote-record-vault.ts'),
+		resolve(__dirname, '..', 'vote-record-wrap.ts'),
+		resolve(__dirname, '..', 'vote-record-vault.ts'),
+	])('%s has no console calls', (file) => {
+		const src = readFileSync(file, 'utf8')
 		expect(strip(src)).not.toContain(TOKEN)
 	})
 

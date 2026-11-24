@@ -8,6 +8,9 @@
  *
  * The allowlist is exact, so a new top-level binding fails here until it is reviewed. Planted
  * fixtures prove each rule can fail.
+ *
+ * Phase 67 plan 30: the reveal workflow (`REVEAL_BY_REASON`, `revealVoteReceipt`) moved to the shared
+ * `packages/workflows/src/voter/vote-receipt-read.ts`, so that file is scanned as the third receipt module.
  */
 
 import { existsSync, readFileSync } from 'fs'
@@ -20,9 +23,11 @@ function stripCommentsPreservingLines(src: string): string {
 
 const RECEIPT_ENGINE = join(__dirname, '..', 'engines', 'vote-receipt.ts')
 const RECEIPT_SCREEN = join(__dirname, '..', 'screens', 'ballot', 'VoteReceiptScreen.tsx')
+const RECEIPT_READ = join(__dirname, '../../../../packages/workflows/src/voter/vote-receipt-read.ts')
 
 const ALLOWED_CONSTS: Record<string, readonly string[]> = {
-	'vote-receipt.ts': ['NONCE_GROUP_COUNT', 'NONCE_GROUP_SIZE', 'NONCE_RE', 'REVEAL_BY_REASON'],
+	'vote-receipt.ts': ['NONCE_GROUP_COUNT', 'NONCE_GROUP_SIZE', 'NONCE_RE'],
+	'vote-receipt-read.ts': ['NONCE_RE', 'REVEAL_BY_REASON'],
 	'VoteReceiptScreen.tsx': ['NOTICE_KEY', 'styles'],
 }
 const CACHE_INIT_RE = /\bnew\s+(Weak)?(Map|Set)\b|\b(open|reveal|load|read)\w*(Record|Receipt|Vote)\w*\s*\(|\bawait\b/i
@@ -49,10 +54,15 @@ describe('receipt modules hold no module-level decrypted record (T-63-12-02, 63-
 	it('resolves both receipt modules (path sanity)', () => {
 		expect(existsSync(RECEIPT_ENGINE)).toBe(true)
 		expect(existsSync(RECEIPT_SCREEN)).toBe(true)
+		expect(existsSync(RECEIPT_READ)).toBe(true)
 	})
 
 	it('vote-receipt.ts has no top-level mutable binding or record cache', () => {
 		expect(checkNoModuleCache('vote-receipt.ts', readFileSync(RECEIPT_ENGINE, 'utf8'), ALLOWED_CONSTS['vote-receipt.ts']!)).toEqual([])
+	})
+
+	it('the shared vote-receipt-read.ts has no top-level mutable binding or record cache', () => {
+		expect(checkNoModuleCache('vote-receipt-read.ts', readFileSync(RECEIPT_READ, 'utf8'), ALLOWED_CONSTS['vote-receipt-read.ts']!)).toEqual([])
 	})
 
 	it('VoteReceiptScreen.tsx has no top-level mutable binding or record cache', () => {
@@ -62,7 +72,9 @@ describe('receipt modules hold no module-level decrypted record (T-63-12-02, 63-
 	it('the scan sees the allowlisted constants (it is not vacuous)', () => {
 		const engine = stripCommentsPreservingLines(readFileSync(RECEIPT_ENGINE, 'utf8'))
 		const screen = stripCommentsPreservingLines(readFileSync(RECEIPT_SCREEN, 'utf8'))
+		const shared = stripCommentsPreservingLines(readFileSync(RECEIPT_READ, 'utf8'))
 		for (const n of ALLOWED_CONSTS['vote-receipt.ts']!) expect(engine).toMatch(new RegExp(`^(export )?const ${n}\\b`, 'm'))
+		for (const n of ALLOWED_CONSTS['vote-receipt-read.ts']!) expect(shared).toMatch(new RegExp(`^(export )?const ${n}\\b`, 'm'))
 		for (const n of ALLOWED_CONSTS['VoteReceiptScreen.tsx']!) expect(screen).toMatch(new RegExp(`^(export )?const ${n}\\b`, 'm'))
 	})
 

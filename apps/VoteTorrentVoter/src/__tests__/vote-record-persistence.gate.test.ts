@@ -2,15 +2,22 @@
  * vote-record-persistence.gate.test.ts - D-29 / D-19 ciphertext-only persistence source gate
  * (Phase 63 plan 08). This is the PATTERNS "vault no-plaintext gate".
  *
+ * Phase 67 plan 30: the store and the vault moved to `packages/workflows/src/voter/` as factories over an
+ * injected key-value port (`kv`), so STORE and VAULT point at the shared files and the allowlisted write
+ * shapes name the `kv` receiver. The app paths are bindings, pinned logic-free by B1.
+ *
  * Rules, all scanned on comment-stripped source:
- *   V1  vote-record-vault.ts performs no persistence: no AsyncStorage / LevelDB / fs reference and
+ *   V1  the shared vault performs no persistence: no AsyncStorage / LevelDB / fs reference and
  *       no setItem / multiSet / mergeItem / multiMerge / removeItem / multiRemove call.
- *   S1  vote-record-store.ts makes no write call other than setItem, and no clear call.
+ *   S1  the shared store makes no write call other than setItem, and no clear call.
  *   S2  every setItem in the store is one of exactly two allowlisted shapes (the record write of
  *       the envelope, the marker write of the marker), each exactly once, record before marker.
  *   S3  the only JSON.stringify arguments in the store are `envelope` and `marker`, once each.
  *   K1  no other non-test file under apps/VoteTorrentVoter/src references the two key prefixes,
  *       the key builders or the prefix constants, so nothing can write the keys around the store.
+ *   B1  the app store and vault bindings make no storage write, no stringify and no cipher call.
+ *   B2  the shared store, vault, receipt reader and sent store name no platform storage token.
+ *   K2  no other shared voter file references the vote-record keys.
  *
  * The scan uses the line-preserving comment stripper copied from no-vrg-ceremony.gate.test.ts.
  * Exclusions are by file suffix (*.test.ts / *.test.tsx) only, never by directory name (T-51-12-05).
@@ -23,7 +30,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'os'
 import { join } from 'path'
 
-type Rule = 'V1' | 'S1' | 'S2' | 'S3' | 'ORDER' | 'K1'
+type Rule = 'V1' | 'S1' | 'S2' | 'S3' | 'ORDER' | 'K1' | 'B1' | 'B2' | 'K2'
 interface Violation {
 	rule: Rule
 	file: string
@@ -52,9 +59,9 @@ const CLEAR_RE = /\.\s*clear\s*\(/g
 const VAULT_TOKENS = ['AsyncStorage', '@react-native-async-storage', 'rn-leveldb', 'react-native-fs']
 
 const RECORD_WRITE_RE =
-	/AsyncStorage\s*\.\s*setItem\s*\(\s*voteRecordKey\s*\(\s*marker\s*\.\s*electionId\s*\)\s*,\s*JSON\s*\.\s*stringify\s*\(\s*envelope\s*\)\s*,?\s*\)/g
+	/\bkv\s*\.\s*setItem\s*\(\s*voteRecordKey\s*\(\s*marker\s*\.\s*electionId\s*\)\s*,\s*JSON\s*\.\s*stringify\s*\(\s*envelope\s*\)\s*,?\s*\)/g
 const MARKER_WRITE_RE =
-	/AsyncStorage\s*\.\s*setItem\s*\(\s*voteMarkerKey\s*\(\s*marker\s*\.\s*electionId\s*\)\s*,\s*JSON\s*\.\s*stringify\s*\(\s*marker\s*\)\s*,?\s*\)/g
+	/\bkv\s*\.\s*setItem\s*\(\s*voteMarkerKey\s*\(\s*marker\s*\.\s*electionId\s*\)\s*,\s*JSON\s*\.\s*stringify\s*\(\s*marker\s*\)\s*,?\s*\)/g
 const STRINGIFY_RE = /JSON\s*\.\s*stringify\s*\(\s*([^\s,)]*)/g
 
 function mk(rule: Rule, file: string, stripped: string, index: number, token: string): Violation {
@@ -169,6 +176,51 @@ function scanKeyReferences(root: string, excludeAbsPaths: ReadonlySet<string>): 
 	return out
 }
 
+/** B1: the bindings hold no write, no stringify and no cipher call (tokens assembled so this file never trips itself). */
+const BINDING_TOKENS: string[] = ['set' + 'Item(', 'multi' + 'Set(', 'JSON.' + 'stringify(', 'gc' + 'm(', 'random' + 'Bytes(']
+
+function scanBinding(file: string, raw: string): Violation[] {
+	const stripped = stripCommentsPreservingLines(raw).replace(/\s+/g, '')
+	const out: Violation[] = []
+	for (const t of BINDING_TOKENS) {
+		const compact = t.replace(/\s+/g, '')
+		let i = stripped.indexOf(compact)
+		while (i !== -1) {
+			out.push({ rule: 'B1', file, line: 0, token: t, text: '' })
+			i = stripped.indexOf(compact, i + compact.length)
+		}
+	}
+	return out
+}
+
+function countToken(raw: string, token: string): number {
+	const stripped = stripCommentsPreservingLines(raw).replace(/\s+/g, '')
+	let n = 0
+	let i = stripped.indexOf(token)
+	while (i !== -1) {
+		n += 1
+		i = stripped.indexOf(token, i + token.length)
+	}
+	return n
+}
+
+function scanPlatformTokens(rule: Rule, file: string, raw: string): Violation[] {
+	const stripped = stripCommentsPreservingLines(raw)
+	const out: Violation[] = []
+	for (const t of VAULT_TOKENS) {
+		let i = stripped.indexOf(t)
+		while (i !== -1) {
+			out.push(mk(rule, file, stripped, i, t))
+			i = stripped.indexOf(t, i + t.length)
+		}
+	}
+	return out
+}
+
+function scanKeyReferencesAs(rule: Rule, root: string, excludeAbsPaths: ReadonlySet<string>): Violation[] {
+	return scanKeyReferences(root, excludeAbsPaths).map((v) => ({ ...v, rule }))
+}
+
 function countsBy(violations: Violation[]): Record<string, number> {
 	const out: Record<string, number> = {}
 	for (const v of violations) out[`${v.rule}:${v.token}`] = (out[`${v.rule}:${v.token}`] ?? 0) + 1
@@ -183,14 +235,23 @@ function detail(violations: Violation[]): string {
 // 1. Real target
 // ---------------------------------------------------------------------------
 
-const STORE = join(__dirname, '../engines/vote-record-store.ts')
-const VAULT = join(__dirname, '../engines/vote-record-vault.ts')
+const STORE = join(__dirname, '../../../../packages/workflows/src/voter/vote-record-store.ts')
+const VAULT = join(__dirname, '../../../../packages/workflows/src/voter/vote-record-vault.ts')
+const RECEIPT = join(__dirname, '../../../../packages/workflows/src/voter/vote-receipt-read.ts')
+const SENT = join(__dirname, '../../../../packages/workflows/src/voter/vote-sent-store.ts')
+const SHARED_VOTER = join(__dirname, '../../../../packages/workflows/src/voter')
+const APP_STORE_BINDING = join(__dirname, '../engines/vote-record-store.ts')
+const APP_VAULT_BINDING = join(__dirname, '../engines/vote-record-vault.ts')
 const SRC = join(__dirname, '..')
 
 describe('vote-record persistence gate - real target', () => {
 	it('the store and vault exist (non-vacuous)', () => {
 		expect(existsSync(STORE)).toBe(true)
 		expect(existsSync(VAULT)).toBe(true)
+		expect(existsSync(RECEIPT)).toBe(true)
+		expect(existsSync(SENT)).toBe(true)
+		expect(existsSync(APP_STORE_BINDING)).toBe(true)
+		expect(existsSync(APP_VAULT_BINDING)).toBe(true)
 	})
 
 	it('V1: the vault performs no persistence', () => {
@@ -208,7 +269,26 @@ describe('vote-record persistence gate - real target', () => {
 	})
 
 	it('K1: no other source file references the keys', () => {
-		const v = scanKeyReferences(SRC, new Set([STORE]))
+		const v = scanKeyReferences(SRC, new Set([APP_STORE_BINDING]))
+		expect({ counts: countsBy(v), detail: detail(v) }).toEqual({ counts: {}, detail: '' })
+	})
+
+	it('B1 the app store and vault bindings make no storage write, no stringify and no cipher call', () => {
+		const storeRaw = readFileSync(APP_STORE_BINDING, 'utf8')
+		const vaultRaw = readFileSync(APP_VAULT_BINDING, 'utf8')
+		const v = [...scanBinding(APP_STORE_BINDING, storeRaw), ...scanBinding(APP_VAULT_BINDING, vaultRaw)]
+		expect({ counts: countsBy(v), detail: detail(v) }).toEqual({ counts: {}, detail: '' })
+		expect(countToken(storeRaw, 'createVoteRecord' + 'Store(')).toBe(1)
+		expect(countToken(vaultRaw, 'createVoteRecord' + 'Vault(')).toBe(1)
+	})
+
+	it('B2 the shared store, vault, receipt and sent store name no platform storage token', () => {
+		const v = [STORE, VAULT, RECEIPT, SENT].flatMap((file) => scanPlatformTokens('B2', file, readFileSync(file, 'utf8')))
+		expect({ counts: countsBy(v), detail: detail(v) }).toEqual({ counts: {}, detail: '' })
+	})
+
+	it('K2 no other shared voter file references the vote-record keys', () => {
+		const v = scanKeyReferencesAs('K2', SHARED_VOTER, new Set([STORE]))
 		expect({ counts: countsBy(v), detail: detail(v) }).toEqual({ counts: {}, detail: '' })
 	})
 })
@@ -217,9 +297,9 @@ describe('vote-record persistence gate - real target', () => {
 // 2. Planted fixtures
 // ---------------------------------------------------------------------------
 
-const REC = 'await AsyncStorage.setItem(voteRecordKey(marker.electionId), JSON.stringify(envelope))'
-const MRK = 'await AsyncStorage.setItem(voteMarkerKey(marker.electionId), JSON.stringify(marker))'
-const EXTRA = 'await AsyncStorage.setItem(voteRecordKey(id), JSON.stringify(record))'
+const REC = 'await kv.setItem(voteRecordKey(marker.electionId), JSON.stringify(envelope))'
+const MRK = 'await kv.setItem(voteMarkerKey(marker.electionId), JSON.stringify(marker))'
+const EXTRA = 'await kv.setItem(voteRecordKey(id), JSON.stringify(record))'
 
 describe('vote-record persistence gate - planted fixtures', () => {
 	let dir: string
@@ -258,9 +338,9 @@ describe('vote-record persistence gate - planted fixtures', () => {
 	})
 
 	it('P4: multiSet is caught by S1 at its line, and not when commented', () => {
-		const scan = scanSrc([REC, MRK, 'await AsyncStorage.multiSet([[a, b], [c, d]])'])
+		const scan = scanSrc([REC, MRK, 'await kv.multiSet([[a, b], [c, d]])'])
 		expect(scan.violations.filter((v) => v.rule === 'S1').map((v) => [v.line, v.token])).toEqual([[3, 'multiSet']])
-		const twin = scanSrc([REC, MRK, '// await AsyncStorage.multiSet([[a, b], [c, d]])'])
+		const twin = scanSrc([REC, MRK, '// await kv.multiSet([[a, b], [c, d]])'])
 		expect(twin.violations).toEqual([])
 	})
 
@@ -291,14 +371,14 @@ describe('vote-record persistence gate - planted fixtures', () => {
 		expect(scanKeyReferences(dir, new Set()).map((v) => v.line)).toEqual([1])
 	})
 
-	it('P7: prettier-wrapped allowlisted writes pass and report the AsyncStorage line', () => {
+	it('P7: prettier-wrapped allowlisted writes pass and report the kv line', () => {
 		const scan = scanSrc([
 			'async function w() {',
-			'\tawait AsyncStorage.setItem(',
+			'\tawait kv.setItem(',
 			'\t\tvoteRecordKey(marker.electionId),',
 			'\t\tJSON.stringify(envelope),',
 			'\t)',
-			'\tawait AsyncStorage.setItem(',
+			'\tawait kv.setItem(',
 			'\t\tvoteMarkerKey(marker.electionId),',
 			'\t\tJSON.stringify(marker),',
 			'\t)',

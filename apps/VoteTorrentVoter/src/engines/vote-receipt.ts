@@ -6,19 +6,18 @@
  * matches the stored marker (WR-02). Storage is reached ONLY through the store's `readVoteMarker`
  * and `readSavedVote` (gate K1). This module never writes, deletes or
  * regenerates anything, and it caches nothing at module level. No logging.
+ *
+ * Phase 67 plan 30: the reveal workflow moved to `@votetorrent/workflows/voter` (`vote-receipt-read.ts`);
+ * `loadVoteReceipt` and `revealVoteReceipt` below forward to a reader built per call over this app's store
+ * and vault. The presentation helpers (nonce groups, the election read, the ballot rows) stay here.
  */
 
 import type { SecretWrapPrompt } from '@votetorrent/attestation-native'
 import type { Ballot } from '@votetorrent/vote-core'
+import { createVoteReceiptReader, type VoteReceiptLoad, type VoteReceiptReader, type VoteRecordReveal } from '@votetorrent/workflows/voter'
 import { readVoteContext, type ElectionReadDeps } from './election-read'
-import { readSavedVote, readVoteMarker, voteRecordMatchesMarker, type VoteMarker } from './vote-record-store'
-import {
-	openVoteRecord,
-	VoteRecordUnavailableError,
-	type VoteRecord,
-	type VoteRecordEnvelope,
-	type VoteRecordUnavailableReason,
-} from './vote-record-vault'
+import { readSavedVote, readVoteMarker, voteRecordMatchesMarker } from './vote-record-store'
+import { openVoteRecord, VoteRecordUnavailableError, type VoteRecord, type VoteRecordEnvelope } from './vote-record-vault'
 
 export const NONCE_GROUP_COUNT = 16
 export const NONCE_GROUP_SIZE = 4
@@ -57,85 +56,32 @@ export async function readReceiptElection(
 	}
 }
 
-export type VoteReceiptLoad =
-	| { kind: 'none' }
-	| { kind: 'unreadable' }
-	| { kind: 'saved' | 'stale'; marker: VoteMarker; envelope: VoteRecordEnvelope; revisionKnown: boolean }
+/**
+ * The reveal workflow (`loadVoteReceipt`, `revealVoteReceipt`) lives in the shared package
+ * (`packages/workflows/src/voter/vote-receipt-read.ts`, phase 67 plan 30); this binding builds the reader
+ * per call over the app's store and vault, so module mocks and spies on those paths stay effective.
+ */
+export type { VoteReceiptLoad } from '@votetorrent/workflows/voter'
+export type VoteReceiptReveal = VoteRecordReveal
+
+function appReceiptReader(): VoteReceiptReader {
+	return createVoteReceiptReader({
+		readVoteMarker: (id) => readVoteMarker(id),
+		readSavedVote: (id, r) => readSavedVote(id, r),
+		voteRecordMatchesMarker: (rec, m) => voteRecordMatchesMarker(rec, m),
+		openVoteRecord: (id, env, o) => openVoteRecord(id, env, o),
+		unavailableReasonOf: (err) => (err instanceof VoteRecordUnavailableError ? err.reason : null),
+	})
+}
 
 /** Marker-driven state: no keystore call, no prompt (D-13). */
-export async function loadVoteReceipt(electionId: string, currentRevision: number | null): Promise<VoteReceiptLoad> {
-	let revision: number
-	let revisionKnown: boolean
-	if (currentRevision === null) {
-		const cls = await readVoteMarker(electionId)
-		if (cls.kind === 'absent') return { kind: 'none' }
-		if (cls.kind === 'unreadable') return { kind: 'unreadable' }
-		revision = cls.marker.electionRevision
-		revisionKnown = false
-	} else {
-		revision = currentRevision
-		revisionKnown = true
-	}
-	const read = await readSavedVote(electionId, revision)
-	if (read.state === 'none') return { kind: 'none' }
-	if (read.state === 'unreadable') return { kind: 'unreadable' }
-	// A missing or undecryptable record is reported, never silently re-enabled.
-	if (read.envelopeState !== 'ok' || read.marker === null || read.envelope === null) return { kind: 'unreadable' }
-	return { kind: read.state, marker: read.marker, envelope: read.envelope, revisionKnown }
+export function loadVoteReceipt(electionId: string, currentRevision: number | null): Promise<VoteReceiptLoad> {
+	return appReceiptReader().loadVoteReceipt(electionId, currentRevision)
 }
 
-export type VoteReceiptReveal =
-	| { kind: 'ok'; record: VoteRecord }
-	| { kind: 'canceled' }
-	| { kind: 'biometric-unavailable' }
-	| { kind: 'unreadable' }
-	| { kind: 'failed' }
-
-const REVEAL_BY_REASON: Record<VoteRecordUnavailableReason, VoteReceiptReveal['kind']> = {
-	canceled: 'canceled',
-	'biometric-unavailable': 'biometric-unavailable',
-	'key-invalidated': 'unreadable',
-	'no-wrap-key': 'unreadable',
-	'policy-mismatch': 'unreadable',
-	'tag-mismatch': 'unreadable',
-	malformed: 'unreadable',
-	'native-error': 'failed',
-}
-
-/**
- * The one place choices and nonces are decrypted. Never rejects and never logs.
- *
- * WR-02: the record is shown only if it is the one the stored marker commits. The marker is read
- * fresh before the prompt (absent or unreadable: `unreadable`, no prompt), and the decrypted record
- * must match it (`voteRecordMatchesMarker`: election, revision, save time, ballot ids). A record a
- * failed save left under an older marker is therefore `unreadable`, never revealed.
- */
-export async function revealVoteReceipt(
-	electionId: string,
-	envelope: VoteRecordEnvelope,
-	prompt: SecretWrapPrompt,
-): Promise<VoteReceiptReveal> {
-	try {
-		const stored = await readVoteMarker(electionId)
-		if (stored.kind !== 'ok') return { kind: 'unreadable' }
-		const record = await openVoteRecord(electionId, envelope, { prompt })
-		if (
-			record.electionId !== electionId ||
-			!voteRecordMatchesMarker(record, stored.marker) ||
-			!record.votes.every((v) => NONCE_RE.test(v.nonce))
-		) {
-			return { kind: 'unreadable' }
-		}
-		return { kind: 'ok', record }
-	} catch (err) {
-		if (err instanceof VoteRecordUnavailableError) {
-			const kind = REVEAL_BY_REASON[err.reason]
-			if (kind === 'canceled' || kind === 'biometric-unavailable' || kind === 'unreadable' || kind === 'failed') {
-				return { kind }
-			}
-		}
-		return { kind: 'failed' }
-	}
+/** The one place choices and nonces are decrypted (WR-02 marker match). Never rejects and never logs. */
+export function revealVoteReceipt(electionId: string, envelope: VoteRecordEnvelope, prompt: SecretWrapPrompt): Promise<VoteReceiptReveal> {
+	return appReceiptReader().revealVoteReceipt(electionId, envelope, prompt)
 }
 
 export interface ReceiptQuestionView {
