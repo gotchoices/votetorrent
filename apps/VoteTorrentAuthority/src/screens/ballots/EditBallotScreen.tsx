@@ -17,7 +17,9 @@ import { useApp } from "../../providers/AppProvider";
 import { loadAuthoritiesWithRetry } from "../../utils/loadAuthoritiesWithRetry";
 import { createDeviceSigner } from "../../engines/device-signer";
 import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
-import type { Authority, Ballot, INetworkEngine } from "@votetorrent/vote-core";
+import type { Authority, INetworkEngine } from "@votetorrent/vote-core";
+import { proposeBallot, submitBallot, toBallotConfirmationView } from "@votetorrent/workflows/authority";
+import type { BallotConfirmationView, BallotDraft } from "@votetorrent/workflows/authority";
 import { peerUnavailableMessage } from "../../utils/peerUnavailableMessage";
 
 /**
@@ -44,8 +46,6 @@ import { peerUnavailableMessage } from "../../utils/peerUnavailableMessage";
  * answer the screen fails closed (Retry); a later success of the LATEST read still restores it.
  */
 const BALLOT_STATE_READ_TIMEOUT_MS = 30_000;
-
-type BallotConfirmationView = { locked: boolean; confirmed: boolean; canWithdraw: boolean; ownTaskOpen: boolean };
 
 /** The comparable form of a ballot: what Propose stores and what Submit would send out. */
 const comparableBallot = (b: { authorityId?: string; description?: string; districts?: string[]; questions?: unknown[] }) =>
@@ -181,12 +181,7 @@ const EditBallotScreen = () => {
 	const readConfirmationState = useCallback(async (): Promise<BallotConfirmationView | null> => {
 		const seq = ++readSeqRef.current;
 		const apply = (state: any): BallotConfirmationView => {
-			const fresh = {
-				locked: !!state.locked,
-				confirmed: !!state.confirmed,
-				canWithdraw: state.canWithdraw === true,
-				ownTaskOpen: state.ownTaskOpen === true,
-			};
+			const fresh = toBallotConfirmationView(state);
 			if (seq === readSeqRef.current) {
 				setConfirmationState(fresh);
 				setStateReadFailed(false);
@@ -274,7 +269,7 @@ const EditBallotScreen = () => {
 		setSubmitting(true);
 		try {
 			const lazySign = async (digest: Uint8Array) => (await createDeviceSigner("Device User"))(digest);
-			await electionEngine.submitBallotForConfirmation(ballotId, lazySign);
+			await submitBallot({ electionEngine, ballotId, sign: lazySign });
 			// Re-read rather than guess. A submitted ballot reads locked until its confirmation
 			// Task is accepted (threshold 1 opens that Task for this officer; it does not self-confirm).
 			const after = await refreshConfirmationState();
@@ -359,16 +354,10 @@ const EditBallotScreen = () => {
 		if (stateUnknown || locked || confirmed) return;
 		setErrorMessage("");
 		setProposing(true);
-		const ballot: Ballot = {
-			id: (ballotDraft as any).id ?? ballotId ?? `ballot-${electionId}-${Date.now()}`,
-			electionId: ballotDraft.electionId ?? electionId ?? "",
-			authorityId: (ballotDraft as any).authority ?? (ballotDraft as any).authorityId ?? "",
-			description: ballotDraft.description ?? "",
-			districts: ballotDraft.districts ?? [],
-			questions: ballotDraft.questions ?? [],
-		};
 		try {
-			await electionEngine.proposeBallot(ballot);
+			// The shared proposeBallot builds the Ballot from the draft (id from the draft, else the persisted
+			// ballotId, else a new one; `authority` is the dropdown's key for authorityId) and upserts it.
+			await proposeBallot({ electionEngine, draft: ballotDraft as BallotDraft, ballotId, electionId, now: Date.now() });
 			navigation.goBack();
 		} catch (error) {
 			console.warn("proposeBallot error", errorClass(error));

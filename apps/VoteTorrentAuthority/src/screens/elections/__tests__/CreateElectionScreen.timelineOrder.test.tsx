@@ -54,6 +54,9 @@ const mockBuilderCtor = jest.fn(function (..._args: unknown[]): BuilderStub {
 });
 
 const mockElectionsEngine = {
+  // The shared createElection takes the builder from the engine (IElectionsEngine.buildCreateElection);
+  // routing it through mockBuilderCtor keeps every builder assertion below meaningful.
+  buildCreateElection: jest.fn((): BuilderStub => mockBuilderCtor()),
   seedElectionSigning: jest.fn(async () => "signing-nonce"),
   peekNextTid: jest.fn(async () => 41),
   seedElectionRevisionSigning: jest.fn(async () => "revision-signing-nonce"),

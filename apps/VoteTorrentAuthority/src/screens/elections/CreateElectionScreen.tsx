@@ -15,19 +15,16 @@ import type { RootStackParamList } from "../../navigation/types";
 import { ElectionRevisionForm, ElectionRevisionFormValue } from "./components/ElectionRevisionForm";
 import { useApp } from "../../providers/AppProvider";
 import { ElectionType } from "@votetorrent/vote-core";
-import type { IElectionsEngine, INetworkEngine, ElectionInit } from "@votetorrent/vote-core";
-import { ElectionsCreateElectionBuilder } from "@votetorrent/vote-engine";
+import type { IElectionsEngine, INetworkEngine } from "@votetorrent/vote-core";
+import { checkElectionKeyholders, createElection } from "@votetorrent/workflows/authority";
+import type { ElectionSetupRefusal } from "@votetorrent/workflows/authority";
 import { createDeviceSigner } from "../../engines/device-signer";
 import { mapElectionError } from "./election-error-messages";
 import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
 import { KeyboardAvoidingScreen } from "../../components/KeyboardAvoidingScreen";
 import { findAuthorityName } from "../../utils/findAuthorityName";
-import { KEYHOLDER_POLICY_ERROR_KEY, validateKeyholderPolicy } from "./keyholder-policy";
-import {
-	resolveElectionTimeline,
-	findTimelineOrderViolation,
-	CREATE_FALLBACK_DAYS,
-} from "./resolve-election-timeline";
+import { KEYHOLDER_POLICY_ERROR_KEY } from "./keyholder-policy";
+import { resolveElectionTimeline, CREATE_FALLBACK_DAYS } from "./resolve-election-timeline";
 
 // Phase 9 plan 09-12 (ELECUI-03) — Single-scroll New Election form.
 // Phase 20 plan 20-06 (EUI-02, EUI-03) — type radio + per-field inline validation.
@@ -107,8 +104,44 @@ export function CreateElectionScreen() {
 		loadAuthority();
 	}, [getEngine]);
 
+	// Presentation only: map a shared createElection refusal code to the field it belongs to.
+	const applyElectionRefusal = (refusal: ElectionSetupRefusal) => {
+		switch (refusal.code) {
+			case "title-required":
+				setTitleError(t("errTitleRequired"));
+				return;
+			case "no-keyholders":
+				setErrorMessage(t("atLeastOneKeyholderRequired"));
+				return;
+			case "election-date-invalid":
+				setDateError(t("errElectionDateInvalid"));
+				return;
+			case "revision-deadline-invalid":
+				setRevisionDeadlineError(t("errRevisionDeadlineInvalid"));
+				return;
+			case "revision-deadline-after-date":
+				setRevisionDeadlineError(t("errRevisionDeadlineAfterDate"));
+				return;
+			case "election-date-too-soon":
+				setDateError(
+					t("errElectionDateTooSoon", {
+						date: new Date(refusal.ballotDeadline ?? 0).toLocaleDateString(),
+					})
+				);
+				return;
+			case "timeline-order":
+				setErrorMessage(t("errTimelineOrder"));
+				return;
+			default:
+				setErrorMessage(t(KEYHOLDER_POLICY_ERROR_KEY[refusal.code]));
+				return;
+		}
+	};
+
 	// Phase 16 Plan 03 — PROPOSE wires the real engine-signing seam + createElection (FLOW-03).
 	// Phase 20 plan 20-06 — EUI-03: validates title + visible date fields before engine call.
+	// Phase 67 plan 10 — the workflow body lives in @votetorrent/workflows (createElection); this
+	// screen keeps state, field errors and navigation.
 	const handlePropose = async () => {
 		// 16-08 item 4: clear any prior error so a retry starts clean.
 		setErrorMessage("");
@@ -128,20 +161,11 @@ export function CreateElectionScreen() {
 			return;
 		}
 
-		// WR-02 + WR-03: enforce the "at least one keyholder" model invariant
-		// (ElectionRevisionInit.keyholders) and strip blank rows so empty names
-		// never inflate keyholders.length / keyholderThreshold.
-		const cleanKeyholders = revision.keyholders
-			.map((name) => name.trim())
-			.filter(Boolean);
-		if (cleanKeyholders.length === 0) {
-			setErrorMessage(t("atLeastOneKeyholderRequired"));
-			return;
-		}
-
-		const policy = validateKeyholderPolicy(cleanKeyholders, Math.trunc(revision.threshold));
-		if (!policy.ok) {
-			setErrorMessage(t(KEYHOLDER_POLICY_ERROR_KEY[policy.reason]));
+		// WR-02 + WR-03: the shared keyholder check strips blank rows, refuses an empty list and
+		// applies the 2-of-N policy, all before any engine call or device-signer resolution.
+		const keyholderCheck = checkElectionKeyholders(revision.keyholders, revision.threshold);
+		if (!keyholderCheck.ok) {
+			applyElectionRefusal(keyholderCheck.refusal);
 			return;
 		}
 
@@ -153,147 +177,40 @@ export function CreateElectionScreen() {
 				return;
 			}
 
-			// Build the device signer once — the callback closes over the device private key
-			// app-side (D-01). The key never crosses into vote-engine.
-			const signer = await createDeviceSigner("Device User");
-
 			const now = Date.now();
 
-			// Resolve the full 10-event timeline ONCE so the builder payload and the
-			// revision-signing seam below sign an IDENTICAL timeline (the digests must match).
 			// resolveElectionTimeline is the single shared construction site both this screen
 			// and EditElectionScreen build through (D-16) — see resolve-election-timeline.ts
 			// for the "relative to votingStarts, not now" rationale.
 			const resolvedTimeline = resolveElectionTimeline(revision, now, CREATE_FALLBACK_DAYS);
 
-			// WR-05: the two required core date fields must actually PARSE — do not let an
-			// unparseable string silently fall back to a fabricated now+N-days timeline in
-			// the signed, immutable election. Surface a field error instead.
-			const parsedCoreDate = new Date(coreDate).getTime();
-			if (Number.isNaN(parsedCoreDate)) {
-				setDateError(t("errElectionDateInvalid"));
-				return;
-			}
-			const parsedRevisionDeadline = new Date(coreRevisionDeadline).getTime();
-			if (Number.isNaN(parsedRevisionDeadline)) {
-				setRevisionDeadlineError(t("errRevisionDeadlineInvalid"));
-				return;
-			}
-
-			// Generate the election id once and use it for both the seam call and the builder
-			// payload — the AdminSigning.Digest and Election.InsertValid Digest must use the
-			// IDENTICAL id (field contract: screen generates id, passes to both paths).
-			const electionId = `election-${now}`;
-			const electionDate = parsedCoreDate;
-			const electionRevisionDeadline = parsedRevisionDeadline;
-			const electionBallotDeadline = now + 10 * 24 * 60 * 60 * 1000;
-			// EUI-03 (D-06): validated non-empty above — trim() only, no silent default
-			const electionTitle = coreTitle.trim();
-
-			// Deadline coherence — catch these BEFORE the engine so the user gets a
-			// friendly, field-level message instead of a raw SQL CHECK
-			// (RevisionDeadline ≤ Date / BallotDeadlineValid) or a builder TIMELINE_ORDER error.
-			if (electionRevisionDeadline > electionDate) {
-				setRevisionDeadlineError(t("errRevisionDeadlineAfterDate"));
-				return;
-			}
-			if (electionBallotDeadline > electionDate) {
-				setDateError(
-					t("errElectionDateTooSoon", {
-						date: new Date(electionBallotDeadline).toLocaleDateString(),
-					})
-				);
-				return;
-			}
-			if (findTimelineOrderViolation(resolvedTimeline) !== null) {
-				setErrorMessage(t("errTimelineOrder"));
-				return;
-			}
-
-			// Assemble the full payload via the v1.1 builder (D-03 / FACT-02)
-			const builder = new ElectionsCreateElectionBuilder(electionsEngine)
-				.setElection({
-					id: electionId,
+			// The workflow body (date parsing refusals, deadline coherence, the v1.1 builder, the two
+			// signing seams and createElection) is the shared createElection. The device signer is
+			// built once, inside createSigner — the callback closes over the device private key
+			// app-side (D-01); the key never crosses into vote-engine. The app passes no
+			// ballotDeadline, so the shared 10-day rule applies.
+			const result = await createElection({
+				electionsEngine,
+				input: {
 					authorityId,
-					title: electionTitle,
-					date: electionDate,
-					revisionDeadline: electionRevisionDeadline,
-					ballotDeadline: electionBallotDeadline,
+					title: coreTitle,
+					date: new Date(coreDate).getTime(),
+					revisionDeadline: new Date(coreRevisionDeadline).getTime(),
 					type: electionType,
-				})
-				.setRevision({
-					electionId,
-					revision: 0,
-					revisionTimestamp: now - 1000,
+					keyholders: revision.keyholders,
+					threshold: revision.threshold,
 					tags: revision.tags,
 					instructions: revision.instructions,
-					keyholders: cleanKeyholders.map((name) => ({
-						name,
-						type: "k",
-						expiration: "0",
-						inviteKey: "",
-						invitePrivate: "",
-						inviteSignature: "",
-						digest: "",
-					})),
 					timeline: resolvedTimeline,
-					keyholderThreshold: Math.max(0, Math.trunc(revision.threshold)),
-				});
-			// Validate BEFORE either signature: build() throws the builder's errors, including the
-			// engine's timeline check (the rules the Voter applies), so an election the Voter would
-			// refuse costs the officer no biometric prompt and leaves no signed AdminSigning rows.
-			const payload = builder.build();
-
-			// Drive the engine signing seam — seam owns tid + Digest computation (D-03);
-			// the signer callback closes over the device private key app-side (D-01).
-			// Pass the SAME election fields (id, authorityId, title, date, ...) so the seam's
-			// internal AdminSigning.Digest matches what createElection's Election.InsertValid computes.
-			const signingNonce = await electionsEngine.seedElectionSigning(
-				{
-					id: electionId,
-					authorityId,
-					title: electionTitle,
-					date: electionDate,
-					revisionDeadline: electionRevisionDeadline,
-					ballotDeadline: electionBallotDeadline,
-					type: electionType,
 				},
-				signer
-			);
-
-			// Sign the ElectionRevision row (Revision=0) via the companion seam.
-			// revTid = (await electionsEngine.peekNextTid()) + 1 (Election consumes T, revision
-			// consumes T+1). pastRevTs = now - 1000 — must be PAST and identical to what
-			// builder.setRevision received.
-			// 999.1 D-15 fix: peekNextTid() is an IElectionsEngine interface method (delegates
-			// to the namespace-allocator-backed peekNextElectionTid(db) internally) — the screen
-			// never holds a raw Database handle, so it cannot call the standalone
-			// peekNextElectionTid(db) function directly.
-			const pastRevTs = now - 1000;
-			const revTid = (await electionsEngine.peekNextTid()) + 1;
-			// Same object the builder payload signs — must be identical (digest parity).
-			const revisionTimeline = resolvedTimeline;
-			const revisionSigningNonce = await electionsEngine.seedElectionRevisionSigning(
-				electionId,
-				authorityId,
-				{
-					revision: 0,
-					revisionTimestamp: pastRevTs,
-					tags: revision.tags,
-					instructions: revision.instructions,
-					timeline: revisionTimeline,
-					keyholderThreshold: Math.max(0, Math.trunc(revision.threshold)),
-				},
-				revTid,
-				signer,
-			);
-
-			// Call createElection directly (not via builder.commit()) so both nonces are forwarded —
-			// ElectionsCreateElectionBuilder.commit() does NOT forward signingNonce (RESEARCH FQ3 option a).
-			// `payload` was built (and validated) above, before signing.
-			// D-27: no local scaffold persistence — createElection already persists
-			// ElectionRevision.Keyholders, and the engine is the single source.
-			await electionsEngine.createElection(payload, { signingNonce, revisionSigningNonce });
+				createSigner: () => createDeviceSigner("Device User"),
+				now,
+			});
+			if (!result.ok) {
+				// A refusal is a field-level message, never a write; the finally resets isCreating.
+				applyElectionRefusal(result.refusal);
+				return;
+			}
 		} catch (err) {
 			console.warn("createElection error:", err);
 			const outcome = handleDeviceSigningError(err);

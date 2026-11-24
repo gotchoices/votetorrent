@@ -32,6 +32,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import { useApp } from "../../providers/AppProvider";
 import { createDeviceSigner } from "../../engines/device-signer";
 import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
+import { rejectTask, signTask } from "@votetorrent/workflows/authority";
 
 // 'registrant' is deliberately excluded from this map's key type — it can never reach this
 // screen. TasksScreen.tsx's `renderableSignatureTasks` filter and useTaskCount.ts's
@@ -98,35 +99,16 @@ export default function SignatureTaskScreen() {
 		}
 	}, [navigation, t, task.signatureType]);
 
-	// SIGN-02 accept path (D-01/D-03/D-04):
-	//   1. Obtain engine-authoritative digest via getSignatureDigest (D-03 — screen never recomputes)
-	//   2. Sign with device-signer callback (D-01 — private key stays app-side)
-	//   3. Call completeSignature with the resulting Signature only
+	// SIGN-02 accept path (D-01/D-03/D-04): the engine-authoritative digest, the device-signer callback
+	// (private key stays app-side) and the completion are the shared signTask (phase 67 plan 10). The
+	// re-invocable-signer rule (39-03 / 57-08: ballot and admin tasks pass the signer along) lives in the
+	// shared signature-task.ts.
 	const sign = async () => {
 		setErrorMessage("");
 		setIsProcessing(true);
 		try {
 			const engine = await getEngine<ISignatureTasksEngine>("signatureTasksEngine");
-			const digest = await engine.getSignatureDigest(task);
-			const signer = await createDeviceSigner("Device User");
-			const signature = await signer(digest);
-			// 39-03 (DEBT-11, D-06): `signer` is a plain in-memory closure over the
-			// already-unlocked device private key (device-signer.ts) — re-invocable
-			// with no additional user decision — so it doubles as the reusable
-			// per-digest `sign` callback finalizeBallot uses to REAL-sign each
-			// promoted per-row Question/Option AdminSigning digest. Only `ballot`
-			// signature tasks drive finalizeBallot (IN-02, 39-REVIEW).
-			// 57-08 (Trigger B): `admin` tasks are the second consumer — a co-signer
-			// accepting a pending "Revise Administration" task may complete the 'rad'
-			// threshold, and completeSignature's promotion attempt (applyAdminProposal)
-			// mints two or three distinct digests, so it likewise needs this
-			// re-invocable closure rather than the single pre-computed `signature`
-			// above. `sign` stays a no-op for every OTHER signatureType.
-			await engine.completeSignature(task, {
-				isAccepted: true,
-				signature,
-				sign: task.signatureType === "ballot" || task.signatureType === "admin" ? signer : undefined,
-			});
+			await signTask({ tasksEngine: engine, task, createSigner: () => createDeviceSigner("Device User") });
 			navigation.goBack();
 		} catch (err) {
 			console.warn("sign error:", err);
@@ -152,10 +134,8 @@ export default function SignatureTaskScreen() {
 		setIsProcessing(true);
 		try {
 			const engine = await getEngine<ISignatureTasksEngine>("signatureTasksEngine");
-			await engine.completeSignature(task, {
-				isAccepted: false,
-				signature: { signature: "", signerKey: "", signerUserId: "" },
-			});
+			// The shared rejectTask has no signer parameter at all (D-12): it sends the empty signature.
+			await rejectTask({ tasksEngine: engine, task });
 			navigation.goBack();
 		} catch (err) {
 			console.warn("reject error:", err);

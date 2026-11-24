@@ -10,11 +10,9 @@ import type {
 	IInvitationEngine,
 	IKeyholderDkgEngine,
 	InviteStatus,
-	KeyholderInvite,
 	SentKeyholderInvite,
 } from "@votetorrent/vote-core";
-import { secp256k1 } from "@noble/curves/secp256k1.js";
-import { bytesToHex } from "@noble/curves/utils.js";
+import { inviteKeyholderSeat } from "@votetorrent/workflows/authority";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { Footer } from "../../components/Footer";
@@ -29,7 +27,6 @@ import { acceptKeyholderInvitation } from "./keyholder-accept";
 import {
 	DEFAULT_KEYHOLDER_INVITE_EXPIRY_HOURS,
 	KEYHOLDER_INVITE_EXPIRY_HOURS,
-	keyholderInviteExpiration,
 	keyholderInviteExpiryLabel,
 } from "./keyholder-invite-expiry";
 import {
@@ -168,64 +165,32 @@ export function KeyholderInvitationScreen() {
 			}
 			if (!name) return;
 
-			// Build the ephemeral secp256k1 key material for this keyholder invite.
-			// AUTH-01 (D-01): hex-encoded secp256k1 key material at the screen surface.
-			// The screen only generates the ephemeral key pair and includes invitePrivate
-			// in the share text (D-06).
-			//
-			// WR-04: there is NO real keyholder-invite signature yet. The current
-			// inviteKeyholder engine impl uses InviteSignature = null SQL-side; a real
-			// keyholder-invite signature is produced engine-side by the forthcoming
-			// createKeyholderInvite engine method (the same boundary that already mints
-			// authority/officer invite signatures). We therefore do NOT fabricate a
-			// signature value here — no placeholder is stored or shared. The
-			// KeyholderInvite type requires inviteSignature: string, so we pass an empty
-			// string (the engine ignores it) rather than a fake 128-char zero string.
-			const invitePrivateBytes = secp256k1.utils.randomSecretKey();
-			const invitePrivate = bytesToHex(invitePrivateBytes);
-			const inviteKey = bytesToHex(secp256k1.getPublicKey(invitePrivateBytes));
-			const type = "k" as const;
-			const expiration = keyholderInviteExpiration(Date.now(), expiryHours);
-
-			const keyholderInvite: KeyholderInvite = {
-				type,
-				expiration,
-				inviteKey,
-				// No fabricated signature — produced engine-side once createKeyholderInvite
-				// lands; inviteKeyholder ignores this field (InviteSignature = null SQL-side).
-				inviteSignature: "",
+			// Phase 67 plan 10: the seat-share builder (ephemeral secp256k1 key, the O-11 validity preset,
+			// the KeyholderInvite with NO fabricated signature (WR-04), the election id read and the
+			// signed inviteKeyholder write) is the shared inviteKeyholderSeat. The seat secret comes back
+			// to this screen only, as the share (D-06); the private key never crosses into vote-engine.
+			const { share } = await inviteKeyholderSeat({
+				electionEngine,
 				name,
-			};
-
-			// Get the election ID from the engine.
-			const electionDetails = await electionEngine.getElectionDetails();
-			const electionId = electionDetails.election.id;
-
-			// second-keyholder-invite-unique fix: inviteKeyholder now writes a signed
-			// InviteSlot (Type='k') and requires the admin's approval signature — same
-			// D-01/D-03/D-04 device-signer pattern AuthorityInvitationScreen uses for
-			// saveInviteWithSigning. The private key never crosses into vote-engine.
-			const defaultUserEng = await getEngine<IDefaultUserEngine>("defaultUser");
-			const defaultUser = await defaultUserEng.get();
-			const signer = await createDeviceSigner(defaultUser?.name ?? "Device User");
-
-			// Call the un-gated inviteKeyholder (21-05 removed the FeatureNotAvailableError gate).
-			await electionEngine.inviteKeyholder(keyholderInvite, electionId, signer);
+				expiryHours,
+				now: Date.now(),
+				createSigner: async () => {
+					// second-keyholder-invite-unique fix: inviteKeyholder writes a signed InviteSlot
+					// (Type='k') and requires the admin's approval signature — same D-01/D-03/D-04
+					// device-signer pattern AuthorityInvitationScreen uses for saveInviteWithSigning.
+					const defaultUserEng = await getEngine<IDefaultUserEngine>("defaultUser");
+					const defaultUser = await defaultUserEng.get();
+					return createDeviceSigner(defaultUser?.name ?? "Device User");
+				},
+			});
 
 			// D-05: render the one-time invite material as text for Copy-to-clipboard share.
 			// Include the invitePrivate so the invitee can paste and accept (D-06).
 			// WR-04: no inviteSignature is shared — the invitee reconstructs from
 			// invitePrivate; no placeholder signature is propagated.
 			// The same ASCII-only text goes out by Share, Copy and the QR code (serializeInviteShare).
-			const sharePayload = serializeInviteShare({
-				invitePrivate,
-				inviteKey,
-				expiration,
-				type,
-				name,
-			});
-			setShareText(sharePayload);
-			setSentExpiration(expiration);
+			setShareText(serializeInviteShare(share));
+			setSentExpiration(share.expiration);
 			// D-08: do NOT navigate away immediately — keep screen so Copy affordance shows.
 		} catch (error) {
 			console.warn("onSend error:", error instanceof Error ? error.name : "unknown");
