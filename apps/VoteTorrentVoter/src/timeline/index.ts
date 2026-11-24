@@ -1,12 +1,10 @@
 /**
- * index.ts -- Phase 59 plan 59-06.
- *
- * The public surface of `src/timeline/` -- the one path 59-07 (rail) and 59-08 (screen) import.
- * No component, no screen, no navigation, no i18n resource edits live here or anywhere else in
- * this module (59-05 owns the `timeline` i18n namespace).
+ * index.ts -- binding over the shared timeline module, which moved to
+ * `packages/workflows/src/voter/timeline/` (phase 67 plan 19). This path stays so existing imports
+ * (`../timeline` in the engines, rail and screen), `jest.mock` paths and tests keep working. The
+ * public surface is unchanged: four values and twelve types, re-exported by name.
  */
-export {deriveTimeline} from './derive-timeline';
-export {STAGE_TITLE_KEY, TIMELINE_KEYS, TIMELINE_STAGE_IDS} from './stages';
+export {deriveTimeline, STAGE_TITLE_KEY, TIMELINE_KEYS, TIMELINE_STAGE_IDS} from '@votetorrent/workflows/voter';
 export type {
 	DeriveTimelineElectionFields,
 	DeriveTimelineInput,
@@ -20,4 +18,4 @@ export type {
 	TimelineViewModel,
 	TimelineViewModelConfident,
 	TimelineViewModelIndeterminate,
-} from './types';
+} from '@votetorrent/workflows/voter';

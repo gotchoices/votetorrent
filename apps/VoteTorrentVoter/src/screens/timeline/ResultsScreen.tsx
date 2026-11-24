@@ -3,11 +3,11 @@ import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import {useTranslation} from 'react-i18next';
-import type {IElectionsEngine} from '@votetorrent/vote-core';
-import type {ElectionResults, ElectionResultsEngine, PublishedTally, TallyPublicationEngine} from '@votetorrent/vote-engine/rn';
+import type {ElectionResults} from '@votetorrent/vote-engine/rn';
+import {readElectionResults} from '@votetorrent/workflows/voter';
+import type {ElectionResultsPublication} from '@votetorrent/workflows/voter';
 import {useVoterApp} from '../../providers/VoterAppProvider';
 import {globalStyles} from '../../theme/styles';
-import {pickElectionId} from '../../engines/election-read';
 import {strandChanges} from '../../engines/strand-changes';
 import {vtDebug} from '../../engines/vt-debug';
 import {unavailableCopyKey} from './results-unavailable';
@@ -21,24 +21,18 @@ import {unavailableCopyKey} from './results-unavailable';
  * Also shows the tally an election officer published (the signed ElectionTally row): whether its signature and
  * tree check out and whether it equals this phone's own count. Counts again, without the loading state, when a
  * key share is released or a vote block or the published tally reaches this phone.
+ *
+ * The read itself (election pick, results engine, published tally) is the shared `readElectionResults`
+ * (`packages/workflows/src/voter/election-results.ts`, phase 67 plan 19); this screen keeps the state, the
+ * strand-change subscription, the dev-only fallback choice, the debug log and the presentation.
  */
 
 /** 'unknown': the published tally could not be read; nothing is shown for it. */
-type Publication = PublishedTally | null | 'unknown';
+type Publication = ElectionResultsPublication;
 type ScreenState = {kind: 'loading'} | {kind: 'ready'; results: ElectionResults; publication: Publication} | {kind: 'failed'};
 
 /** The tables a recount depends on (qualified, as the strand reports them). */
 const RESULTS_TABLES = ['App.KeyholderShareRelease', 'App.ElectionKey', 'App.VoteBlock', 'App.VoteBlockVoter', 'App.ElectionTally'];
-
-async function readPublication(getEngine: <T>(name: string) => Promise<T>, results: ElectionResults): Promise<Publication> {
-	if (results.status !== 'tallied') return 'unknown';
-	try {
-		const engine = await getEngine<TallyPublicationEngine>('tallyPublication');
-		return await engine.readPublishedTally(results.electionId, results.revision, results.tally);
-	} catch {
-		return 'unknown';
-	}
-}
 
 const percent = (count: number, of: number): number => (of > 0 ? Math.round((count / of) * 100) : 0);
 
@@ -77,19 +71,13 @@ export default function ResultsScreen() {
 		quiet.current = false;
 		(async () => {
 			try {
-				const electionsEngine = await getEngine<IElectionsEngine>('elections');
-				const summaries = await electionsEngine.getElections();
-				const electionId = pickElectionId(summaries, __DEV__ ? seededElectionId : undefined);
-				if (!electionId) {
-					if (live) setState({kind: 'ready', results: {status: 'no-election', electionId: ''}, publication: 'unknown'});
-					return;
-				}
-				const engine = await getEngine<ElectionResultsEngine>('electionResults');
-				const results = await engine.getElectionResults(electionId);
-				const publication = await readPublication(getEngine, results);
-				// The engine's reason code goes to the log only; the screen shows plain copy for it.
-				if (results.status === 'unavailable') vtDebug('results', 'unavailable', {reason: results.reason});
-				if (live) setState({kind: 'ready', results, publication});
+				const read = await readElectionResults({
+					getEngine,
+					fallbackElectionId: __DEV__ ? seededElectionId : undefined,
+					// The engine's reason code goes to the log only; the screen shows plain copy for it.
+					onUnavailable: reason => vtDebug('results', 'unavailable', {reason}),
+				});
+				if (live) setState({kind: 'ready', results: read.results, publication: read.publication});
 			} catch {
 				if (live) setState({kind: 'failed'});
 			}

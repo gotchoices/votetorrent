@@ -168,7 +168,8 @@ describe('no literal English or Spanish copy string in relative-date.ts', () => 
 		// eslint-disable-next-line @typescript-eslint/no-require-imports -- test-local, source scan
 		const fs = require('fs');
 		const path = require('path');
-		const source: string = fs.readFileSync(path.resolve(__dirname, '../relative-date.ts'), 'utf8');
+		// The module moved to the shared package (phase 67 plan 19); `../relative-date.ts` is a binding, so the scan reads the shared file.
+		const source: string = fs.readFileSync(path.resolve(__dirname, '../../../../../packages/workflows/src/voter/timeline/relative-date.ts'), 'utf8');
 		const stripped = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 		// Copy-shaped words that would indicate resolved English/Spanish literal text leaking into
 		// the module (as opposed to i18n key strings like 'subtitle.today', which never contain

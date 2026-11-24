@@ -463,7 +463,8 @@ describe('readVoteContext — source gate: derived window only, no dev override 
 			...banned.filter(t => body.includes(t)).map(t => `contains ${t}`),
 		];
 	}
-	const source = stripCommentsPreservingLines(fs.readFileSync(path.join(__dirname, '..', 'election-read.ts'), 'utf8'));
+	// The read moved to the shared package (phase 67 plan 19); `../election-read.ts` is a binding, so the gate reads the shared file.
+	const source = stripCommentsPreservingLines(fs.readFileSync(path.resolve(__dirname, '../../../../../packages/workflows/src/voter/election-read.ts'), 'utf8'));
 
 	it('R11: readVoteContext derives the window and partitions confirmed ballots, with no override or wall clock', () => {
 		expect(readVoteContextViolations(source)).toEqual([]);

@@ -212,7 +212,7 @@ describe('closed-key-set assertion: every titleKey and subtitle.key emitted acro
 	});
 });
 
-describe('no ambient clock: no source file under src/timeline/ reads the process clock', () => {
+describe('no ambient clock: no source file under packages/workflows/src/voter/timeline/ reads the process clock', () => {
 	function stripComments(source: string): string {
 		return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 	}
@@ -228,16 +228,18 @@ describe('no ambient clock: no source file under src/timeline/ reads the process
 		});
 	}
 
-	test('no zero-argument Date construction or a live-clock read anywhere under src/timeline/ (excluding __tests__/__fixtures__)', () => {
-		const timelineDir = path.resolve(__dirname, '..');
+	// Built from parts so this file's own source text never contains the literal patterns it
+	// scans for -- a checker whose own text matches its own pattern is permanently green
+	// regardless of the code under test (a recurring trap on this project).
+	const clockReadPattern = new RegExp(['Date', '\\s*\\.\\s*now', '\\s*\\('].join(''));
+	const zeroArgDatePattern = new RegExp(['new', '\\s+Date', '\\s*\\(', '\\s*\\)'].join(''));
+
+	test('no zero-argument Date construction or a live-clock read anywhere under packages/workflows/src/voter/timeline/ (the shared module; this directory holds only bindings)', () => {
+		// The timeline moved to the shared package (phase 67 plan 19); the files beside this test are bindings.
+		const timelineDir = path.resolve(__dirname, '../../../../../packages/workflows/src/voter/timeline');
 		const sourceFiles = walk(timelineDir);
 		expect(sourceFiles.length).toBeGreaterThan(0); // non-vacuity: the walk itself must find files
-
-		// Built from parts so this file's own source text never contains the literal patterns it
-		// scans for -- a checker whose own text matches its own pattern is permanently green
-		// regardless of the code under test (a recurring trap on this project).
-		const clockReadPattern = new RegExp(['Date', '\\s*\\.\\s*now', '\\s*\\('].join(''));
-		const zeroArgDatePattern = new RegExp(['new', '\\s+Date', '\\s*\\(', '\\s*\\)'].join(''));
+		expect(sourceFiles.map(f => path.basename(f)).sort()).toEqual(['derive-timeline.ts', 'relative-date.ts', 'stages.ts', 'types.ts']);
 
 		const offenders: string[] = [];
 		for (const file of sourceFiles) {
@@ -247,5 +249,14 @@ describe('no ambient clock: no source file under src/timeline/ reads the process
 			}
 		}
 		expect(offenders).toEqual([]);
+	});
+
+	test('self-check: the clock patterns catch a planted read', () => {
+		const plantedClockRead = ['const t = ', 'Date', '.', 'now', '()'].join('');
+		const plantedZeroArgDate = ['const d = ', 'new', ' ', 'Date', '()'].join('');
+		expect(clockReadPattern.test(stripComments(plantedClockRead))).toBe(true);
+		expect(zeroArgDatePattern.test(stripComments(plantedZeroArgDate))).toBe(true);
+		expect(clockReadPattern.test(stripComments('const t = normalizeInstant(input.now)'))).toBe(false);
+		expect(zeroArgDatePattern.test(stripComments('const d = new Date(ms)'))).toBe(false);
 	});
 });
