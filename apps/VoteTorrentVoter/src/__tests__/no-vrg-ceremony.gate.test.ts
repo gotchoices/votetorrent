@@ -16,7 +16,9 @@
  *      approach as `packages/vote-engine/test/browser-entry-purity.spec.ts`'s `stripComments`
  *      (that file's header records both false-positive modes were OBSERVED with an unstripped
  *      scanner), adjusted to preserve line numbers (blanking block-comment characters instead of
- *      deleting them) so a real match's reported line number is accurate.
+ *      deleting them) so a real match's reported line number is accurate. The gate also walks
+ *      `packages/workflows/src/voter`, where the Voter registration ceremony now lives (phase 67
+ *      plan 11 moved it out of `ConfirmationScreen.tsx` into `@votetorrent/workflows`).
  *
  *      TWO exclusions, both principled, neither a silent narrowing of coverage:
  *        (a) this gate file itself (`no-vrg-ceremony.gate.test.ts`) — it necessarily names the
@@ -179,6 +181,8 @@ function countsByToken (matches: ForbiddenMatch[]): Record<ForbiddenToken, numbe
 
 const VOTER_SRC_DIR = join(__dirname, '..')
 const THIS_FILE = join(__dirname, 'no-vrg-ceremony.gate.test.ts')
+/** The shared Voter ceremony directory (phase 67 plan 11): four levels up from `src/__tests__` to the repo root. */
+const WORKFLOWS_VOTER_SRC_DIR = join(__dirname, '../../../../packages/workflows/src/voter')
 
 /**
  * Exact matches that are NOT the ceremony, each with its reason. An entry names one file (relative to
@@ -205,6 +209,28 @@ describe('no-vrg-ceremony source gate (D-09) — apps/VoteTorrentVoter/src', () 
 			expect({ exemption: e.file, hits: all.filter((m) => m.file === join(VOTER_SRC_DIR, e.file) && m.token === e.token && m.text === e.text).length }).toEqual({ exemption: e.file, hits: 1 })
 		}
 		const matches = all.filter((m) => !isNotTheCeremony(m))
+		const counts = countsByToken(matches)
+		expect({ counts, detail: formatMatches(matches) }).toEqual({
+			counts: { 'register(': 0, 'associate(': 0, seedSignedMutation: 0, issueAttestationChallenge: 0 },
+			detail: '',
+		})
+	})
+})
+
+// There is NO exemption list for the shared directory. A later plan that moves a module carrying a
+// non-ceremony token into `packages/workflows/src/voter` (for example an Optimystic matchmaking
+// `register(` call) adds an exact-line exemption, the way `NOT_THE_CEREMONY` does above, and never
+// widens a directory exclusion (T-51-12-05).
+describe('no-vrg-ceremony source gate (D-09) — packages/workflows/src/voter (the shared registration ceremony)', () => {
+	it('anti-vacuity: the walk reaches the moved ceremony file and its comment-stripped text holds runRegistrationCeremony', () => {
+		const ceremonyFile = join(WORKFLOWS_VOTER_SRC_DIR, 'registration-ceremony.ts')
+		expect(walkSourceFiles(WORKFLOWS_VOTER_SRC_DIR, new Set())).toContain(ceremonyFile)
+		const stripped = stripCommentsPreservingLines(readFileSync(ceremonyFile, 'utf8'))
+		expect(stripped).toContain('runRegistrationCeremony')
+	})
+
+	it('has zero real-code occurrences of register(/associate(/seedSignedMutation/issueAttestationChallenge, per-token counted, file:line reported', () => {
+		const matches = scanForForbiddenTokens(WORKFLOWS_VOTER_SRC_DIR, new Set())
 		const counts = countsByToken(matches)
 		expect({ counts, detail: formatMatches(matches) }).toEqual({
 			counts: { 'register(': 0, 'associate(': 0, seedSignedMutation: 0, issueAttestationChallenge: 0 },
