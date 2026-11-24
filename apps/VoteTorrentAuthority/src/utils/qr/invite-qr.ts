@@ -32,6 +32,18 @@ export function buildInviteQrPanelPng(text: string, targetPx: number): QrPanelPn
 	return buildQrPanelPng(text, targetPx, INVITE_QR_LEVEL);
 }
 
+export type InvitationQrAttempt = { readonly ok: true; readonly base64: string; readonly panelPx: number } | { readonly ok: false };
+
+/** Build the on-screen QR without ever throwing; any failure (too long, bad input) fails closed. */
+export function tryBuildInvitationQr(text: string, targetPx: number): InvitationQrAttempt {
+	try {
+		const { base64, panelPx } = buildInviteQrPanelPng(text, targetPx);
+		return { ok: true, base64, panelPx };
+	} catch {
+		return { ok: false };
+	}
+}
+
 /**
  * The PNG behind "Share QR image": the QR centred on white with at least a 4-module quiet zone.
  * No name, expiry or other text is drawn, so the image carries nothing beyond the invitation itself.

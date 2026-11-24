@@ -24,25 +24,13 @@ import { useKeepAwake } from "@sayem314/react-native-keep-awake";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { deleteSharedInvitationQrImage, shareInvitationQrImage } from "../../engines/qr-share";
-import { buildInviteQrPanelPng } from "../../utils/qr/invite-qr";
+import { tryBuildInvitationQr } from "../../utils/qr/invite-qr";
 import { acquireSecureLease, releaseSecureLease } from "./InviteSharePasteField";
 
 /** Horizontal room the panel leaves on screen, in dp (the screen container's 16 dp padding on each side). */
 export const INVITATION_QR_GUTTER_DP = 32;
 /** The panel never grows past this, in dp, so it stays a comfortable size on a tablet. */
 export const INVITATION_QR_MAX_DP = 360;
-
-export type InvitationQrAttempt = { readonly ok: true; readonly base64: string; readonly panelPx: number } | { readonly ok: false };
-
-/** Build the on-screen QR without ever throwing; any failure (too long, bad input) fails closed. */
-export function tryBuildInvitationQr(text: string, targetPx: number): InvitationQrAttempt {
-	try {
-		const { base64, panelPx } = buildInviteQrPanelPng(text, targetPx);
-		return { ok: true, base64, panelPx };
-	} catch {
-		return { ok: false };
-	}
-}
 
 function logFailure(stage: "qr" | "qr-share"): void {
 	// eslint-disable-next-line no-console -- closed token only, never the invitation, image or native text.
