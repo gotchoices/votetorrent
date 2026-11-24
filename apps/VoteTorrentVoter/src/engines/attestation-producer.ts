@@ -55,6 +55,7 @@
 import type { AttestationChallenge, DeviceAttestation, Signature } from '@votetorrent/vote-core'
 import { createRealAttestationProducer } from '@votetorrent/attestation-native'
 import type { SignDeviceKeyDigestOptions } from '@votetorrent/attestation-native'
+import type { AttestationProducer, VoteSigningProducer } from '@votetorrent/workflows/platform'
 import { USE_STUB_PLAY_INTEGRITY, USE_REAL_ATTESTATION_PRODUCER } from './proof-flags.generated'
 import { dismissKeyboardForSystemPrompt } from '../utils/dismissKeyboardForSystemPrompt'
 
@@ -72,26 +73,20 @@ import { dismissKeyboardForSystemPrompt } from '../utils/dismissKeyboardForSyste
  * schema `AdminSigning`/officer ceremony verifies. Implemented by BOTH concrete producers
  * (`StubAttestationProducer` below, and the real hardware-backed producer as of plan 51-14).
  */
-export interface AttestationProducer {
-	provisionDeviceKey(): Promise<{ publicKey: string }>
-	/**
-	 * READ-ONLY lookup of the CURRENT device key (63-18 fix): never generates, rotates or prompts.
-	 * Every LOOKUP (association queries, registration status, continuity) must use this;
-	 * `provisionDeviceKey` is for CREATION flows only, because on Android it mints a NEW key on
-	 * every call. Rejects with code `DEVICE_KEY_ABSENT` / `DEVICE_KEY_INVALIDATED`.
-	 */
-	getCurrentDeviceKey(): Promise<{ publicKey: string }>
-	produce(challenge: AttestationChallenge): Promise<DeviceAttestation>
-	signDeviceKeyDigest?(digest: Uint8Array, options?: SignDeviceKeyDigestOptions): Promise<Signature>
-}
+/**
+ * The interface (with `getCurrentDeviceKey`, the READ-ONLY lookup of the CURRENT device key that never
+ * generates, rotates or prompts and rejects `DEVICE_KEY_ABSENT` / `DEVICE_KEY_INVALIDATED`, 63-18 fix)
+ * now lives in the shared workflows package's `./platform` subpath (phase 67) and is re-exported here
+ * so every existing import path keeps working; `__tests__/workflows-platform-parity.test.ts` pins the
+ * re-export to the platform type.
+ */
+export type { AttestationProducer }
 
 /**
  * An `AttestationProducer` whose `signDeviceKeyDigest` is statically present. Vote signing has no
  * "cannot sign" branch: `resolveVoteSigningProducer` returns this type.
  */
-export type VoteSigningProducer = AttestationProducer & {
-	signDeviceKeyDigest(digest: Uint8Array, options?: SignDeviceKeyDigestOptions): Promise<Signature>
-}
+export type { VoteSigningProducer }
 
 /**
  * StubAttestationProducer — dev-only `AttestationProducer` implementation.

@@ -36,15 +36,17 @@ import {
 	type SecretWrapOptions,
 	type SecretWrapPrompt,
 	type SecretWrapper,
-	type WrappedSecret,
 } from '@votetorrent/attestation-native'
+import type { VoteRecordWrapProvider } from '@votetorrent/workflows/platform'
 
 export const VOTETORRENT_VOTE_RECORD_WRAP_KEY_V1 = 'VOTETORRENT_VOTE_RECORD_WRAP_KEY_V1'
 
-export interface VoteRecordWrapProvider {
-	wrap(plaintext: Uint8Array, aad: Uint8Array, prompt: SecretWrapPrompt): Promise<WrappedSecret>
-	unwrap(wrapped: WrappedSecret, aad: Uint8Array, prompt: SecretWrapPrompt): Promise<Uint8Array>
-}
+/**
+ * The provider interface lives in the shared workflows package's `./platform` subpath (phase 67) and
+ * is re-exported here so every existing `import type { VoteRecordWrapProvider } from
+ * './vote-record-wrap'` keeps working.
+ */
+export type { VoteRecordWrapProvider }
 
 /**
  * D-14 / R-5: the auth window, in seconds, of the vote-record wrap key. D-14's aim is one prompt at

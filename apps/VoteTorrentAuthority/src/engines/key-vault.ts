@@ -20,6 +20,7 @@ import { KeyVaultError, assertKeyVaultAlias } from '@votetorrent/vote-engine/rn'
 import type { IKeyVault, KeyVaultPolicy } from '@votetorrent/vote-engine/rn';
 import { createNativeSecretWrapper, WRAP_KEY_ALIAS_PATTERN } from '@votetorrent/attestation-native';
 import type { SecretWrapper, WrappedSecret, SecretWrapOptions, SecretWrapPrompt } from '@votetorrent/attestation-native';
+import type { KeyVaultStorage } from '@votetorrent/workflows/platform';
 import { utf8ToBytes } from '@noble/hashes/utils.js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { dismissKeyboardForSystemPrompt } from '../utils/dismissKeyboardForSystemPrompt';
@@ -33,12 +34,9 @@ export const KEY_VAULT_STORAGE_PREFIX = 'vt.keyvault.v1.';
 const MAX_SECRET_BYTES = 4096;
 
 /** Minimal storage surface this file needs — satisfied by `AsyncStorage`'s default export and by a
- * test fake. */
-export interface KeyVaultStorage {
-	getItem(key: string): Promise<string | null>;
-	setItem(key: string, value: string): Promise<void>;
-	removeItem(key: string): Promise<void>;
-}
+ * test fake. The type lives in the shared workflows package's `./platform` subpath (phase 67) and is
+ * re-exported here so every existing `import type { KeyVaultStorage } from './key-vault'` keeps working. */
+export type { KeyVaultStorage };
 
 /** Configures the `requireUserAuth: true` wrap path. `keyAlias` must match
  * `WRAP_KEY_ALIAS_PATTERN`; `prompt()` is called fresh on every wrap/unwrap so a caller can
