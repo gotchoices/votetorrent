@@ -122,6 +122,9 @@ const mockGetEngine = jest.fn(async (name: string) => {
 });
 
 jest.mock('react-native-vector-icons/FontAwesome6', () => 'FontAwesome6');
+
+const mockShowToast = jest.fn();
+jest.mock('../../../components/Toast', () => ({ useToast: () => mockShowToast }));
 jest.mock('@votetorrent/attestation-native', () => ({ setSecureScreen: jest.fn(async () => true) }));
 
 jest.mock('react-i18next', () => ({
@@ -703,12 +706,43 @@ describe('AdministratorInvitationScreen - hardened accept (masked share, press-t
       second = buttonByTitle(tr, 'accept').props.onPress();
       await new Promise((r) => setTimeout(r, 0));
     });
-    expect(buttonByTitle(tr, 'accept').props.disabled).toBe(true);
+    // In flight the Accept button reads "Accepting…" with a spinner, and both buttons are off.
+    const footerButton = (which: 'accept' | 'reject') =>
+      tr.root.findAll((n) => n.props?.testID === `signature-task-footer-${which}` && typeof n.props?.title === 'string' && typeof n.props?.onPress === 'function')[0];
+    expect(footerButton('accept').props.title).toBe('acceptingBusy');
+    expect(footerButton('accept').props.disabled).toBe(true);
+    expect(footerButton('reject').props.disabled).toBe(true);
     await renderer.act(async () => {
       release();
       await Promise.all([first, second]);
     });
     expect(mockRespondToInvite).toHaveBeenCalledTimes(1);
+  });
+
+  it('a saved accept shows a confirmation', async () => {
+    const tr = await render();
+    await renderer.act(async () => {
+      await buttonByTitle(tr, 'accept').props.onPress();
+    });
+    expect(mockShowToast).toHaveBeenCalledWith('administratorAcceptSuccess', { testID: 'administrator-accept-success' });
+  });
+
+  it('a saved reject shows a confirmation', async () => {
+    const tr = await render();
+    await renderer.act(async () => {
+      await buttonByTitle(tr, 'reject').props.onPress();
+    });
+    expect(mockShowToast).toHaveBeenCalledWith('invitationRejectedToast', { testID: 'administrator-reject-success' });
+  });
+
+  it('a failed accept shows no confirmation', async () => {
+    mockRespondToInvite.mockRejectedValueOnce(new Error('boom'));
+    const tr = await render();
+    await renderer.act(async () => {
+      await buttonByTitle(tr, 'accept').props.onPress();
+    });
+    expect(mockShowToast).not.toHaveBeenCalled();
+    expect(mockGoBack).not.toHaveBeenCalled();
   });
 
   it('gap9/IN-08: a stale error is cleared when an expired share is pasted after Clear', async () => {

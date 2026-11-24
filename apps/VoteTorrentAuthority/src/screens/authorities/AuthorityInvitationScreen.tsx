@@ -28,7 +28,17 @@ import { globalStyles } from "../../theme/styles";
 import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
 import { useUnsharedInviteGuard } from "../../hooks/useUnsharedInviteGuard";
 import { KeyboardAvoidingScreen } from "../../components/KeyboardAvoidingScreen";
-import { inviteAcceptErrorKey, inviteLoadErrorKey, isShareExpired, parseInviteExpirationMs, parseInviteShare, resolveInviteFromShare } from "../invitations/invite-share";
+import {
+	inviteAcceptErrorKey,
+	inviteLoadErrorKey,
+	isShareExpired,
+	parseInviteExpirationMs,
+	parseInviteShare,
+	resolveInviteFromShare,
+	withInviteLookupTimeout,
+} from "../invitations/invite-share";
+import { useToast } from "../../components/Toast";
+import { errorLogSummary } from "../../utils/errorLogSummary";
 import { takeInviteShare } from "../invitations/invite-share-handoff";
 import { InviteSharePasteField } from "../invitations/InviteSharePasteField";
 
@@ -131,7 +141,7 @@ export default function AuthorityInvitationScreen() {
 				setInvite(status);
 			} catch (error) {
 				if (cancelled) return;
-				console.warn("Error loading authority invite:", error instanceof Error ? error.name : "unknown");
+				console.warn("Error loading authority invite:", errorLogSummary(error));
 				setErrorMessage(t(inviteLoadErrorKey(error)));
 			}
 		})();
@@ -243,28 +253,34 @@ export default function AuthorityInvitationScreen() {
 
 	// D-06: accept - the slot is resolved from the pasted share, never from a route id.
 	const respondingRef = useRef(false);
-	const [isResponding, setIsResponding] = useState(false);
+	// Which answer is in flight: the footer shows its spinner and keeps both buttons off.
+	const [answering, setAnswering] = useState<"accept" | "reject" | undefined>(undefined);
+	const showToast = useToast();
 	const respond = async (accept: boolean) => {
 		// gap6/IN-04: one in-flight answer at a time (the ref closes the window before state re-renders).
 		if (respondingRef.current) return;
 		respondingRef.current = true;
-		setIsResponding(true);
+		setAnswering(accept ? "accept" : "reject");
 		setErrorMessage("");
 		try {
 			const engine = await getEngine<IInvitationEngine>("invitations");
 			// gap7/WR-01: always re-resolve at press time so a resend made while the screen was open is
 			// answered on the live head, not the Cid captured at mount.
-			const target = await resolveInviteFromShare(engine, pastedInvite, "au");
+			// The lookup is bounded; the respondToInvite write after it is not.
+			const target = await withInviteLookupTimeout(resolveInviteFromShare(engine, pastedInvite, "au"));
 			// T-21-11-03: accept and decline both call the SIGNED respondToInvite path (D-09).
 			await engine.respondToInvite(target.slotCid, accept, target.invitePrivate);
 			// GAP-2: navigate ONLY on success - the InviteResult is now written.
+			showToast(t(accept ? "invitationAcceptedToast" : "invitationRejectedToast"), {
+				testID: accept ? "authority-accept-success" : "authority-reject-success",
+			});
 			navigation.goBack();
 		} catch (error) {
-			console.warn("Error responding to invite:", error instanceof Error ? error.name : "unknown");
+			console.warn("Error responding to invite:", errorLogSummary(error));
 			setErrorMessage(mapAcceptError(error));
 		} finally {
 			respondingRef.current = false;
-			setIsResponding(false);
+			setAnswering(undefined);
 		}
 	};
 	const onAccept = () => (expired ? undefined : respond(true));
@@ -407,7 +423,8 @@ export default function AuthorityInvitationScreen() {
 				onReject={onDecline}
 				acceptLabel={t("accept")}
 				rejectLabel={t("reject")}
-				disabled={!resolved || expired || isResponding}
+				busy={answering}
+				disabled={!resolved || expired}
 			/>
 		</KeyboardAvoidingScreen>
 	);
