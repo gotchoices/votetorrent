@@ -5,6 +5,8 @@
 // request must work on an unbuilt tree, and the daemon start and `vt run` commands guard themselves.
 
 import { EXIT, type ExitCode } from './exit-codes.js'
+import { runRoleCommand } from '../ctl/commands.js'
+import { isRole } from '../ctl/protocol.js'
 
 export interface CliIo {
   out(text: string): void
@@ -44,6 +46,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<ExitCo
     io.out(USAGE)
     return EXIT.PASS
   }
+  if (isRole(first)) return runRoleCommand(argv, io, { env: process.env })
   io.err('vt: unknown command (see vt --help)\n')
   return EXIT.USAGE
 }
