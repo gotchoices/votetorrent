@@ -24,7 +24,10 @@ const resources = {
 			// Detail inside the "Learn about this …" info dialogs.
 			'info.unavailable': "This information isn't available right now.",
 			'info.openLink': 'More information',
-			networkName: 'Utah Network',
+			// Fallback inside sentences ("Register for the voting network") while no network is open.
+			networkName: 'voting network',
+			// Header title while no network is open.
+			noNetworkTitle: 'No network joined',
 			notifications: 'Notifications',
 			'breadcrumb.home': 'Home',
 			'breadcrumb.ballot': 'Ballot',
@@ -610,7 +613,8 @@ const resources = {
 			close: 'Cerrar',
 			'info.unavailable': 'Esta información no está disponible en este momento.',
 			'info.openLink': 'Más información',
-			networkName: 'Red de Utah',
+			networkName: 'red de votación',
+			noNetworkTitle: 'Sin red',
 			notifications: 'Notificaciones',
 			'breadcrumb.home': 'Inicio',
 			'breadcrumb.ballot': 'Papeleta',

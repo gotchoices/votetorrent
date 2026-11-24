@@ -49,7 +49,7 @@ type RegistrationNavigationProp = NativeStackNavigationProp<
 
 export default function RegistrationScreen() {
 	// D-06/SHELL-03: every screen routes through useVoterApp() — no inline fixture-module import.
-	const {isInitialized, getEngine, hasNetwork} = useVoterApp();
+	const {isInitialized, getEngine, hasNetwork, networkName: openNetworkName} = useVoterApp();
 	const networkName = useNetworkName();
 	const {draft} = useRegistrationDraft();
 	// __DEV__ toggle override (null until toggled this session) — see file header comment.
@@ -142,7 +142,7 @@ export default function RegistrationScreen() {
 
 	return (
 		<View style={[styles.screen, {backgroundColor: colors.background}]}>
-			<NetworkHeader networkName={networkName} onPressNetwork={() => navigation.navigate('RegistrationInfo')} />
+			<NetworkHeader networkName={openNetworkName} onPressNetwork={() => navigation.navigate('RegistrationInfo')} />
 
 			<ScrollView contentContainerStyle={styles.content}>
 				{/* Spike 100: no network open yet — the way in is the authority's join code. */}

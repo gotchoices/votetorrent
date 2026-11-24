@@ -16,7 +16,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
 
 export interface NetworkHeaderProps {
-	/** The open network's name (`useNetworkName`); the `networkName` copy when omitted. */
+	/** The open network's name; the `noNetworkTitle` copy when omitted (no network open). */
 	networkName?: string;
 	onPressNetwork?: () => void;
 	onPressBell?: () => void;
@@ -54,7 +54,7 @@ export function NetworkHeader({networkName, onPressNetwork, onPressBell}: Networ
 							lineHeight: typeScale.h1.lineHeight,
 						},
 					]}>
-					{networkName ?? t('networkName')}
+					{networkName ?? t('noNetworkTitle')}
 				</Text>
 				<FontAwesome6 name="chevron-down" size={20} color={colors.light} />
 			</Pressable>

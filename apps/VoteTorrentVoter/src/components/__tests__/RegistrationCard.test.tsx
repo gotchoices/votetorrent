@@ -87,7 +87,7 @@ describe('RegistrationCard (REG-01/REG-05)', () => {
 
 		it('falls back to the common network name when none is open', () => {
 			const text = JSON.stringify(renderCard({isRegistered: false, draft: EMPTY_DRAFT, registeredAt: null}).toJSON());
-			expect(text).toContain('To participate in the Utah Network you will need to register');
+			expect(text).toContain('To participate in the voting network you will need to register');
 		});
 	});
 

@@ -31,6 +31,6 @@ describe('NetworkHeader', () => {
 	});
 
 	it('falls back to the common network name when none is open', () => {
-		expect(renderTitle()).toBe('"Utah Network"');
+		expect(renderTitle()).toBe('"No network joined"');
 	});
 });

@@ -23,7 +23,6 @@ import type {ExtendedTheme} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useTranslation} from 'react-i18next';
 import {useVoterApp} from '../../providers/VoterAppProvider';
-import {useNetworkName} from '../../hooks/useNetworkName';
 import {LIFECYCLE_ORDER} from '../../providers/types';
 import type {LifecycleState, VoterElection} from '../../providers/types';
 import type {VoteStackParamList} from '../../navigation/types';
@@ -64,8 +63,7 @@ async function networkListsAnElection(
 
 export default function HomeScreen() {
 	// D-06/SHELL-03: every screen routes through useVoterApp() — no inline fixture-module import.
-	const {isInitialized, lifecycleOverride, setLifecycleOverride, clockOffsetMs, nowMs, getElection, getEngine, seededElectionId, hasNetwork} = useVoterApp();
-	const networkName = useNetworkName();
+	const {isInitialized, lifecycleOverride, setLifecycleOverride, clockOffsetMs, nowMs, getElection, getEngine, seededElectionId, hasNetwork, networkName: openNetworkName} = useVoterApp();
 	const {colors, type: typeScale} = useTheme() as ExtendedTheme;
 	const {t, i18n} = useTranslation('home');
 	const {t: tCommon} = useTranslation('common');
@@ -247,7 +245,7 @@ export default function HomeScreen() {
 
 	return (
 		<View style={[styles.screen, {backgroundColor: colors.background}]}>
-			<NetworkHeader networkName={networkName} />
+			<NetworkHeader networkName={openNetworkName} />
 			<ConfigFaultNotice />
 			<UnsharedChangesNotice />
 
