@@ -75,6 +75,18 @@ export interface StrandDbFactoryOptions {
    * `JoinedNetworksUnreadableError` and `addStrand` is never called.
    */
   isJoinedNetwork?: (strandId: string) => boolean | Promise<boolean>
+  /**
+   * Where the control-connection probe sits relative to the joined-list check.
+   *
+   * Default false: the count is read AFTER the joined-list check (the Authority's order). True: it is
+   * read synchronously right after the founder-intent take and BEFORE `isJoinedNetwork` is awaited
+   * (the Voter's spike-100 order). The early read keeps a re-attach of a network this node created
+   * from counting a relay connection that arrived during the joined-list read, which would open the
+   * network as a joiner waiting for a first sync nobody supplies.
+   *
+   * The Voter binding (`apps/VoteTorrentVoter/src/engines/rn-db-factory.ts`) is its one setter.
+   */
+  probeConnectionsBeforeJoinedCheck?: boolean
 }
 
 /**
@@ -143,6 +155,10 @@ export function createStrandDbFactory(node: StrandHost, options?: StrandDbFactor
     // window is claimed by the open it was installed for and by no other.
     const intent = takeFounderIntent(strandId)
 
+    // spike 100 (Voter): with probeConnectionsBeforeJoinedCheck the peer probe is read here, before any await.
+    const probedEarly =
+      options?.probeConnectionsBeforeJoinedCheck === true ? (node.getControlNode()?.getConnections().length ?? 0) : null
+
     // D-30: a persisted joined hash is never founder. Only awaited when the option is given, so
     // the timing of a factory without it is unchanged (addStrand stays synchronous).
     let joined = false
@@ -156,7 +172,7 @@ export function createStrandDbFactory(node: StrandHost, options?: StrandDbFactor
     }
 
     // D-07 (0.11.0): check for peers BEFORE addStrand — no peers ⇒ we are the founder (the default).
-    const controlConnections = node.getControlNode()?.getConnections().length ?? 0
+    const controlConnections = probedEarly ?? node.getControlNode()?.getConnections().length ?? 0
     const founder = resolveFounderFlag({ intent, joined, controlConnections })
 
     // The network's relays join this strand's bootstrap seed (strand-relay-seed.ts). Awaited only

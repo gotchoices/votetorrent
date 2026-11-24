@@ -44,6 +44,8 @@ jest.mock(
 const { createStrandDbFactory } = require('../rn-db-factory');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const fi = require('../founder-intent');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const shared = require('@votetorrent/workflows');
 
 export {};
 
@@ -59,6 +61,25 @@ function makeFakeNode(connections: number) {
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const founderOf = (node: ReturnType<typeof makeFakeNode>, i = 0) => (node.addStrand.mock.calls[i][0] as any).founder;
+
+/**
+ * A node whose connection count starts at 0 and whose joined-list read flips it to 1: models a relay
+ * that connects DURING the joined-list read (spike 100). The Voter order reads the count before the
+ * await (founder true); the Authority order reads it after (founder false).
+ */
+function makeProbeNode() {
+  let count = 0;
+  const db = { setSchemaPath: jest.fn(), exec: jest.fn().mockResolvedValue(undefined), prepare: jest.fn() };
+  const strand = { strandId: 'fake', database: { getDatabase: () => db } };
+  const node = {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    addStrand: jest.fn(async (_config: any) => strand),
+    getControlNode: jest.fn(() => ({ getConnections: () => new Array(count).fill({}) })),
+    whenStrandWritable: jest.fn(async () => { throw new Error('not configured'); }),
+  };
+  const isJoinedNetwork = async () => { count = 1; return false; };
+  return { node, isJoinedNetwork };
+}
 
 describe('createStrandDbFactory — founder intent (D-30) — Voter', () => {
   afterEach(() => {
@@ -98,5 +119,36 @@ describe('createStrandDbFactory — founder intent (D-30) — Voter', () => {
     const node = makeFakeNode(0);
     await fi.withFounding(() => createStrandDbFactory(node, { isJoinedNetwork: async () => true })('joinedhash'));
     expect(founderOf(node)).toBe(false);
+  });
+
+  it('FI-6 the Voter binding reads the connection count BEFORE awaiting the joined list (spike 100): a relay connecting during the read does not demote a re-attach to joiner', async () => {
+    const { node, isJoinedNetwork } = makeProbeNode();
+    await createStrandDbFactory(node, { isJoinedNetwork })('reattach1');
+    expect(founderOf(node)).toBe(true);
+  });
+
+  it('FI-7 the shared factory reads the count AFTER the joined list by default (the Authority order), and probeConnectionsBeforeJoinedCheck: true switches it to the Voter order', async () => {
+    const { node, isJoinedNetwork } = makeProbeNode();
+    await shared.createStrandDbFactory(node, { isJoinedNetwork })('reattach2');
+    expect(founderOf(node)).toBe(false);
+
+    const { node: node2, isJoinedNetwork: isJoined2 } = makeProbeNode();
+    await shared.createStrandDbFactory(node2, { isJoinedNetwork: isJoined2, probeConnectionsBeforeJoinedCheck: true })('reattach3');
+    expect(founderOf(node2)).toBe(true);
+  });
+
+  it('FI-8 one founder-intent slot: a window opened through the shared module is peeked (without consuming) and consumed through the Voter binding', async () => {
+    expect(fi.peekFounderIntent()).toBeNull();
+    await shared.withFounding(async () => {
+      expect(fi.peekFounderIntent()).toBe('founding');
+      expect(fi.peekFounderIntent()).toBe('founding');
+      const node = makeFakeNode(1);
+      await createStrandDbFactory(node)('one-slot');
+      expect(founderOf(node)).toBe(true);
+      expect(fi.peekFounderIntent()).toBeNull();
+    });
+    await shared.withJoining('h', async () => {
+      expect(fi.peekFounderIntent()).toBeNull();
+    });
   });
 });

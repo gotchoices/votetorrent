@@ -51,6 +51,8 @@ jest.mock(
 const { createStrandDbFactory } = require('../rn-db-factory');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { StrandWaitCancelledError, StrandLaunchFailedError, failOnStrandError } = require('../strand-first-sync');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const fi = require('../founder-intent');
 
 // ---------------------------------------------------------------------------
 // Fakes: a strand DB whose bare table names resolve, and a CadreNode seam.
@@ -344,8 +346,23 @@ describe('createStrandDbFactory — a joined network is never opened as founder 
 
   it('an unreadable joined-network list refuses to open rather than risk founding', async () => {
     const node = makeFakeNode({ connections: 0 });
-    await expect(createStrandDbFactory(node, { isJoinedNetwork: async () => { throw new Error('storage'); } })('h'))
-      .rejects.toThrow('not opening the network as its founder');
-    expect(node.addStrand).not.toHaveBeenCalled();
+    // The refusal is the shared factory's typed JoinedNetworksUnreadableError (structural check, never
+    // instanceof) with a closed-token warn; the inner storage error must not leak into the log.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      let caught: unknown = null;
+      try {
+        await createStrandDbFactory(node, { isJoinedNetwork: async () => { throw new Error('storage'); } })('h');
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).not.toBeNull();
+      expect(fi.isJoinedNetworksUnreadableError(caught)).toBe(true);
+      expect(node.addStrand).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith('[strand-factory] attach refused', { reason: 'joined-list-unreadable' });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('storage');
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
