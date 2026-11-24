@@ -152,41 +152,152 @@ export function childInvocation (distFile: string): ChildInvocation {
 // Detectors
 // ---------------------------------------------------------------------------
 
+// `import {..} from`, `export {..} from`, `export * from`, `export * as x from`, `import type`, multi-line
+// clauses. Quotes cannot appear inside the clause, so a quote ends any attempt to pair an `import` with a
+// later statement's `from`. `import{`/`export{` without a space are accepted.
+const STATIC_RE = /\b(import|export)(?:\s+|(?=[{*]))(type\s+)?([^'";]*?)\s*from\s*['"]([^'"]+)['"]/g
+const SIDE_EFFECT_RE = /\bimport\s*['"]([^'"]+)['"]/g
+const DYNAMIC_RE = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g
+const REQUIRE_RE = /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g
+
+/** `{ type A, type B }` with every member typed is type-only even without the `import type` keyword. */
+function allMembersTyped (clause: string): boolean {
+  const c = clause.trim()
+  if (!c.startsWith('{') || !c.endsWith('}')) return false
+  const members = c.slice(1, -1).split(',').map((m) => m.trim()).filter((m) => m.length > 0)
+  return members.length > 0 && members.every((m) => /^type\s+/.test(m))
+}
+
 /** Every import/export specifier in `text` (comments stripped first), in source order. */
 export function specifiers (text: string): Specifier[] {
-  void stripComments(text)
-  return [] // vacuous: implemented in Task 3 of 67-04
+  const code = stripComments(text)
+  const found: Array<Specifier & { at: number }> = []
+  for (const m of code.matchAll(STATIC_RE)) {
+    const typeOnly = m[2] !== undefined || allMembersTyped(m[3] ?? '')
+    found.push({ spec: m[4] as string, typeOnly, kind: 'static', at: m.index ?? 0 })
+  }
+  for (const m of code.matchAll(SIDE_EFFECT_RE)) found.push({ spec: m[1] as string, typeOnly: false, kind: 'side-effect', at: m.index ?? 0 })
+  for (const m of code.matchAll(DYNAMIC_RE)) found.push({ spec: m[1] as string, typeOnly: false, kind: 'dynamic', at: m.index ?? 0 })
+  for (const m of code.matchAll(REQUIRE_RE)) found.push({ spec: m[1] as string, typeOnly: false, kind: 'require', at: m.index ?? 0 })
+  found.sort((a, b) => a.at - b.at)
+  return found.map(({ spec, typeOnly, kind }) => ({ spec, typeOnly, kind }))
+}
+
+/** `./x.js` (or `./x`) next to `fromAbs` -> absolute `./x.ts` candidate. */
+function relativeTarget (fromAbs: string, spec: string): string {
+  return resolve(dirname(fromAbs), `${spec.replace(/\.js$/, '')}.ts`)
 }
 
 /** Sorted package-relative src files reachable from `exportRoots` through relative specifiers (value or type). */
 export function moduleClosure (packageRoot: string, read: ReadFn = readReal): string[] {
-  void packageRoot
-  void read
-  return [] // vacuous: implemented in Task 3 of 67-04
+  const srcDir = join(packageRoot, 'src')
+  const seen = new Set<string>()
+  const queue = exportRoots(packageRoot).map((rel) => join(packageRoot, rel))
+  while (queue.length > 0) {
+    const abs = queue.shift() as string
+    if (seen.has(abs)) continue
+    seen.add(abs)
+    for (const { spec } of specifiers(read(abs))) {
+      if (!spec.startsWith('.')) continue
+      const target = relativeTarget(abs, spec)
+      // Unresolved or escaping relatives are purityHits' job; the closure follows what exists in src.
+      if (isInside(srcDir, target) && existsSync(target) && !seen.has(target)) queue.push(target)
+    }
+  }
+  return [...seen].map((abs) => toPosix(relative(packageRoot, abs))).sort()
 }
 
 /** `listSrcFiles` minus `moduleClosure`, sorted. */
 export function orphanFiles (packageRoot: string, read: ReadFn = readReal): string[] {
-  void packageRoot
-  void read
-  return [] // vacuous: implemented in Task 3 of 67-04
+  const closure = new Set(moduleClosure(packageRoot, read))
+  return listSrcFiles(packageRoot).filter((f) => !closure.has(f)).sort()
+}
+
+const isForbiddenPackage = (spec: string): boolean =>
+  FORBIDDEN_PACKAGES.some((p) => spec === p || spec.startsWith(`${p}/`)) || FORBIDDEN_PREFIXES.some((p) => spec.startsWith(p))
+
+/** `node:` specifiers, and bare specifiers whose first path segment is a Node builtin (Metro bundles this package). */
+const isNodeBuiltin = (spec: string): boolean => {
+  if (spec.startsWith('node:')) return true
+  if (spec.startsWith('.') || spec.startsWith('/')) return false
+  return builtinModules.includes(spec.split('/')[0] as string)
 }
 
 /** `<src rel>: <rule>: <detail>` for every purity violation in every src file (not only the closure). */
 export function purityHits (packageRoot: string, read: ReadFn = readReal): string[] {
-  void packageRoot
-  void read
-  void builtinModules
-  return [] // vacuous: implemented in Task 3 of 67-04
+  const srcDir = join(packageRoot, 'src')
+  const hits = new Set<string>()
+  for (const rel of listSrcFiles(packageRoot)) {
+    const abs = join(packageRoot, rel)
+    const text = read(abs)
+    const code = stripComments(text)
+    const add = (rule: string, detail?: string): void => {
+      hits.add(detail === undefined ? `${rel}: ${rule}` : `${rel}: ${rule}: ${detail}`)
+    }
+    if (/\brequire\s*\(/.test(code)) add('require-call')
+    if (/\bcreateRequire\b/.test(code)) add('create-require')
+    if (/\b(globalThis|global)\s*\.\s*require\b/.test(code)) add('global-require')
+    if (/\bimport\s*\(\s*(?!['"])/.test(code)) add('dynamic-import-nonliteral')
+    for (const { spec } of specifiers(text)) {
+      if (isForbiddenPackage(spec)) add('forbidden-package', spec)
+      if (isNodeBuiltin(spec)) add('node-builtin', spec)
+      if (!spec.startsWith('.')) continue
+      if (!spec.endsWith('.js')) {
+        add('relative-no-js-suffix', spec)
+        continue
+      }
+      const target = relativeTarget(abs, spec)
+      if (!isInside(srcDir, target)) add('relative-escapes-package', spec)
+      else if (!existsSync(target)) add('relative-unresolved', spec)
+    }
+  }
+  return [...hits].sort()
+}
+
+const TAIL_CHARS = 400
+
+/**
+ * The last 400 chars of the child's stderr with stack frames, blank lines and Node's version footer
+ * removed, keeping the thrown error's own line in view: Node 22 follows `ReferenceError: require is not
+ * defined in ES module scope` with ~250 chars of `.cjs` advice, four frames and the footer, so a raw tail
+ * would show only the advice and never the error.
+ */
+function stderrTailOf (stderr: string): string {
+  const lines = stderr.split('\n').filter((l) => l.trim() !== '' && !/^\s+at /.test(l) && !/^Node\.js v\d/.test(l))
+  const body = lines.join('\n')
+  if (body.length <= TAIL_CHARS) return body
+  const tail = body.slice(-TAIL_CHARS)
+  const errorLine = lines.find((l) => /^[A-Za-z]*Error\b/.test(l))
+  if (errorLine === undefined || tail.includes(errorLine)) return tail
+  const head = errorLine.slice(0, TAIL_CHARS - 1)
+  return `${head}\n${body.slice(-(TAIL_CHARS - head.length - 1))}`
 }
 
 /** Load `distFile` in its own plain node child; `ok` is exit 0, a hang past `timeoutMs` is SIGKILLed and reported. */
 export function loadUnderNode (distFile: string, timeoutMs: number): Promise<LoadResult> {
-  void distFile
-  void timeoutMs
-  void spawn
-  void mkdtempSync
-  void rmSync
-  void tmpdir
-  return Promise.resolve({ ok: true, code: 0, stderrTail: '' }) // vacuous: implemented in Task 3 of 67-04
+  const { command, args, env } = childInvocation(distFile)
+  // A fresh, empty cwd: nothing cwd-relative (node_modules, package.json) may help resolution.
+  const cwd = mkdtempSync(join(tmpdir(), 'wf-load-'))
+  return new Promise<LoadResult>((done) => {
+    let settled = false
+    let stderr = ''
+    const child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const finish = (r: LoadResult): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      rmSync(cwd, { recursive: true, force: true })
+      done(r)
+    }
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      finish({ ok: false, code: null, stderrTail: `timeout ${timeoutMs} ms` })
+    }, timeoutMs)
+    child.stdout.resume()
+    child.stderr.on('data', (chunk: Buffer | string) => {
+      stderr = (stderr + String(chunk)).slice(-4000)
+    })
+    child.on('error', (err) => finish({ ok: false, code: null, stderrTail: String(err.message).slice(-TAIL_CHARS) }))
+    child.on('close', (code) => finish({ ok: code === 0, code, stderrTail: stderrTailOf(stderr) }))
+  })
 }
