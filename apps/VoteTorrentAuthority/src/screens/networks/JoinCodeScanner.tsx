@@ -31,6 +31,16 @@
  * other QR with the plain "not a ..." banner. The kind picks the copy, the testID prefix
  * (`join-network-*` or `accept-invitation-*`) and the log tag (`[join]` or `[invite]`).
  *
+ * Choose image: inside the scanner, next to Paste instead, a "Choose image" button opens the
+ * system photo picker so a photo or screenshot of the QR can be read instead of the live camera.
+ * The camera pauses while the picker is open and resumes when it closes without a code. The
+ * picked image is read by `pickImageAndReadQrCodes` (engines/qr-image-decode, which deletes the
+ * picker's copy), and its QR values go through `judgeScannedValues`, the same check a camera frame
+ * goes through: the accepted value reaches `onAccept` exactly as a scan would, and a wrong kind
+ * gets the same banner. A cancelled pick, a picture with no QR and an unreadable picture each get
+ * their own banner. A build without the image picker shows the button disabled with a sentence
+ * that says so. The screens use `useScanImage` for the same pick when the camera is off.
+ *
  * The join code is a bearer credential, and an invitation holds its private key. This file never logs, stores or forwards a barcode object,
  * `rawValue` (other than the one accepted value handed to `onAccept`), corner points, raw bytes, or
  * an error object or message. Every console call is `console.info` with one closed literal token.
@@ -50,6 +60,8 @@ import {useBarcodeScannerOutput} from 'react-native-vision-camera-barcode-scanne
 import type {Barcode, BarcodeScannerOutputResolution, TargetBarcodeFormat} from 'react-native-vision-camera-barcode-scanner';
 import {looksLikeJoinCode} from '@votetorrent/vote-engine/rn';
 import {isInvitationQrText} from '../invitations/invite-share';
+import {isQrImageDecodeAvailable, pickImageAndReadQrCodes} from '../../engines/qr-image-decode';
+import type {QrImageReadResult} from '../../engines/qr-image-decode';
 
 export type JoinScanCameraState = 'ready' | 'blocked' | 'none' | 'denied' | 'failed';
 
@@ -70,6 +82,14 @@ interface ScanKindConfig {
 	otherKindToken: string;
 	notKindKey: string;
 	notKindToken: string;
+	/** Choose image: the picker closed with no picture. */
+	imageCancelledKey: string;
+	/** Choose image: the picture holds no QR code. */
+	imageNoCodeKey: string;
+	/** Choose image: the picture could not be read. */
+	imageUnreadableKey: string;
+	/** Choose image: this build has no image picker. */
+	imageUnavailableKey: string;
 }
 
 export const SCAN_KINDS: Readonly<Record<ScanKind, ScanKindConfig>> = {
@@ -86,6 +106,10 @@ export const SCAN_KINDS: Readonly<Record<ScanKind, ScanKindConfig>> = {
 		otherKindToken: 'rejected-invitation',
 		notKindKey: 'joinScanNotJoinCode',
 		notKindToken: 'rejected-not-join-code',
+		imageCancelledKey: 'scanImageCancelled',
+		imageNoCodeKey: 'joinScanImageNoCode',
+		imageUnreadableKey: 'joinScanImageUnreadable',
+		imageUnavailableKey: 'joinScanImageUnavailable',
 	},
 	invitation: {
 		testIDPrefix: 'accept-invitation',
@@ -100,6 +124,10 @@ export const SCAN_KINDS: Readonly<Record<ScanKind, ScanKindConfig>> = {
 		otherKindToken: 'rejected-join-code',
 		notKindKey: 'inviteScanNotInvitation',
 		notKindToken: 'rejected-not-invitation',
+		imageCancelledKey: 'scanImageCancelled',
+		imageNoCodeKey: 'inviteImageNoCode',
+		imageUnreadableKey: 'inviteImageUnreadable',
+		imageUnavailableKey: 'inviteImageUnavailable',
 	},
 };
 
@@ -128,6 +156,105 @@ export function joinScanAvailability(status: string, hasDevice: boolean): 'ready
 	if (status === 'denied' || status === 'restricted') return 'blocked';
 	if (status === 'authorized' && !hasDevice) return 'none';
 	return 'ready';
+}
+
+/** What a read holds for one kind: the camera's frames and a picked image are judged by this one rule. */
+export type ScanReadVerdict = {type: 'accepted'; value: string} | {type: 'other-kind'} | {type: 'not-kind'};
+
+function judgeWith(config: ScanKindConfig, values: readonly unknown[]): ScanReadVerdict {
+	let otherKind = false;
+	for (const value of values) {
+		if (typeof value !== 'string') continue;
+		if (config.accepts(value)) return {type: 'accepted', value};
+		if (config.isOtherKind(value)) otherKind = true;
+	}
+	return otherKind ? {type: 'other-kind'} : {type: 'not-kind'};
+}
+
+/** The first value of `kind` among the read values, or which refusal they get. */
+export function judgeScannedValues(values: readonly unknown[], kind: ScanKind = 'join-code'): ScanReadVerdict {
+	return judgeWith(SCAN_KINDS[kind], values);
+}
+
+/** A picked image, judged: the value to accept, or the sentence (an i18n key) and its closed log token. */
+export type ScanImageOutcome = {type: 'accepted'; value: string} | {type: 'message'; key: string; token: string};
+
+/** Map a picker read to what the scanner and the screens do with it. */
+export function scanImageOutcome(result: QrImageReadResult, kind: ScanKind = 'join-code'): ScanImageOutcome {
+	const config = SCAN_KINDS[kind];
+	switch (result.kind) {
+		case 'decoded': {
+			const verdict = judgeWith(config, result.values);
+			if (verdict.type === 'accepted') return verdict;
+			return verdict.type === 'other-kind'
+				? {type: 'message', key: config.otherKindKey, token: config.otherKindToken}
+				: {type: 'message', key: config.notKindKey, token: config.notKindToken};
+		}
+		case 'no-code':
+			return {type: 'message', key: config.imageNoCodeKey, token: 'no-code'};
+		case 'unreadable':
+			return {type: 'message', key: config.imageUnreadableKey, token: 'unreadable'};
+		case 'unavailable':
+			return {type: 'message', key: config.imageUnavailableKey, token: 'unavailable'};
+		case 'cancelled':
+		default:
+			return {type: 'message', key: config.imageCancelledKey, token: 'cancelled'};
+	}
+}
+
+export interface ScanImagePicker {
+	/** False on a build without the image picker: the button is shown disabled with a sentence. */
+	available: boolean;
+	/** True while the photo picker is open or its image is being read. */
+	picking: boolean;
+	/**
+	 * Open the picker and judge the image. Resolves null when a pick is already open or the caller
+	 * unmounted. Never rejects.
+	 */
+	pick(): Promise<ScanImageOutcome | null>;
+}
+
+/** The Choose image pick for one kind, shared by the scanner and the screens' camera-off notices. */
+export function useScanImage(kind: ScanKind = 'join-code'): ScanImagePicker {
+	const available = useMemo(() => isQrImageDecodeAvailable(), []);
+	const [picking, setPicking] = useState(false);
+	const pickingRef = useRef(false);
+	const mountedRef = useRef(true);
+	const kindRef = useRef(kind);
+	kindRef.current = kind;
+	useEffect(() => {
+		mountedRef.current = true;
+		return () => {
+			mountedRef.current = false;
+		};
+	}, []);
+	const pick = useCallback(async (): Promise<ScanImageOutcome | null> => {
+		if (pickingRef.current) return null;
+		const config = SCAN_KINDS[kindRef.current];
+		if (!available) {
+			console.info(`${config.logTag} image: unavailable`);
+			return scanImageOutcome({kind: 'unavailable'}, kindRef.current);
+		}
+		pickingRef.current = true;
+		setPicking(true);
+		try {
+			let result: QrImageReadResult;
+			try {
+				result = await pickImageAndReadQrCodes({logTag: config.logTag});
+			} catch {
+				// pickImageAndReadQrCodes never rejects; a stand-in that does is an unreadable image.
+				result = {kind: 'unreadable'};
+			}
+			if (!mountedRef.current) return null;
+			const outcome = scanImageOutcome(result, kindRef.current);
+			console.info(`${config.logTag} image: ${outcome.type === 'accepted' ? 'accepted' : outcome.token}`);
+			return outcome;
+		} finally {
+			pickingRef.current = false;
+			if (mountedRef.current) setPicking(false);
+		}
+	}, [available]);
+	return {available, picking, pick};
 }
 
 // Fixed colours: they sit on live camera video, so they are not theme tokens.
@@ -196,7 +323,11 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 	onAcceptRef.current = props.onAccept;
 	onCameraStateRef.current = props.onCameraState;
 
+	const image = useScanImage(props.kind ?? 'join-code');
+	const imagePick = image.pick;
 	const lockRef = useRef(false);
+	// True while the photo picker is open: camera frames are ignored and the camera is paused.
+	const pausedRef = useRef(false);
 	const ignoreRejectRef = useRef(false);
 	const attemptRef = useRef(0);
 	const mountedRef = useRef(true);
@@ -312,18 +443,11 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 	// Stable (empty deps), refs only: the library memoises the output on formats and resolution.
 	const onBarcodes = useCallback((barcodes: Barcode[]) => {
 		if (lockRef.current) return;
+		if (pausedRef.current) return;
 		const kind = configRef.current;
-		let accepted: string | undefined;
-		let otherKind = false;
-		for (const barcode of barcodes) {
-			const value = barcode.rawValue;
-			if (typeof value !== 'string') continue;
-			if (kind.accepts(value)) {
-				accepted = value;
-				break;
-			}
-			if (kind.isOtherKind(value)) otherKind = true;
-		}
+		const verdict = judgeWith(kind, barcodes.map(barcode => barcode.rawValue));
+		const accepted = verdict.type === 'accepted' ? verdict.value : undefined;
+		const otherKind = verdict.type === 'other-kind';
 		if (accepted !== undefined) {
 			lockRef.current = true;
 			if (bannerTimerRef.current !== undefined) clearTimeout(bannerTimerRef.current);
@@ -344,6 +468,37 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 			ignoreRejectRef.current = false;
 		}, JOIN_SCAN_REJECT_IGNORE_MS);
 	}, []);
+
+	const showBanner = useCallback((key: string) => {
+		setBannerKey(key);
+		if (bannerTimerRef.current !== undefined) clearTimeout(bannerTimerRef.current);
+		bannerTimerRef.current = setTimeout(() => setBannerKey(null), JOIN_SCAN_BANNER_MS);
+	}, []);
+
+	// Choose image: pause the camera, read the picked image, then accept it exactly as a scan or
+	// show its banner and resume. A pick that returns after the scanner closed is dropped.
+	const onChooseImage = useCallback(async () => {
+		if (lockRef.current || pausedRef.current) return;
+		const attempt = attemptRef.current;
+		pausedRef.current = true;
+		if (bannerTimerRef.current !== undefined) clearTimeout(bannerTimerRef.current);
+		setBannerKey(null);
+		let outcome: ScanImageOutcome | null;
+		try {
+			outcome = await imagePick();
+		} finally {
+			pausedRef.current = false;
+		}
+		if (outcome === null || !mountedRef.current || !visibleRef.current || attemptRef.current !== attempt || lockRef.current) return;
+		if (outcome.type === 'accepted') {
+			lockRef.current = true;
+			setPhase('accepted');
+			console.info(`${configRef.current.logTag} scan: accepted`);
+			onAcceptRef.current(outcome.value);
+			return;
+		}
+		showBanner(outcome.key);
+	}, [imagePick, showBanner]);
 
 	const onStarted = useCallback(() => {
 		setPhase(p => (p === 'starting' ? 'scanning' : p));
@@ -374,7 +529,8 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 	const textLeft = Math.round((width - textWidth) / 2);
 	const pasteBottom = insets.bottom + 16;
 	const showCamera = (phase === 'starting' || phase === 'scanning' || phase === 'accepted') && device !== undefined;
-	const cameraActive = (phase === 'starting' || phase === 'scanning') && appActive;
+	const cameraActive = (phase === 'starting' || phase === 'scanning') && appActive && !image.picking;
+	const imageDisabled = !image.available || image.picking || phase === 'accepted';
 	const waiting = phase === 'requesting' || phase === 'starting';
 	// Optional chaining: a theme without fonts (some screen tests mock only colors) keeps the defaults.
 	const boldText = {fontFamily: fonts?.bold?.fontFamily, fontWeight: fonts?.bold?.fontWeight};
@@ -443,20 +599,43 @@ export default function JoinCodeScanner(props: JoinCodeScannerProps) {
 					)}
 				</View>
 
-				{bannerKey !== null ? (
-					<View testID={`${prefix}-scan-banner`} accessibilityRole="alert" style={[styles.banner, {bottom: pasteBottom + 44 + 16}]}>
-						<FontAwesome6 name="circle-exclamation" size={16} color={INK} />
-						<Text style={[styles.body, regularText, styles.bannerText]}>{t(bannerKey)}</Text>
-					</View>
-				) : null}
+				<View style={[styles.bottomBar, {bottom: pasteBottom}]} pointerEvents="box-none">
+					{bannerKey !== null ? (
+						<View testID={`${prefix}-scan-banner`} accessibilityRole="alert" style={styles.banner}>
+							<FontAwesome6 name="circle-exclamation" size={16} color={INK} />
+							<Text style={[styles.body, regularText, styles.bannerText]}>{t(bannerKey)}</Text>
+						</View>
+					) : null}
 
-				<Pressable
-					testID={`${prefix}-scan-paste`}
-					accessibilityRole="button"
-					onPress={props.onPasteInstead}
-					style={[styles.pasteButton, {bottom: pasteBottom}]}>
-					<Text style={[styles.pasteLabel, boldText]}>{t(config.pasteKey)}</Text>
-				</Pressable>
+					{!image.available ? (
+						<Text testID={`${prefix}-scan-image-unavailable`} style={[styles.caption, regularText]}>
+							{t(config.imageUnavailableKey)}
+						</Text>
+					) : null}
+					<Pressable
+						testID={`${prefix}-scan-image`}
+						accessibilityRole="button"
+						accessibilityLabel={t('scanImageLabel')}
+						accessibilityState={{disabled: imageDisabled, busy: image.picking}}
+						disabled={imageDisabled}
+						onPress={onChooseImage}
+						style={[styles.imageButton, !image.available ? styles.imageButtonDisabled : null]}>
+						{image.picking ? (
+							<ActivityIndicator testID={`${prefix}-scan-image-busy`} color={INK} />
+						) : (
+							<FontAwesome6 name="image" size={18} color={INK} />
+						)}
+						<Text style={[styles.imageLabel, boldText]}>{t('scanImageButton')}</Text>
+					</Pressable>
+
+					<Pressable
+						testID={`${prefix}-scan-paste`}
+						accessibilityRole="button"
+						onPress={props.onPasteInstead}
+						style={styles.pasteButton}>
+						<Text style={[styles.pasteLabel, boldText]}>{t(config.pasteKey)}</Text>
+					</Pressable>
+				</View>
 			</View>
 		</Modal>
 	);
@@ -521,10 +700,16 @@ const styles = StyleSheet.create({
 		lineHeight: 22,
 		textAlign: 'center',
 	},
-	banner: {
+	bottomBar: {
 		position: 'absolute',
-		left: 16,
-		right: 16,
+		left: 0,
+		right: 0,
+		alignItems: 'center',
+		gap: 12,
+	},
+	banner: {
+		alignSelf: 'stretch',
+		marginHorizontal: 16,
 		flexDirection: 'row',
 		alignItems: 'center',
 		backgroundColor: BANNER_BG,
@@ -536,10 +721,35 @@ const styles = StyleSheet.create({
 		marginLeft: 12,
 		textAlign: 'left',
 	},
+	caption: {
+		color: INK,
+		fontSize: 14,
+		lineHeight: 20,
+		textAlign: 'center',
+		maxWidth: TEXT_MAX_WIDTH,
+	},
+	imageButton: {
+		minHeight: 48,
+		paddingHorizontal: 20,
+		borderRadius: 24,
+		borderWidth: 1,
+		borderColor: INK,
+		backgroundColor: SCRIM,
+		flexDirection: 'row',
+		alignItems: 'center',
+		justifyContent: 'center',
+		gap: 10,
+	},
+	imageButtonDisabled: {
+		opacity: 0.5,
+	},
+	imageLabel: {
+		color: INK,
+		fontSize: 16,
+		lineHeight: 22,
+	},
 	pasteButton: {
-		position: 'absolute',
-		left: 0,
-		right: 0,
+		alignSelf: 'stretch',
 		minHeight: 44,
 		alignItems: 'center',
 		justifyContent: 'center',

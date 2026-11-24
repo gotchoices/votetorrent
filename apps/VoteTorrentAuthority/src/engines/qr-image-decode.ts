@@ -15,9 +15,13 @@
  * image picker was added has no `ImagePicker` native module; the screen then shows "not available on
  * this build" instead of offering a button that would crash.
  *
- * The picked image may be a picture of an invitation, which holds a private key. So the copy in the
- * cache is deleted as soon as it is read, nothing here logs a uri, a file name or a decoded value,
- * and the only log lines are closed tokens. `pickImageAndReadQrCodes` never rejects.
+ * Callers: Accept an Invitation's Choose image button, and the Choose image button inside the
+ * camera scanner (JoinCodeScanner, for join codes and invitations alike).
+ *
+ * The picked image may be a picture of an invitation, which holds a private key, or of a join code,
+ * a bearer credential. So the copy in the cache is deleted as soon as it is read, nothing here logs
+ * a uri, a file name or a decoded value, and the only log lines are a closed tag (`[invite]` or
+ * `[join]`) and a closed token. `pickImageAndReadQrCodes` never rejects.
  */
 
 import type { Barcode, BarcodeScanner, BarcodeScannerOptions } from 'react-native-vision-camera-barcode-scanner';
@@ -56,6 +60,8 @@ export interface QrImageDecodeDeps {
 	loadImage?: (filePath: string) => Promise<LoadedImage>;
 	createScanner?: (options: BarcodeScannerOptions) => StillImageQrScanner;
 	deleteFile?: (filePath: string) => Promise<unknown>;
+	/** The closed tag on this module's log lines: `[invite]` (the default) or `[join]`. */
+	logTag?: string;
 }
 
 /**
@@ -65,9 +71,9 @@ export interface QrImageDecodeDeps {
  */
 export const QR_IMAGE_MAX_SIDE_PX = 2048;
 
-function logToken(token: string): void {
-	// eslint-disable-next-line no-console -- closed token only, never a uri, file name or decoded value.
-	console.info(`[invite] image: ${token}`);
+function logToken(token: string, tag = '[invite]'): void {
+	// eslint-disable-next-line no-console -- closed tag and token only, never a uri, file name or decoded value.
+	console.info(`${tag} image: ${token}`);
 }
 
 /** Strip a file:// prefix (the picker returns file URLs; the image loader and fs want paths). */
@@ -145,8 +151,9 @@ export function isQrImageDecodeAvailable(deps?: Pick<QrImageDecodeDeps, 'isAvail
  * return the decoded strings. Never rejects: every failure is a typed result.
  */
 export async function pickImageAndReadQrCodes(deps?: QrImageDecodeDeps): Promise<QrImageReadResult> {
+	const tag = deps?.logTag ?? '[invite]';
 	if (!isQrImageDecodeAvailable(deps)) {
-		logToken('unavailable');
+		logToken('unavailable', tag);
 		return { kind: 'unavailable' };
 	}
 	const pickImage = deps?.pickImage ?? defaultPickImage;
@@ -158,12 +165,12 @@ export async function pickImageAndReadQrCodes(deps?: QrImageDecodeDeps): Promise
 	try {
 		response = await pickImage();
 	} catch {
-		logToken('picker-failed');
+		logToken('picker-failed', tag);
 		return { kind: 'unreadable' };
 	}
 	if (response?.didCancel) return { kind: 'cancelled' };
 	if (response?.errorCode !== undefined) {
-		logToken('picker-failed');
+		logToken('picker-failed', tag);
 		return { kind: 'unreadable' };
 	}
 	const uri = response?.assets?.[0]?.uri;
@@ -179,7 +186,7 @@ export async function pickImageAndReadQrCodes(deps?: QrImageDecodeDeps): Promise
 		try {
 			image = await loadImage(filePath);
 		} catch {
-			logToken('load-failed');
+			logToken('load-failed', tag);
 			return { kind: 'unreadable' };
 		}
 		let barcodes: Barcode[];
@@ -187,7 +194,7 @@ export async function pickImageAndReadQrCodes(deps?: QrImageDecodeDeps): Promise
 			scanner = createScanner({ barcodeFormats: ['qr-code'] });
 			barcodes = await scanner.scanCodesInImageAsync(image);
 		} catch {
-			logToken('scan-failed');
+			logToken('scan-failed', tag);
 			return { kind: 'unreadable' };
 		}
 		const values = (Array.isArray(barcodes) ? barcodes : [])
@@ -208,7 +215,7 @@ export async function pickImageAndReadQrCodes(deps?: QrImageDecodeDeps): Promise
 		try {
 			await deleteFile(filePath);
 		} catch {
-			logToken('delete-failed');
+			logToken('delete-failed', tag);
 		}
 	}
 }

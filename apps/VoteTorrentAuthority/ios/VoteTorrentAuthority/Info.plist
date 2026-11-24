@@ -38,7 +38,7 @@
 	<key>NSFaceIDUsageDescription</key>
 	<string>VoteTorrent Authority uses Face ID to confirm it&apos;s you before it signs with your officer key. The key is kept in the Secure Enclave and never leaves this device.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>VoteTorrent Authority reads only the picture you choose, to find an invitation QR code in it. It does not keep, change or upload your photos.</string>
+	<string>VoteTorrent Authority reads only the picture you choose, to find a VoteTorrent QR code in it: a join code or an invitation. It does not keep, change or upload your photos.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UIAppFonts</key>

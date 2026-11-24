@@ -687,6 +687,13 @@ const resources = {
 			joinScanCameraFailed: 'The camera could not start. Close other apps that use the camera and try again, or paste the join code instead.',
 			joinScanOpenSettings: 'Open Settings',
 			joinScanIsInvitation: 'That QR code is an invitation, not a join code. To use it, go to Settings > Accept an Invitation.',
+			// Choose image, inside the scanner and next to a camera notice: read the QR from a photo or screenshot.
+			scanImageButton: 'Choose image',
+			scanImageLabel: 'Choose a photo or screenshot of the QR code',
+			scanImageCancelled: 'No image was chosen. Point the camera at the QR code, or choose an image again.',
+			joinScanImageNoCode: 'No QR code was found in that image. Choose a sharper picture that shows the whole QR code, or paste the join code instead.',
+			joinScanImageUnreadable: "That image couldn't be read. Choose another picture, or paste the join code instead.",
+			joinScanImageUnavailable: "Choosing an image isn't available in this version of the app. Scan the QR code or paste the join code instead.",
 			// Keyholder invitation as a QR code (sender), and scan or choose an image (invitee).
 			invitationQrShow: 'Show QR code',
 			invitationQrHide: 'Hide QR code',
@@ -2195,6 +2202,13 @@ const resources = {
 			joinScanCameraFailed: 'No se pudo iniciar la cámara. Cierra otras aplicaciones que usen la cámara e inténtalo de nuevo, o pega el código de acceso.',
 			joinScanOpenSettings: 'Abrir Ajustes',
 			joinScanIsInvitation: 'Ese código QR es una invitación, no un código de acceso. Para usarla, ve a Ajustes > Aceptar una Invitación.',
+			// Elegir imagen, dentro del escáner y junto a un aviso de la cámara: leer el QR de una foto o captura.
+			scanImageButton: 'Elegir imagen',
+			scanImageLabel: 'Elegir una foto o captura de pantalla del código QR',
+			scanImageCancelled: 'No se eligió ninguna imagen. Apunta la cámara al código QR o vuelve a elegir una imagen.',
+			joinScanImageNoCode: 'No se encontró ningún código QR en esa imagen. Elige una foto más nítida donde se vea todo el código QR, o pega el código de acceso.',
+			joinScanImageUnreadable: 'No se pudo leer esa imagen. Elige otra foto, o pega el código de acceso.',
+			joinScanImageUnavailable: 'Elegir una imagen no está disponible en esta versión de la aplicación. Escanea el código QR o pega el código de acceso.',
 			// Invitación de custodio como código QR (quien envía), y escanear o elegir una imagen (quien recibe).
 			invitationQrShow: 'Mostrar código QR',
 			invitationQrHide: 'Ocultar código QR',
