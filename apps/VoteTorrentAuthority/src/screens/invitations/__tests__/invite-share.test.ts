@@ -3,7 +3,21 @@ import { bytesToHex } from '@noble/curves/utils.js';
 import { InvitationEngine } from '@votetorrent/vote-engine/rn';
 import { addTestAuthority, createTestNetwork, makeTestSignCallback } from '@votetorrent/vote-engine/test/fixtures/test-context';
 import type { InviteSlotResolution } from '@votetorrent/vote-core';
-import { InviteShareError, inviteAcceptErrorKey, inviteLoadErrorKey, inviteShareErrorKey, isShareExpired, parseInviteExpirationMs, parseInviteShare, resolveInviteFromShare } from '../invite-share';
+import {
+	INVITE_LOOKUP_TIMEOUT_MS,
+	InviteLookupTimeoutError,
+	InviteShareError,
+	inviteAcceptErrorKey,
+	inviteLoadErrorKey,
+	inviteShareErrorKey,
+	isBiometricCancelError,
+	isNetworkNoAnswerError,
+	isShareExpired,
+	parseInviteExpirationMs,
+	parseInviteShare,
+	resolveInviteFromShare,
+	withInviteLookupTimeout,
+} from '../invite-share';
 
 function kp() {
 	const priv = secp256k1.utils.randomSecretKey();
@@ -252,5 +266,86 @@ describe('inviteLoadErrorKey', () => {
 		expect(inviteLoadErrorKey(Object.assign(new Error('n'), { noNetworkEstablished: true }))).toBe('invitationNeedsNetwork');
 		expect(inviteLoadErrorKey(new Error('boom'))).toBe('invitationLoadFailed');
 		expect(inviteLoadErrorKey(undefined)).toBe('invitationLoadFailed');
+	});
+});
+
+describe('known failure classes map to their own copy', () => {
+	const coded = (code: string, message = 'x') => Object.assign(new Error(message), { code });
+	it.each([
+		['our own lookup timeout', new InviteLookupTimeoutError(25_000)],
+		['a peer dial timeout carried across rethrow by code', coded('DIAL_TIMEOUT', 'InvitationEngine.resolveInviteSlot: dial timeout')],
+		['a response timeout', coded('RESPONSE_TIMEOUT')],
+		['a spent request budget', coded('REQUEST_BUDGET_EXCEEDED')],
+		['no coordinator', coded('NO_NETWORK_COORDINATOR')],
+		['a cohort-unreachable block', new Error('InvitationEngine.respondToInvite: Block abc is unavailable (cohort-unreachable)')],
+		['a possibly-stale block', Object.assign(new Error('stale'), { name: 'BlockPossiblyStaleError' })],
+		['a wrapped "timed out after" text', new Error('InvitationEngine.respondToInvite: sync timed out after 30000ms')],
+		['a timeout in the cause', Object.assign(new Error('outer'), { cause: coded('RESPONSE_TIMEOUT') })],
+	])('network or members did not answer: %s', (_label, err) => {
+		expect(isNetworkNoAnswerError(err)).toBe(true);
+		expect(inviteAcceptErrorKey(err)).toBe('invitationNetworkNoAnswer');
+		expect(inviteLoadErrorKey(err)).toBe('invitationNetworkNoAnswer');
+	});
+
+	it('already answered and expired keep their copy', () => {
+		expect(inviteAcceptErrorKey(new InviteShareError('already-answered'))).toBe('invitationAcceptAlreadyAnswered');
+		expect(inviteAcceptErrorKey(coded('invite-already-answered'))).toBe('invitationAcceptAlreadyAnswered');
+		expect(inviteAcceptErrorKey(new InviteShareError('no-longer-valid'))).toBe('invitationAcceptNoLongerValid');
+		expect(inviteAcceptErrorKey(coded('invite-no-longer-valid'))).toBe('invitationAcceptNoLongerValid');
+	});
+
+	it('a cancelled biometric prompt: native code direct, or carried by a vault refusal', () => {
+		expect(inviteAcceptErrorKey(coded('CANCELED'))).toBe('invitationAcceptBiometricCancelled');
+		expect(inviteAcceptErrorKey(coded('SYSTEM_CANCELED'))).toBe('invitationAcceptBiometricCancelled');
+		const vault = Object.assign(new Error('key-vault: native wrap denied'), { name: 'KeyVaultError', code: 'auth-denied', nativeCode: 'CANCELED' });
+		expect(isBiometricCancelError(vault)).toBe(true);
+		expect(inviteAcceptErrorKey(vault)).toBe('invitationAcceptBiometricCancelled');
+	});
+
+	it('a lockout is not a cancel, and a coded refusal wins over a timeout-looking message', () => {
+		const lockout = Object.assign(new Error('denied'), { code: 'auth-denied', nativeCode: 'LOCKOUT' });
+		expect(isBiometricCancelError(lockout)).toBe(false);
+		expect(inviteAcceptErrorKey(lockout)).toBeUndefined();
+		expect(inviteAcceptErrorKey(coded('invite-already-answered', 'timed out after 1ms'))).toBe('invitationAcceptAlreadyAnswered');
+	});
+
+	it('an unknown failure stays undefined for accept and is the load-failure copy for a load', () => {
+		const unknown = new Error('InvitationEngine.respondToInvite: something else');
+		expect(isNetworkNoAnswerError(unknown)).toBe(false);
+		expect(inviteAcceptErrorKey(unknown)).toBeUndefined();
+		expect(inviteLoadErrorKey(unknown)).toBe('invitationLoadFailed');
+	});
+});
+
+describe('withInviteLookupTimeout', () => {
+	afterEach(() => jest.useRealTimers());
+
+	it('passes a result through and clears its timer', async () => {
+		jest.useFakeTimers();
+		await expect(withInviteLookupTimeout(Promise.resolve(7), 1000)).resolves.toBe(7);
+		expect(jest.getTimerCount()).toBe(0);
+	});
+
+	it('passes a rejection through unchanged', async () => {
+		jest.useFakeTimers();
+		const err = new InviteShareError('not-found');
+		await expect(withInviteLookupTimeout(Promise.reject(err), 1000)).rejects.toBe(err);
+		expect(jest.getTimerCount()).toBe(0);
+	});
+
+	it('rejects with InviteLookupTimeoutError when the work hangs', async () => {
+		jest.useFakeTimers();
+		const p = withInviteLookupTimeout(new Promise<never>(() => undefined), INVITE_LOOKUP_TIMEOUT_MS);
+		const settled = expect(p).rejects.toMatchObject({ name: 'InviteLookupTimeoutError', code: 'invite-lookup-timeout' });
+		jest.advanceTimersByTime(INVITE_LOOKUP_TIMEOUT_MS - 1);
+		await Promise.resolve();
+		jest.advanceTimersByTime(1);
+		await settled;
+		expect(jest.getTimerCount()).toBe(0);
+	});
+
+	it('the named timeout is between 20 and 30 seconds', () => {
+		expect(INVITE_LOOKUP_TIMEOUT_MS).toBeGreaterThanOrEqual(20_000);
+		expect(INVITE_LOOKUP_TIMEOUT_MS).toBeLessThanOrEqual(30_000);
 	});
 });

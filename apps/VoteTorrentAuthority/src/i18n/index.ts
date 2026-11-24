@@ -88,6 +88,25 @@ const resources = {
 			invitationAcceptNoLongerValid: 'This invitation was withdrawn or has expired. Ask the sender for a new one.',
 			invitationAcceptExpired: 'This invitation expired on {{when}}. Ask the sender for a new one.',
 			invitationAcceptFailed: 'Could not respond to the invitation. Try again.',
+			// Accept and decline in flight, the network lookup of a pasted invitation, and what the
+			// officer sees once an answer is saved (Accept an Invitation in Settings).
+			acceptingBusy: 'Accepting…',
+			rejectingBusy: 'Rejecting…',
+			decliningBusy: 'Declining…',
+			invitationResponseSlow: 'Still working. On a slow network this can take a minute. Keep the app open.',
+			invitationLookingUp: 'Looking up the invitation on the network…',
+			invitationLookupSlowTitle: "The invitation hasn't been found yet",
+			invitationLookupSlowBody:
+				"The election office's phone, or another member of this network, must be online with the VoteTorrent app open. Check that, then try again.",
+			invitationLookupRetry: 'Try Again',
+			invitationNetworkNoAnswer:
+				"The network didn't answer in time. The election office's phone, or another member, must be online with the app open. Then try again.",
+			invitationAcceptBiometricCancelled: 'The fingerprint or face check was cancelled, so nothing was saved. Press Accept to try again.',
+			keyholderAcceptSuccess: "Invitation accepted. You're now a keyholder for this election.",
+			administratorAcceptSuccess: "Invitation accepted. You're now an administrator.",
+			invitationAcceptedToast: 'Invitation accepted.',
+			invitationDeclinedToast: 'Invitation declined.',
+			invitationRejectedToast: 'Invitation rejected.',
 			soleInitialAdministratorNote:
 				'Please create a user on this network. Your user will be the sole initial administrator.',
 			userIsSoleAdministratorNote:
@@ -1652,6 +1671,23 @@ const resources = {
 			invitationAcceptNoLongerValid: 'Esta invitación fue retirada o ha caducado. Pide una nueva a quien te la envió.',
 			invitationAcceptExpired: 'Esta invitación caducó el {{when}}. Pide una nueva a quien te la envió.',
 			invitationAcceptFailed: 'No se pudo responder a la invitación. Inténtalo de nuevo.',
+			acceptingBusy: 'Aceptando…',
+			rejectingBusy: 'Rechazando…',
+			decliningBusy: 'Rechazando…',
+			invitationResponseSlow: 'Seguimos trabajando. En una red lenta esto puede tardar un minuto. Mantén la aplicación abierta.',
+			invitationLookingUp: 'Buscando la invitación en la red…',
+			invitationLookupSlowTitle: 'Aún no se ha encontrado la invitación',
+			invitationLookupSlowBody:
+				'El teléfono de la oficina electoral, u otro miembro de esta red, debe estar en línea con la aplicación VoteTorrent abierta. Compruébalo e inténtalo de nuevo.',
+			invitationLookupRetry: 'Intentar de Nuevo',
+			invitationNetworkNoAnswer:
+				'La red no respondió a tiempo. El teléfono de la oficina electoral, u otro miembro, debe estar en línea con la aplicación abierta. Luego inténtalo de nuevo.',
+			invitationAcceptBiometricCancelled: 'Se canceló la verificación de huella o rostro, así que no se guardó nada. Pulsa Aceptar para intentarlo de nuevo.',
+			keyholderAcceptSuccess: 'Invitación aceptada. Ahora eres custodio de esta elección.',
+			administratorAcceptSuccess: 'Invitación aceptada. Ahora eres administrador.',
+			invitationAcceptedToast: 'Invitación aceptada.',
+			invitationDeclinedToast: 'Invitación rechazada.',
+			invitationRejectedToast: 'Invitación rechazada.',
 			soleInitialAdministratorNote:
 				'Cree un usuario en esta red. Su usuario será el único administrador inicial.',
 			userIsSoleAdministratorNote:

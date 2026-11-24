@@ -335,6 +335,7 @@ export const EXEMPT_LINES: ExemptLine[] = [
 	{ file: 'screens/registration/continuity-review.ts', key: '7c59e887d021bca7', count: 1, reason: 'error subclass constructor whose reason is a closed union of fixed tokens; the message is never rendered' },
 	{ file: 'screens/settings/SettingsScreen.tsx', key: 'f79afbba4990186c', count: 1, reason: 'debug seed control, rendered only in development builds' },
 	{ file: 'screens/users/RevokeKeyScreen.tsx', key: '1e730b284ab023c7', count: 1, reason: 'substring classification of the failure, never rendered' },
+	{ file: 'utils/errorLogSummary.ts', key: '5cd9b422092b1cca', count: 1, reason: 'log-only summary: the message is scrubbed of JSON, quoted text, hex, CIDs and ids before it is logged, and never rendered' },
 ];
 
 describe('strict: no raw error text anywhere in the Authority app', () => {

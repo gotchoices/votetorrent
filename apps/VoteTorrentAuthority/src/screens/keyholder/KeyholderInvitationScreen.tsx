@@ -33,6 +33,7 @@ import {
 	keyholderInviteExpiryLabel,
 } from "./keyholder-invite-expiry";
 import {
+	INVITE_LOOKUP_TIMEOUT_MS,
 	inviteAcceptErrorKey,
 	inviteLoadErrorKey,
 	isShareExpired,
@@ -40,7 +41,12 @@ import {
 	parseInviteShare,
 	resolveInviteFromShare,
 	serializeInviteShare,
+	withInviteLookupTimeout,
 } from "../invitations/invite-share";
+import { useInviteLookup, useSlowFlag } from "../invitations/useInviteLookup";
+import { InviteLookupNotice, RETRYABLE_LOOKUP_FAILURE_KEYS } from "../invitations/InviteLookupNotice";
+import { useToast } from "../../components/Toast";
+import { errorLogSummary } from "../../utils/errorLogSummary";
 import { takeInviteShare } from "../invitations/invite-share-handoff";
 import { InviteSharePasteField } from "../invitations/InviteSharePasteField";
 import { globalStyles } from "../../theme/styles";
@@ -77,7 +83,10 @@ export function KeyholderInvitationScreen() {
 	const markInviteShared = useUnsharedInviteGuard(shareText);
 	const [errorMessage, setErrorMessage] = useState<string>("");
 	const [isSending, setIsSending] = useState(false);
-	const [isAccepting, setIsAccepting] = useState(false);
+	// Accept mode: which answer is in flight (the footer shows its spinner and keeps both buttons off).
+	const [answering, setAnswering] = useState<"accept" | "reject" | undefined>(undefined);
+	const answerSlow = useSlowFlag(answering !== undefined);
+	const showToast = useToast();
 	const handleDeviceSigningError = useDeviceSigningErrorHandler();
 
 	// Accept-mode paste field (D-06); seeded by an entry route that already holds the share.
@@ -92,7 +101,28 @@ export function KeyholderInvitationScreen() {
 	const expired = expiredAt !== undefined;
 	// gap6/WR-06: the name shown is the one STORED on the invitation slot, read after the slot
 	// resolves; the name inside the pasted JSON is unauthenticated and never displayed.
-	const [resolved, setResolved] = useState<{ slotCid: string; storedName: string } | undefined>(undefined);
+	// The lookup has a visible state (looking, timed out, failed) and Try Again; every run, retry and
+	// mount starts a fresh lookup, so a hung earlier one can never keep the buttons grey.
+	const lookupKey = mode === "accept" && pastedInvite.trim() && parsed && !expired ? pastedInvite : undefined;
+	const { state: lookup, retry: retryLookup } = useInviteLookup<{ slotCid: string; storedName: string }>({
+		key: lookupKey,
+		lookup: async () => {
+			try {
+				const engine = await getEngine<IInvitationEngine>("invitations");
+				const r = await resolveInviteFromShare(engine, pastedInvite, "k");
+				const stored = (r.status as { invite?: { name?: string } } | undefined)?.invite?.name;
+				return { slotCid: r.slotCid, storedName: stored ?? "" };
+			} catch (error) {
+				console.warn("Error loading keyholder invite:", errorLogSummary(error));
+				throw error;
+			}
+		},
+	});
+	const resolved = lookup.phase === "resolved" ? lookup.value : undefined;
+	const lookupFailureKey = lookup.phase === "failed" ? inviteLoadErrorKey(lookup.error) : undefined;
+	useEffect(() => {
+		if (lookup.phase === "timed-out") console.warn("Keyholder invite lookup: no answer yet");
+	}, [lookup.phase]);
 
 	useLayoutEffect(() => {
 		navigation.setOptions({
@@ -230,32 +260,10 @@ export function KeyholderInvitationScreen() {
 		return t("invitationAcceptFailed");
 	};
 
-	// Resolve the slot from the paste and read its stored name (accept mode only).
+	// gap9/IN-08: a stale answer error never outlives the paste that caused it.
 	useEffect(() => {
-		if (mode !== "accept") return;
-		setResolved(undefined);
-		// gap9/IN-08: a stale error never outlives the paste that caused it.
-		setErrorMessage("");
-		if (!pastedInvite.trim() || !parsed || expired) return;
-		let cancelled = false;
-		(async () => {
-			try {
-				const engine = await getEngine<IInvitationEngine>("invitations");
-				const r = await resolveInviteFromShare(engine, pastedInvite, "k");
-				if (cancelled) return;
-				const stored = (r.status as { invite?: { name?: string } } | undefined)?.invite?.name;
-				setResolved({ slotCid: r.slotCid, storedName: stored ?? "" });
-			} catch (error) {
-				if (cancelled) return;
-				console.warn("Error loading keyholder invite:", error instanceof Error ? error.name : "unknown");
-				setErrorMessage(t(inviteLoadErrorKey(error)));
-			}
-		})();
-		return () => {
-			cancelled = true;
-		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [mode, pastedInvite, getEngine, expired]);
+		if (mode === "accept") setErrorMessage("");
+	}, [mode, pastedInvite]);
 
 	// D-06/D-21/D-26: accept - the invitee pastes the share text; acceptKeyholderInvitation resolves
 	// the slot from the share alone (before any prompt), provisions a FRESH keyholder identity (D-21)
@@ -266,13 +274,16 @@ export function KeyholderInvitationScreen() {
 		if (respondingRef.current || expired) return;
 		respondingRef.current = true;
 		setErrorMessage("");
-		setIsAccepting(true);
+		setAnswering("accept");
 		try {
 			const engine = await getEngine<IInvitationEngine>("invitations");
 			await acceptKeyholderInvitation(
 				{
 					invitationEngine: engine,
 					vault: resolveKeyholderKeyVault(),
+					// The reads before provisioning are bounded (no prompt, nothing written on a timeout);
+					// the write itself never is.
+					readTimeoutMs: INVITE_LOOKUP_TIMEOUT_MS,
 					// Positive proof that a held same-election identity is an earlier-revision seat (never prompts).
 					readKeyholderSeatFacts: async (electionId) => {
 						try {
@@ -286,13 +297,17 @@ export function KeyholderInvitationScreen() {
 				pastedInvite
 			);
 			// GAP-2: navigate ONLY on success - the InviteResult is now written.
+			showToast(t("keyholderAcceptSuccess"), { testID: "keyholder-accept-success" });
 			navigation.goBack();
 		} catch (error) {
-			console.warn("Error responding to invite:", error instanceof Error ? error.name : "unknown");
+			console.warn("Error responding to invite:", errorLogSummary(error));
 			setErrorMessage(mapAcceptError(error));
+			// The slot may have changed (answered, withdrawn) or the network may be back: look it up
+			// again, so the buttons come back once it resolves, with no app restart.
+			retryLookup();
 		} finally {
 			respondingRef.current = false;
-			setIsAccepting(false);
+			setAnswering(undefined);
 		}
 	};
 
@@ -300,21 +315,24 @@ export function KeyholderInvitationScreen() {
 		// One in-flight answer at a time (shared latch with Accept).
 		if (respondingRef.current) return;
 		respondingRef.current = true;
-		setIsAccepting(true);
+		setAnswering("reject");
 		setErrorMessage("");
 		try {
 			const engine = await getEngine<IInvitationEngine>("invitations");
-			const { slotCid, invitePrivate } = await resolveInviteFromShare(engine, pastedInvite, "k");
+			// The lookup is bounded; the respondToInvite write after it is not.
+			const { slotCid, invitePrivate } = await withInviteLookupTimeout(resolveInviteFromShare(engine, pastedInvite, "k"));
 			// T-21-11-03: decline calls the SAME signed respondToInvite path (D-09).
 			await engine.respondToInvite(slotCid, false, invitePrivate);
 			// GAP-2: navigate ONLY on success - the InviteResult is now written.
+			showToast(t("invitationDeclinedToast"), { testID: "keyholder-decline-success" });
 			navigation.goBack();
 		} catch (error) {
-			console.warn("Error responding to invite:", error instanceof Error ? error.name : "unknown");
+			console.warn("Error responding to invite:", errorLogSummary(error));
 			setErrorMessage(mapAcceptError(error));
+			retryLookup();
 		} finally {
 			respondingRef.current = false;
-			setIsAccepting(false);
+			setAnswering(undefined);
 		}
 	};
 
@@ -416,6 +434,13 @@ export function KeyholderInvitationScreen() {
 							<ThemedText type="defaultSemiBold">{t("name")}: </ThemedText>
 							<ThemedText testID="keyholder-invitation-name">{resolved.storedName}</ThemedText>
 						</View>
+					) : lookup.phase === "looking" || lookup.phase === "timed-out" || lookup.phase === "failed" ? (
+						<InviteLookupNotice
+							phase={lookup.phase}
+							failureMessage={lookupFailureKey ? t(lookupFailureKey) : undefined}
+							canRetry={lookupFailureKey !== undefined && RETRYABLE_LOOKUP_FAILURE_KEYS.has(lookupFailureKey)}
+							onRetry={retryLookup}
+						/>
 					) : (
 						<ThemedText>{t("invitationAcceptPasteHint")}</ThemedText>
 					)}
@@ -432,14 +457,22 @@ export function KeyholderInvitationScreen() {
 					/>
 				</View>
 			</ScrollView>
-			{/* GAP-2: surface respondToInvite failures inline in accept mode */}
-			<InlineError message={errorMessage} />
+			{/* GAP-2: surface respondToInvite failures inline in accept mode (once: not again when the
+			    re-run lookup already shows the same copy) */}
+			<InlineError message={lookupFailureKey && errorMessage === t(lookupFailureKey) ? "" : errorMessage} />
+			{answerSlow ? (
+				<ThemedText testID="keyholder-invitation-answer-slow" type="small" style={localStyles.answerSlow}>
+					{t("invitationResponseSlow")}
+				</ThemedText>
+			) : null}
 			<SignatureTaskFooter
 				onAccept={onAccept}
 				onReject={onDecline}
 				acceptLabel={t("accept")}
 				rejectLabel={t("decline")}
-				disabled={isAccepting || !resolved || expired}
+				rejectBusyLabel={t("decliningBusy")}
+				busy={answering}
+				disabled={!resolved || expired}
 			/>
 		</KeyboardAvoidingScreen>
 	);
@@ -491,6 +524,10 @@ const localStyles = StyleSheet.create({
 	detailRow: {
 		flexDirection: "row",
 		marginBottom: 8,
+	},
+	answerSlow: {
+		paddingHorizontal: globalStyles.container.padding,
+		marginBottom: 4,
 	},
 });
 

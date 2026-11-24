@@ -51,24 +51,33 @@ function sharedInvitationQrImagePath(): string {
 	return CachesDirectoryPath + '/' + SHARED_INVITATION_QR_IMAGE_FILENAME;
 }
 
-async function deleteCacheFile(p: string, token: string): Promise<void> {
+/** Delete `p` if it is there. True when the delete failed (a missing file is not a failure). Never rejects. */
+async function deleteCacheFile(p: string): Promise<boolean> {
 	try {
 		if (await exists(p)) await unlink(p);
+		return false;
 	} catch (e) {
-		if ((e as { code?: unknown } | null)?.code === 'ENOENT') return;
-		// eslint-disable-next-line no-console -- closed token only, never a code, path or native text.
-		console.info(token);
+		return (e as { code?: unknown } | null)?.code !== 'ENOENT';
 	}
 }
 
+// Each caller logs its own closed literal tag: a tag passed in as a variable is a non-literal console
+// argument, which the console-leak rule refuses even when every value it can take is a fixed string.
+
 /** Delete the cache PNG. Idempotent: a missing file is fine. Never rejects. */
 export async function deleteSharedQrImage(): Promise<void> {
-	await deleteCacheFile(sharedQrImagePath(), '[voter-invite] qr-share: failed');
+	if (await deleteCacheFile(sharedQrImagePath())) {
+		// eslint-disable-next-line no-console -- closed token only, never a code, path or native text.
+		console.info('[voter-invite] qr-share: failed');
+	}
 }
 
 /** Delete the invitation's cache PNG. Idempotent: a missing file is fine. Never rejects. */
 export async function deleteSharedInvitationQrImage(): Promise<void> {
-	await deleteCacheFile(sharedInvitationQrImagePath(), '[invite] qr-share: failed');
+	if (await deleteCacheFile(sharedInvitationQrImagePath())) {
+		// eslint-disable-next-line no-console -- closed token only, never a code, path or native text.
+		console.info('[invite] qr-share: failed');
+	}
 }
 
 /** Write `png` to `path`, open the share sheet on it, and report how the sheet settled. */

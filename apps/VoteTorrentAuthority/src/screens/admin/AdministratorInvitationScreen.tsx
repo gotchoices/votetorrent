@@ -31,7 +31,17 @@ import { FOUNDING_OFFICER_SCOPES } from "../../utils/foundingOfficerScopes";
 import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
 import { useUnsharedInviteGuard } from "../../hooks/useUnsharedInviteGuard";
 import { KeyboardAvoidingScreen } from "../../components/KeyboardAvoidingScreen";
-import { inviteAcceptErrorKey, inviteLoadErrorKey, isShareExpired, parseInviteExpirationMs, parseInviteShare, resolveInviteFromShare } from "../invitations/invite-share";
+import {
+	inviteAcceptErrorKey,
+	inviteLoadErrorKey,
+	isShareExpired,
+	parseInviteExpirationMs,
+	parseInviteShare,
+	resolveInviteFromShare,
+	withInviteLookupTimeout,
+} from "../invitations/invite-share";
+import { useToast } from "../../components/Toast";
+import { errorLogSummary } from "../../utils/errorLogSummary";
 import { takeInviteShare } from "../invitations/invite-share-handoff";
 import { InviteSharePasteField } from "../invitations/InviteSharePasteField";
 
@@ -128,7 +138,7 @@ export default function AdministratorInvitationScreen() {
 				setInvite(status);
 			} catch (error) {
 				if (cancelled) return;
-				console.warn("Error loading officer invite:", error instanceof Error ? error.name : "unknown");
+				console.warn("Error loading officer invite:", errorLogSummary(error));
 				setInviteLoadFailed(true);
 				setErrorMessage(t(inviteLoadErrorKey(error)));
 			}
@@ -211,12 +221,14 @@ export default function AdministratorInvitationScreen() {
 
 	// D-06: accept - the slot is resolved from the pasted share, never from a route id.
 	const respondingRef = useRef(false);
-	const [isResponding, setIsResponding] = useState(false);
+	// Which answer is in flight: the footer shows its spinner and keeps both buttons off.
+	const [answering, setAnswering] = useState<"accept" | "reject" | undefined>(undefined);
+	const showToast = useToast();
 	const respond = async (accept: boolean) => {
 		// gap6/IN-04: one in-flight answer at a time (the ref closes the window before state re-renders).
 		if (respondingRef.current) return;
 		respondingRef.current = true;
-		setIsResponding(true);
+		setAnswering(accept ? "accept" : "reject");
 		setErrorMessage("");
 		try {
 			// 66.1-07 (D-12): an accept carries the phone's own user id, name and current signing key, read
@@ -226,7 +238,8 @@ export default function AdministratorInvitationScreen() {
 			const engine = await getEngine<IInvitationEngine>("invitations");
 			// gap7/WR-01: always re-resolve at press time so a resend made while the screen was open is
 			// answered on the live head, not the Cid captured at mount.
-			const target = await resolveInviteFromShare(engine, pastedInvite, "of");
+			// The lookup is bounded; the respondToInvite write after it is not.
+			const target = await withInviteLookupTimeout(resolveInviteFromShare(engine, pastedInvite, "of"));
 			// T-21-11-03: accept and decline both call the SIGNED respondToInvite path (D-09).
 			if (officer) {
 				// invokedId equals officer.userId (66.1-05 refuses a mismatch).
@@ -235,16 +248,19 @@ export default function AdministratorInvitationScreen() {
 				await engine.respondToInvite(target.slotCid, false, target.invitePrivate);
 			}
 			// GAP-2: navigate ONLY on success - the InviteResult is now written.
+			showToast(t(accept ? "administratorAcceptSuccess" : "invitationRejectedToast"), {
+				testID: accept ? "administrator-accept-success" : "administrator-reject-success",
+			});
 			navigation.goBack();
 		} catch (error) {
-			console.warn("Error responding to invite:", error instanceof Error ? error.name : "unknown");
+			console.warn("Error responding to invite:", errorLogSummary(error));
 			const outcome = handleDeviceSigningError(error);
 			if (outcome.handled) return;
 			const key = adminChangeErrorKey(error);
 			setErrorMessage(key ? t(key) : mapAcceptError(error));
 		} finally {
 			respondingRef.current = false;
-			setIsResponding(false);
+			setAnswering(undefined);
 		}
 	};
 	const onAccept = () => (expired ? undefined : respond(true));
@@ -348,7 +364,8 @@ export default function AdministratorInvitationScreen() {
 				onReject={onDecline}
 				acceptLabel={t("accept")}
 				rejectLabel={t("reject")}
-				disabled={!resolved || expired || isResponding}
+				busy={answering}
+				disabled={!resolved || expired}
 			/>
 		</KeyboardAvoidingScreen>
 	);

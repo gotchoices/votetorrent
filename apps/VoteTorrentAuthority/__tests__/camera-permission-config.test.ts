@@ -20,6 +20,9 @@ const APP_DIR = process.env.CAMERA_CONFIG_ROOT ?? path.resolve(__dirname, "..");
 
 const CAMERA_USAGE_EN =
 	"VoteTorrent Authority uses the camera only to scan the QR join code from the election office. It does not take photos or record video.";
+/** The Info.plist fallback names invitations too, since the scanner also reads an invitation QR. */
+const CAMERA_USAGE_PLIST_EN =
+	"VoteTorrent Authority uses the camera only to scan VoteTorrent QR codes: a join code from the election office, or an invitation someone shows you. It does not take photos or record video.";
 const CAMERA_USAGE_ES =
 	"VoteTorrent Authority usa la cámara solo para escanear el código QR de acceso de la oficina electoral. No toma fotos ni graba video.";
 
@@ -116,7 +119,7 @@ describe("Authority Android manifest camera declarations", () => {
 
 describe("Authority iOS camera purpose strings", () => {
 	it("T7: Info.plist carries the English camera purpose string", () => {
-		expect(plistString(read(INFO_PLIST), "NSCameraUsageDescription")).toBe(CAMERA_USAGE_EN);
+		expect(plistString(read(INFO_PLIST), "NSCameraUsageDescription")).toBe(CAMERA_USAGE_PLIST_EN);
 	});
 
 	it("T8: Info.plist has no microphone key", () => {
