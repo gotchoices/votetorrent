@@ -6,6 +6,7 @@ import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { useToast } from "../../components/Toast";
 import { copyToClipboard } from "../../utils/copyToClipboard";
+import { InvitationQrPanel } from "./InvitationQrPanel";
 
 export interface InviteShareBlockProps {
 	/** Already-translated heading shown above the share text. */
@@ -19,6 +20,11 @@ export interface InviteShareBlockProps {
 	 * `sharedAction`, or a copy was confirmed. Never fired on a dismissed sheet, a rejection or a failed copy.
 	 */
 	onShared?: () => void;
+	/**
+	 * Offer "Show QR code" (keyholder invitations): the same text as a QR the invitee scans, plus a
+	 * "Share QR image" PNG. Off by default, so the other invitation screens are unchanged.
+	 */
+	showQr?: boolean;
 }
 
 
@@ -41,12 +47,16 @@ export interface InviteShareBlockProps {
  *   sheet counts as shared there. Accepted: the guard is a safety net against an accidental Back, not
  *   proof of delivery, and waiting for a signal Android never sends would nag after every real share.
  *   A rejection or a failed copy never counts.
+ * - SHOW QR CODE (only with `showQr`) toggles `InvitationQrPanel` inline. Showing the QR does not
+ *   count as shared (the invitee may not have scanned it yet); a QR image share that the sheet
+ *   reports as sent does.
  */
-export function InviteShareBlock({ label, shareText, testIDPrefix, onShared }: InviteShareBlockProps) {
+export function InviteShareBlock({ label, shareText, testIDPrefix, onShared, showQr = false }: InviteShareBlockProps) {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const showToast = useToast();
 	const [shareFailed, setShareFailed] = useState(false);
+	const [qrOpen, setQrOpen] = useState(false);
 	const mountedRef = useRef(true);
 
 	useEffect(() => {
@@ -90,6 +100,23 @@ export function InviteShareBlock({ label, shareText, testIDPrefix, onShared }: I
 				backgroundColor={colors.card}
 				onPress={onCopy}
 			/>
+			{showQr && !qrOpen ? (
+				<CustomButton
+					testID={`${testIDPrefix}-qr-open`}
+					title={t("invitationQrShow")}
+					icon="qrcode"
+					backgroundColor={colors.card}
+					onPress={() => setQrOpen(true)}
+				/>
+			) : null}
+			{showQr && qrOpen ? (
+				<InvitationQrPanel
+					shareText={shareText}
+					testIDPrefix={testIDPrefix}
+					onHide={() => setQrOpen(false)}
+					onShared={onShared}
+				/>
+			) : null}
 			{shareFailed ? (
 				<ThemedText
 					testID={`${testIDPrefix}-status`}

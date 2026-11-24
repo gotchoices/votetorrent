@@ -371,7 +371,13 @@ export function KeyholderInvitationScreen() {
 
 						{/* D-05: render share text + Copy button after a successful send */}
 						{shareText ? (
-							<InviteShareBlock label={t("invitationKey")} shareText={shareText} testIDPrefix="keyholder-invitation-share" onShared={markInviteShared} />
+							<InviteShareBlock
+								label={t("invitationKey")}
+								shareText={shareText}
+								testIDPrefix="keyholder-invitation-share"
+								onShared={markInviteShared}
+								showQr
+							/>
 						) : null}
 
 						{/* Pattern B error display */}

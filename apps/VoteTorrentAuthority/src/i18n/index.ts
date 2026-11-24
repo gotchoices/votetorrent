@@ -686,6 +686,15 @@ const resources = {
 			joinScanCameraNone: 'This phone has no camera to scan with. Paste the join code instead.',
 			joinScanCameraFailed: 'The camera could not start. Close other apps that use the camera and try again, or paste the join code instead.',
 			joinScanOpenSettings: 'Open Settings',
+			// Keyholder invitation as a QR code (sender), and scan or choose an image (invitee).
+			invitationQrShow: 'Show QR code',
+			invitationQrHide: 'Hide QR code',
+			invitationQrA11y: 'QR code of the invitation',
+			invitationQrWarning:
+				'This QR code is the invitation itself. Anyone who scans it or gets the image can accept it in place of the person you are inviting. Show it or send it only to that person.',
+			invitationQrShareImage: 'Share QR image',
+			invitationQrShareFailed: "Couldn't share the QR image. Use Share or Copy instead.",
+			invitationQrRenderFailed: 'This invitation is too long to show as a QR code. Use Share or Copy instead.',
 			keyholderAcceptSelfInvite: 'You sent this keyholder invitation, so you cannot accept it. Each keyholder must be a different person on their own device.',
 			keyholderAcceptSeatHeld: 'This device already holds a keyholder seat for this election. Each keyholder needs their own device.',
 			keyholderInviteExpiryLabel: 'Invitation valid for',
@@ -2163,6 +2172,15 @@ const resources = {
 			joinScanCameraNone: 'Este teléfono no tiene cámara para escanear. Pega el código de acceso.',
 			joinScanCameraFailed: 'No se pudo iniciar la cámara. Cierra otras aplicaciones que usen la cámara e inténtalo de nuevo, o pega el código de acceso.',
 			joinScanOpenSettings: 'Abrir Ajustes',
+			// Invitación de custodio como código QR (quien envía), y escanear o elegir una imagen (quien recibe).
+			invitationQrShow: 'Mostrar código QR',
+			invitationQrHide: 'Ocultar código QR',
+			invitationQrA11y: 'Código QR de la invitación',
+			invitationQrWarning:
+				'Este código QR es la invitación misma. Cualquiera que lo escanee o reciba la imagen puede aceptarla en lugar de la persona que invitas. Muéstralo o envíalo solo a esa persona.',
+			invitationQrShareImage: 'Compartir imagen del QR',
+			invitationQrShareFailed: 'No se pudo compartir la imagen del QR. Usa Compartir o Copiar.',
+			invitationQrRenderFailed: 'Esta invitación es demasiado larga para mostrarla como código QR. Usa Compartir o Copiar.',
 			keyholderAcceptSelfInvite: 'Tú enviaste esta invitación de custodio, así que no puedes aceptarla. Cada custodio debe ser una persona distinta en su propio dispositivo.',
 			keyholderAcceptSeatHeld: 'Este dispositivo ya tiene un puesto de custodio en esta elección. Cada custodio necesita su propio dispositivo.',
 			keyholderInviteExpiryLabel: 'Invitación válida durante',
