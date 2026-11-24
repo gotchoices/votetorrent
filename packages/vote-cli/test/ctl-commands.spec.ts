@@ -221,8 +221,9 @@ describe('ctl commands: vt role verb', function () {
     expect(await runRoleCommand(['officer', 'start', '--peer', t.ctlDir], none, {})).to.equal(EXIT.USAGE)
     expect(none.stderr()).to.equal('vt: officer start has no local handler in this command table\n')
     const viaCli = capture()
+    // runCli now routes `start` to the daemon's local command (67-23), which refuses a relative --state.
     expect(await runCli(['voter', 'start', '--state', 's'], viaCli)).to.equal(EXIT.USAGE)
-    expect(viaCli.stderr()).to.equal('vt: voter start has no local handler in this command table\n')
+    expect(viaCli.stderr()).to.equal('vt: voter start refused (state-relative)\n')
     expect(t.events.length).to.equal(0)
   })
 
