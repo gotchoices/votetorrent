@@ -221,6 +221,13 @@ function buttonByTitle(tr: renderer.ReactTestRenderer, title: string) {
   return tr.root.findAll((n) => n.props?.title === title && typeof n.props?.onPress === 'function')[0];
 }
 
+/** The footer's Accept or Decline button whatever its label (it reads "acceptingBusy" while in flight). */
+function footerButton(tr: renderer.ReactTestRenderer, which: 'accept' | 'reject') {
+  return tr.root.findAll(
+    (n) => n.props?.testID === `signature-task-footer-${which}` && typeof n.props?.title === 'string' && typeof n.props?.onPress === 'function'
+  )[0];
+}
+
 function makeFakeVault(overrides?: { putSecret?: jest.Mock }) {
   return {
     putSecret: overrides?.putSecret ?? jest.fn(async () => undefined),
@@ -405,7 +412,7 @@ describe('KeyholderInvitationScreen - paste-first accept mode (no route id)', ()
       await Promise.resolve();
     });
     await renderer.act(async () => {
-      await buttonByTitle(tr, 'accept').props.onPress();
+      await footerButton(tr, 'accept').props.onPress();
     });
     expect(mockAcceptKeyholderInvitation).toHaveBeenCalledTimes(1);
 
@@ -788,7 +795,9 @@ describe('KeyholderInvitationScreen - hardened accept (stored name, masked share
     let release!: (v: unknown) => void;
     mockResolveInviteSlot.mockImplementationOnce(() => new Promise((r) => { release = r; }));
     const tr = await render();
-    expect(JSON.stringify(tr.toJSON())).toContain('invitationAcceptPasteHint');
+    // While the slot resolves the screen says it is looking it up (it used to show the paste hint).
+    expect(JSON.stringify(tr.toJSON())).toContain('invitationLookingUp');
+    expect(JSON.stringify(tr.toJSON())).not.toContain('Kay Two');
     expect(buttonByTitle(tr, 'accept').props.disabled).toBe(true);
     expect(buttonByTitle(tr, 'decline').props.disabled).toBe(true);
     await renderer.act(async () => {
@@ -818,7 +827,8 @@ describe('KeyholderInvitationScreen - hardened accept (stored name, masked share
       b = buttonByTitle(tr, 'decline').props.onPress();
       await new Promise((r) => setTimeout(r, 0));
     });
-    expect(buttonByTitle(tr, 'decline').props.disabled).toBe(true);
+    expect(footerButton(tr, 'reject').props.disabled).toBe(true);
+    expect(footerButton(tr, 'reject').props.title).toBe('decliningBusy');
     await renderer.act(async () => {
       release();
       await Promise.all([a, b]);
