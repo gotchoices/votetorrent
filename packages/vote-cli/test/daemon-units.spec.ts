@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runCli, type CliIo } from '../src/cli/run-cli.js'
 import { SecretRegistry } from '../src/secrecy/redact.js'
@@ -144,7 +144,7 @@ describe('daemon units', function () {
     expect(ok.peerDir).to.equal(join(root, 'party-x', 'officer'))
     expect(ok.partyDir).to.equal(join(root, 'party-x'))
     expect(ok.runRoot).to.equal(root)
-    expect(ok.repoRoot).to.equal(REPO_ROOT)
+    expect(ok.repoRoot).to.equal(resolve(REPO_ROOT))
     expect(ok.labels).to.deep.equal([{ label: 'officer', role: 'officer' }])
     expect(ok.colocate).to.equal(null)
     expect(existsSync(join(root, 'party-x'))).to.equal(false)
