@@ -19,6 +19,7 @@ import { AUTHORITY_COMMON_VERBS, COMMON_VERBS } from '../common.js'
 import { OFFICER_NETWORK_VERBS } from './network-verbs.js'
 import { OFFICER_ELECTION_VERBS } from './election-verbs.js'
 import { OFFICER_INTAKE_VERBS } from './intake-verbs.js'
+import { OFFICER_RESULTS_VERBS } from './results-verbs.js'
 
 /** Compile-time pin: the daemon's context satisfies the officer verb context (never called). */
 export const assertOfficerContext = (ctx: VerbContext): OfficerVerbContext => ctx
@@ -29,4 +30,5 @@ export const OFFICER_VERB_ENTRIES: Readonly<Record<string, VerbHandler<VerbConte
   ...OFFICER_NETWORK_VERBS,
   ...OFFICER_ELECTION_VERBS,
   ...OFFICER_INTAKE_VERBS,
+  ...OFFICER_RESULTS_VERBS,
 })

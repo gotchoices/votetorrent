@@ -12,9 +12,11 @@ import type { VerbHandler } from '../../ctl/protocol.js'
 import type { VerbContext } from '../../daemon/verb-context.js'
 import { AUTHORITY_COMMON_VERBS, COMMON_VERBS } from '../common.js'
 import { KEYHOLDER_VERBS } from './index.js'
+import { KEYHOLDER_RESULTS_VERBS } from './results-verbs.js'
 
 export const KEYHOLDER_VERB_ENTRIES: Readonly<Record<string, VerbHandler<VerbContext>>> = Object.freeze({
   ...COMMON_VERBS,
   ...AUTHORITY_COMMON_VERBS,
   ...KEYHOLDER_VERBS,
+  ...KEYHOLDER_RESULTS_VERBS,
 })
