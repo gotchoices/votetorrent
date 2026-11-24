@@ -384,7 +384,7 @@ describe('keyholder drivers (@votetorrent/workflows/authority)', function () {
     for (const value of observed) {
       const serialized =
         typeof value === 'object' && value !== null && 'message' in value
-          ? JSON.stringify({ name: value.name, message: value.message, code: (value as { code?: unknown }).code, stack: value.stack })
+          ? JSON.stringify({ name: (value as { name?: unknown }).name, message: value.message, code: (value as { code?: unknown }).code, stack: (value as { stack?: unknown }).stack })
           : JSON.stringify(value)
       expect(serialized).to.be.a('string')
       for (const secret of secrets) {

@@ -233,8 +233,8 @@ describe('registration approval (@votetorrent/workflows/authority officer group)
       expect(r.calls.slice(completed + 1)).to.deep.equal([
         'registration.getRegistrationRequest', 'intake.createOpener', 'factory', 'registration.publishRegistrationDecision',
       ])
-      expect(r.args['registration.publishRegistrationDecision'][0][1]).to.equal(REQUEST_ID)
-      expect(r.args['registration.publishRegistrationDecision'][0][2]).to.deep.equal({ closesRequestId: OTHER_REQUEST_ID })
+      expect(r.args['registration.publishRegistrationDecision']![0]![1]).to.equal(REQUEST_ID)
+      expect(r.args['registration.publishRegistrationDecision']![0]![2]).to.deep.equal({ closesRequestId: OTHER_REQUEST_ID })
       expect(result.published.kind).to.equal('published')
     })
 
@@ -275,7 +275,7 @@ describe('registration approval (@votetorrent/workflows/authority officer group)
       await approveRegistrationRequest({
         getEngine: r.getEngine, requestId: REQUEST_ID, task, checklist, resolveSign: r.resolveSign, review: r.review, closesRequestId: null,
       })
-      const [completedTask, result] = r.args['tasks.completeSignature'][0] as [unknown, Record<string, unknown>]
+      const [completedTask, result] = r.args['tasks.completeSignature']![0] as [unknown, Record<string, unknown>]
       expect(completedTask).to.equal(task)
       expect(result.isAccepted).to.equal(true)
       expect(result.signature).to.equal(r.signatureValue)
@@ -376,12 +376,12 @@ describe('registration approval (@votetorrent/workflows/authority officer group)
       })
       expect(r.calls).to.deep.equal(['resolveSign', 'registration.rejectRegistrationRequest', 'tasks.completeSignature'])
       expect(r.engineLookups).to.deep.equal(['registration', 'signatureTasksEngine'])
-      const rejectArgs = r.args['registration.rejectRegistrationRequest'][0]
+      const rejectArgs = r.args['registration.rejectRegistrationRequest']![0]!
       expect(rejectArgs[0]).to.equal(REQUEST_ID)
       expect(rejectArgs[1]).to.deep.equal({ checklist: CHECKLIST, rejectionReason: 'reason text' })
       expect((rejectArgs[1] as { checklist: unknown }).checklist).to.equal(CHECKLIST)
       expect(rejectArgs[2]).to.equal(r.sign)
-      const [closedTask, completion] = r.args['tasks.completeSignature'][0] as [unknown, Record<string, unknown>]
+      const [closedTask, completion] = r.args['tasks.completeSignature']![0] as [unknown, Record<string, unknown>]
       expect(closedTask).to.equal(task)
       expect(completion).to.deep.equal({ isAccepted: false, signature: { signature: '', signerKey: '', signerUserId: '' } })
       expect(Object.keys(completion).sort()).to.deep.equal(['isAccepted', 'signature'])
@@ -440,7 +440,7 @@ describe('registration approval (@votetorrent/workflows/authority officer group)
       const r = rig()
       await recordRegistrationRejectVote({ getEngine: r.getEngine, task })
       expect(r.calls).to.deep.equal(['tasks.completeSignature'])
-      const completion = r.args['tasks.completeSignature'][0][1] as Record<string, unknown>
+      const completion = r.args['tasks.completeSignature']![0]![1] as Record<string, unknown>
       expect(completion).to.deep.equal({ isAccepted: false, signature: { signature: '', signerKey: '', signerUserId: '' } })
       expect(Object.keys(completion).sort()).to.deep.equal(['isAccepted', 'signature'])
     })
@@ -452,12 +452,12 @@ describe('registration approval (@votetorrent/workflows/authority officer group)
       })
       expect(r.engineLookups[0]).to.equal('registration')
       expect(r.calls.slice(0, 3)).to.deep.equal(['resolveSign', 'registration.closeStaleRegistrationRequest', 'tasks.completeSignature'])
-      const closeArgs = r.args['registration.closeStaleRegistrationRequest'][0]
+      const closeArgs = r.args['registration.closeStaleRegistrationRequest']![0]!
       expect(closeArgs[0]).to.equal(REQUEST_ID)
       expect(closeArgs[1]).to.deep.equal({ rejectionReason: 'late' })
       expect(closeArgs[2]).to.equal(r.sign)
-      expect(r.args['tasks.completeSignature'][0][1]).to.deep.equal({ isAccepted: false, signature: { signature: '', signerKey: '', signerUserId: '' } })
-      expect(r.args['registration.publishRegistrationDecision'][0][2]).to.deep.equal({ closesRequestId: null })
+      expect(r.args['tasks.completeSignature']![0]![1]).to.deep.equal({ isAccepted: false, signature: { signature: '', signerKey: '', signerUserId: '' } })
+      expect(r.args['registration.publishRegistrationDecision']![0]![2]).to.deep.equal({ closesRequestId: null })
       expect(result.taskClose).to.equal('closed')
       expect(result.published.kind).to.equal('published')
       expect(r.calls).to.not.include('tasks.getSignatureDigest')
@@ -493,7 +493,7 @@ describe('registration approval (@votetorrent/workflows/authority officer group)
       expect(view.priorRejections).to.deep.equal([])
       expect(view.failure).to.equal(undefined)
       expect(view.readMs).to.be.a('number')
-      expect(r.args['registration.getPriorRejections'][0]).to.deep.equal(['requester-key', REQUEST_ID])
+      expect(r.args['registration.getPriorRejections']![0]).to.deep.equal(['requester-key', REQUEST_ID])
     })
 
     it('L2 prior rejections failure: flagged with the identical failure, nothing stored, later reads still run', async () => {
