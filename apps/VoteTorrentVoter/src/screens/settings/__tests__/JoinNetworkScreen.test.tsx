@@ -138,6 +138,13 @@ describe('JoinNetworkScreen', () => {
 		expect(hasId('join-network-preview')).toBe(false);
 	});
 
+	it('on the stack routes (no Scan tab props) the scanner opens only on the Scan press', () => {
+		vc.__setCameraPermissionStatus('not-determined');
+		render();
+		expect(cams().length).toBe(0);
+		expect(vc.__cameraPermissionRequestCount()).toBe(0);
+	});
+
 	describe.each(OK_NAMES)('with the %s code', name => {
 		const fixture = JOIN_CODE_FIXTURES[name];
 
