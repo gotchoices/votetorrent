@@ -143,6 +143,17 @@ module.exports = {
       '<rootDir>/node_modules/@votetorrent/vote-engine/dist/index.js',
     '^@votetorrent/vote-engine/rn$':
       '<rootDir>/node_modules/@votetorrent/vote-engine/dist/rn-entry.js',
+    // @votetorrent/workflows (phase 67): Jest's CJS resolver does not read the exports map for
+    // these subpaths, the same gap as `vote-engine/rn` above, so they map to the built dist that
+    // the apps bundle.
+    '^@votetorrent/workflows$':
+      '<rootDir>/node_modules/@votetorrent/workflows/dist/index.js',
+    '^@votetorrent/workflows/authority$':
+      '<rootDir>/node_modules/@votetorrent/workflows/dist/authority/index.js',
+    '^@votetorrent/workflows/voter$':
+      '<rootDir>/node_modules/@votetorrent/workflows/dist/voter/index.js',
+    '^@votetorrent/workflows/platform$':
+      '<rootDir>/node_modules/@votetorrent/workflows/dist/platform/index.js',
     // polyfills/native-crypto.js installs the engine's native ECDH through this subpath.
     '^@votetorrent/vote-engine/crypto-backend$':
       '<rootDir>/node_modules/@votetorrent/vote-engine/dist/crypto/backend.js',
