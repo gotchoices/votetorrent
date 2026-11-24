@@ -17,7 +17,9 @@
  * to an older, newer or malformed code's field error.
  *
  * Registered on the Settings, Registration and Timeline stacks (route closure, D-14); it only ever
- * goes back, so it adds no onward routes. Every failure is shown as translated copy chosen by the
+ * goes back, so it adds no onward routes. The Scan tab's root (`ScanScreen`) renders this same
+ * screen with `JoinNetworkScreenProps`: the scanner opens as the tab comes into view, closes when
+ * the tab leaves, and Done goes where the tab says. The scanned code never leaves this state. Every failure is shown as translated copy chosen by the
  * typed reason — never the engine's own text (it can carry cadre-core error messages). The code
  * holds the invitation's private key (a bearer credential for cadre membership), so nothing here
  * logs it.
@@ -91,7 +93,27 @@ type ScanAvailability = 'ready' | 'blocked' | 'none';
 
 type Phase = {kind: 'idle'} | {kind: 'joining'; step: NetworkJoinStep} | {kind: 'joined'; name: string} | {kind: 'failed'; key: string};
 
-export default function JoinNetworkScreen() {
+/**
+ * Props the Scan tab passes; the stack routes pass none. The scanned code stays in this screen's
+ * state either way: none of these carry it, and nothing here puts it in navigation params.
+ */
+export interface JoinNetworkScreenProps {
+	/**
+	 * Each time this number goes up, the scanner opens, but only while the field is empty, nothing
+	 * is joining or joined, the camera is usable, and the last camera attempt was not refused or
+	 * failed (so a refusal is not asked again on every visit). Zero or absent never opens it.
+	 */
+	scanRequest?: number;
+	/**
+	 * False while the screen is out of view (another tab is showing). The scanner closes, so the
+	 * camera never runs behind another tab, and a finished join clears back to an empty form.
+	 */
+	active?: boolean;
+	/** What Done does after a successful join. Default: go back. */
+	onDone?(): void;
+}
+
+export default function JoinNetworkScreen({scanRequest = 0, active = true, onDone}: JoinNetworkScreenProps = {}) {
 	const {joinNetwork} = useVoterApp();
 	const navigation = useNavigation();
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
@@ -110,6 +132,32 @@ export default function JoinNetworkScreen() {
 
 	const decoded = useMemo(() => (text.trim().length === 0 ? null : decodeNetworkJoinCode(text)), [text]);
 	const busy = phase.kind === 'joining';
+
+	// The Scan tab's request to open the scanner. A ref holds whether it may open right now, so the
+	// effect runs only when the request number changes, never because the field or a notice did.
+	const canAutoOpen =
+		text.trim().length === 0 && phase.kind === 'idle' && availability === 'ready' && scanNotice !== 'denied' && scanNotice !== 'failed';
+	const canAutoOpenRef = useRef(canAutoOpen);
+	canAutoOpenRef.current = canAutoOpen;
+	useEffect(() => {
+		if (scanRequest > 0 && canAutoOpenRef.current) {
+			setScanNotice(null);
+			setScannerOpen(true);
+		}
+	}, [scanRequest]);
+
+	// Out of view: the camera goes off, and a finished join leaves an empty form for the next visit.
+	const joinedRef = useRef(false);
+	joinedRef.current = phase.kind === 'joined';
+	useEffect(() => {
+		if (active) return;
+		setScannerOpen(false);
+		if (joinedRef.current) {
+			setText('');
+			setScanNotice(null);
+			setPhase({kind: 'idle'});
+		}
+	}, [active]);
 
 	// Focus returns to the Scan button when the scanner closes (R7).
 	useEffect(() => {
@@ -211,7 +259,7 @@ export default function JoinNetworkScreen() {
 				<Pressable
 					testID="join-network-done"
 					accessibilityRole="button"
-					onPress={() => navigation.goBack()}
+					onPress={() => (onDone ? onDone() : navigation.goBack())}
 					style={[styles.cta, {backgroundColor: colors.primary, borderRadius: radii.pill}]}>
 					<Text style={[styles.ctaLabel, {color: colors.light, fontFamily: fonts.bold.fontFamily, fontWeight: fonts.bold.fontWeight}]}>
 						{t('doneButton')}
