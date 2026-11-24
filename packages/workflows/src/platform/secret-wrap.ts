@@ -29,3 +29,29 @@ export interface SecretWrapPrompt {
   subtitle: string
   negativeButton: string
 }
+
+/**
+ * The closed set of secret-wrap error codes, the same members in the same order as the native
+ * secret-wrap module's code list. It must stay EXACTLY equal to the native type: the Voter app pins the
+ * equality with a strict compile-time parity check (`vote-record-move.parity.test.ts`, phase 67 plan 30)
+ * that fails the app typecheck when either side drifts. Type-only, so the platform runtime namespace
+ * stays empty.
+ */
+export type SecretWrapErrorCode =
+  | 'INVALID_ARGUMENT'
+  | 'INVALID_ENCODING'
+  | 'NO_WRAP_KEY'
+  | 'WRAP_KEY_POLICY_MISMATCH'
+  | 'UNWRAP_TAG_MISMATCH'
+  | 'KEY_INVALIDATED'
+  | 'DEVICE_LOCKED'
+  | 'CANCELED'
+  | 'NO_BIOMETRICS_ENROLLED'
+  | 'LOCKOUT'
+  | 'LOCKOUT_PERMANENT'
+  | 'BIOMETRIC_ERROR'
+  | 'NO_ACTIVITY'
+  | 'WRAP_FAILED'
+  | 'UNWRAP_FAILED'
+  | 'NATIVE_UNAVAILABLE'
+  | 'MALFORMED_NATIVE_RESULT'
