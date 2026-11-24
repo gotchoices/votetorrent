@@ -7,7 +7,7 @@ import renderer from "react-test-renderer";
 import { Keyboard, Platform, ScrollView } from "react-native";
 
 jest.mock("@multiformats/multiaddr", () => ({ multiaddr: () => ({ getComponents: () => [] }) }), { virtual: true });
-jest.mock("@votetorrent/vote-core", () => ({}), { virtual: true });
+jest.mock("@votetorrent/vote-core", () => jest.requireActual("@votetorrent/vote-core"));
 jest.mock("react-native-vector-icons/FontAwesome6", () => "FontAwesome6");
 jest.mock("react-i18next", () => ({
 	useTranslation: () => ({ t: (key: string) => key }),

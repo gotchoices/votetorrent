@@ -65,7 +65,7 @@ jest.mock(
 );
 
 // vote-core type-only import — provide an empty module so resolution succeeds.
-jest.mock('@votetorrent/vote-core', () => ({}), { virtual: true });
+jest.mock('@votetorrent/vote-core', () => jest.requireActual('@votetorrent/vote-core'));
 
 // react-native-vector-icons not available in jest env. Also needed transitively by
 // FoundingBundleExportCard's LifecycleConfirmCard (CustomTextInput -> ChipButton).
