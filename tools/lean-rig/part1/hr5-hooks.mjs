@@ -3,12 +3,16 @@
 //      AsyncStorage default export, which delegates to the per-role file kv and THROWS when HR5_ASYNC_STORAGE_FILE is unset);
 //  (2) from a parent under the Authority src, the Voter src or this scratch dir, map the vote-engine rn entry to the
 //      vote-engine SRC and re-anchor every other bare specifier to the opener URL (one patched copy of each package);
+//      the shared @votetorrent/workflows package is exempt (plan 67-03): the anchor's node_modules (vote-engine's) cannot
+//      see it, so it resolves from the importing app's own workspace link; one patched optimystic/cadre copy still holds
+//      because packages/workflows depends on them through the same workspace;
 //  (3) force format module for those apps' src ts and tsx files.
 // It maps no package of the optimistic, cadre or protocol-limits families.
 let cfg = {}
 export function initialize (data) { cfg = data ?? {} }
 
 const isBare = (s) => !(s.startsWith('.') || s.startsWith('/') || s.startsWith('node:') || s.startsWith('data:') || s.startsWith('file:'))
+const isWorkflows = (s) => s === '@votetorrent/workflows' || s.startsWith('@votetorrent/workflows/')
 const classes = (names) => names.map((n) => `export class ${n} { constructor () { throw new Error('stubbed: RN-only module on the host') } }`).join('\n')
 const trace = (spec) => `(globalThis.__hr5Stubs ??= []).push(${JSON.stringify(spec)});\n`
 const STUBS = {
@@ -41,7 +45,7 @@ export async function resolve (specifier, context, nextResolve) {
   let result
   if (fromApp && specifier === '@votetorrent/vote-engine/rn') {
     result = await nextResolve(cfg.rnEntry, context)
-  } else if (fromApp && isBare(specifier) && cfg.anchor) {
+  } else if (fromApp && isBare(specifier) && !isWorkflows(specifier) && cfg.anchor) {
     result = await nextResolve(specifier, { ...context, parentURL: cfg.anchor })
   } else {
     result = await nextResolve(specifier, context)
