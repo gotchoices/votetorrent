@@ -5,11 +5,22 @@
 import { BUILTIN_VERBS_VERB } from '../../ctl/protocol.js'
 import { HANDOFF_KEYS } from '../results.js'
 import { CLI01_VERB_INVENTORY, SUPPORT_VERBS } from '../verb-inventory.js'
-import { type ElectionLegBody } from '../election-legs.js'
-import { bool, callVerb, callVerbs, needOk, nowMs, number, stringOf } from './common.js'
+import { type ElectionLegBody, type RunContext } from '../election-legs.js'
+import { bool, callVerb, callVerbs, needOk, nowMs, number, sleep, stringOf } from './common.js'
 
 const AUTHORITIES = ['officer', 'kh-a', 'kh-b'] as const
 const HASH_RE = /^[0-9a-f]{32}$/
+const CONTROL_CONVERGENCE_MS = 120000
+
+async function waitForControlConnections (ctx: RunContext): Promise<boolean> {
+  const deadline = nowMs(ctx) + CONTROL_CONVERGENCE_MS
+  for (;;) {
+    const reads = await Promise.all(AUTHORITIES.map((label) => callVerb(ctx, label, label === 'officer' ? 'officer.readback' : 'keyholder.readback', {})))
+    if (reads.every((r) => r.ok && number(r.result.controlConnections) >= 2)) return true
+    if (nowMs(ctx) >= deadline) return false
+    await sleep(ctx, 1000)
+  }
+}
 
 function expectedVerbs (role: string): string[] {
   return [
@@ -99,6 +110,9 @@ export const networkBody: ElectionLegBody = async (L, ctx) => {
     }
     const after = await readAll()
     L.need('reopen-peers', 'R2', 'the peer id survived every restart', stringOf(after.peerId8) === ctx.shared.peerId8)
+    if (typeof after.controlConnections === 'number') {
+      L.need('reopen-peers', 'R2c', 'every authority re-established two control connections after the restart', await waitForControlConnections(ctx))
+    }
     const again = await callVerb(ctx, 'officer', 'officer.authority-id', { networkHash })
     needOk(L, 'reopen-open', 'R3', 'the reopened officer reads its authority again', again)
     L.need('reopen-open', 'R4', 'one authority is visible after the reopen', again.ok && number(again.result.count) === 1)
