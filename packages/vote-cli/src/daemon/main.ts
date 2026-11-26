@@ -22,6 +22,7 @@ import type { DaemonEnvReport } from './daemon-env.js'
 import { createErrorRecorder } from './error-recorder.js'
 import { installOutputRedaction } from './output-redaction.js'
 import { buildPeerRegistry } from './registries.js'
+import { reopenJoinedNetworks } from './reopen-networks.js'
 import type { StartOptions } from './start-args.js'
 
 export interface RunDaemonOptions extends StartOptions {
@@ -138,6 +139,12 @@ export async function runDaemon(opts: RunDaemonOptions, deps: RunDaemonDeps = de
       return finish(tokenText === 'peer-dir-busy' ? EXIT.USAGE : EXIT.FAIL)
     }
   }
+
+  // 3b. every joined network is open (or its bound has passed) before any peer reports ready
+  await Promise.all(peers.map(async (p) => {
+    const r = await reopenJoinedNetworks(p.booted.ctx)
+    if (r.known > 0) out(`VT-DAEMON-NETWORKS role=${p.role} peer=${p.label} known=${r.known} opened=${r.opened} failed=${r.failed} pending=${r.pending}`)
+  }))
 
   // 4. one ctl server per peer, the primary last
   const startedAt = new Date().toISOString()
