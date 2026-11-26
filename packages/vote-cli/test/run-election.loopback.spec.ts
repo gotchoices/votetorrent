@@ -136,7 +136,7 @@ async function expectProbe (dir: string): Promise<void> {
 
 async function startInstrumentedOfficer (root: string, relay: LoopbackRelay, party: string): Promise<InstrumentDaemon> {
   const runDir = join(root, `instruments-${party}`)
-  const peerDir = join(runDir, 'state', 'officer')
+  const peerDir = join(runDir, 'state', party, 'officer')
   const instrDir = join(peerDir, 'instruments')
   const logDir = join(runDir, 'logs')
   const secretsDir = join(runDir, 'secrets')
