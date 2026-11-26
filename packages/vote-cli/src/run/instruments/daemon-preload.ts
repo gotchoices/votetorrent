@@ -193,7 +193,9 @@ async function boot (): Promise<void> {
   if (typeof cluster?.prototype?.send === 'function') installSizeProbe(cluster.prototype)
   if (typeof cadre?.prototype?.start === 'function') trackCadreStarts(cadre.prototype, nodes)
   wrapConsoleDigestCount()
+  let writtenCalls = -1
   const writeProbe = (): void => {
+    writtenCalls = probe.calls
     writePrivate(join(dir, 'size-probe.json'), JSON.stringify({
       installed: probe.installed,
       calls: probe.calls,
@@ -203,6 +205,8 @@ async function boot (): Promise<void> {
     }) + '\n')
   }
   const requestTimer = setInterval(() => {
+    // new sends reach the file within a second, so a leg shorter than the 30 s rewrite reads its own count
+    if (probe.calls !== writtenCalls) writeProbe()
     void pumpRequests(dir, nodes)
   }, 1000)
   requestTimer.unref()
