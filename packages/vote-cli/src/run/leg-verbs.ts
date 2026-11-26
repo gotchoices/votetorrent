@@ -119,7 +119,7 @@ export const LEG_VERBS = Object.freeze({
   }),
   'officer.results': Object.freeze({
     role: 'officer', verb: 'results', approval: false,
-    args: (i: LegVerbInput) => withOptional(required(i, 'network', 'election'), i, 'waitMs')
+    args: (i: LegVerbInput) => withOptional(required(i, 'network', 'election'), i, 'waitMs', 'requirePublished')
   }),
   'officer.readback': Object.freeze({
     role: 'officer', verb: 'readback', approval: false,
@@ -145,7 +145,7 @@ export const LEG_VERBS = Object.freeze({
   }),
   'keyholder.results': Object.freeze({
     role: 'keyholder', verb: 'results', approval: false,
-    args: (i: LegVerbInput) => withOptional(required(i, 'network', 'election'), i, 'waitMs')
+    args: (i: LegVerbInput) => withOptional(required(i, 'network', 'election'), i, 'waitMs', 'requirePublished')
   }),
   'keyholder.readback': Object.freeze({
     role: 'keyholder', verb: 'readback', approval: false,
@@ -183,7 +183,7 @@ export const LEG_VERBS = Object.freeze({
   }),
   'voter.results': Object.freeze({
     role: 'voter', verb: 'results', approval: false,
-    args: (i: LegVerbInput) => withOptional(required(i, 'network', 'election'), i, 'waitMs')
+    args: (i: LegVerbInput) => withOptional(required(i, 'network', 'election'), i, 'waitMs', 'requirePublished')
   }),
   'voter.readback': Object.freeze({
     role: 'voter', verb: 'readback', approval: false,

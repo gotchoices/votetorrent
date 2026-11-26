@@ -3,6 +3,7 @@
 // before the window) and pool all votes together. With fewer than three voters the leg stops after
 // association and records pool-skipped (a check, not a soft fail).
 
+import { randomBytes } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 import type { ElectionLegBody } from '../election-legs.js'
 import { callVerb, needOk, needServedVerbs, nowMs, number, poll, sleep, stringOf } from './common.js'
@@ -62,7 +63,9 @@ export const votersBody: ElectionLegBody = async (L, ctx) => {
           authority: ctx.shared.authorityId,
           network,
           request: pending[0]!,
-          checklist: 'none',
+          // `none` mixed with a substantive item is the incomplete checklist; `none` alone meets the
+          // gate and would refuse the voter's request for good
+          checklist: 'none,id',
           reasonFile
         })
         L.need('refuse-gate', 'D07', 'the incomplete D-07 checklist was refused before any token read',
@@ -128,7 +131,10 @@ export const votersBody: ElectionLegBody = async (L, ctx) => {
     peer.stage('joined')
 
     const registrantFile = ctx.secretPath(`registrant-${label}.json`)
-    writeFileSync(registrantFile, JSON.stringify({ firstName: 'vt', lastName: label }) + '\n', { flag: 'wx', mode: 0o600 })
+    // the rig's registrant fields (synthetic, with a random address per voter)
+    const number1 = label.slice(1)
+    const email = `voter${number1}-${randomBytes(4).toString('hex')}@example.invalid`
+    writeFileSync(registrantFile, JSON.stringify({ firstName: 'Vtcli', lastName: `Voter${number1}`, email, dob: '1990-01-01' }) + '\n', { flag: 'wx', mode: 0o600 })
     ctx.registerSecretFile(registrantFile, { windows: true })
     const registered = await callVerb(ctx, label, 'voter.register', { network, election, registrantFile })
     needOk(L, 'intake', `R-${label}`, `${label} staged its registration`, registered)

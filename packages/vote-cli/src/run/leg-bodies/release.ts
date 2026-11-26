@@ -66,7 +66,8 @@ export const releaseBody: ElectionLegBody = async (L, ctx) => {
 
     const reads = await Promise.all(labels.map(async (label) => {
       if (roleOf(label) === 'voter') ctx.peer(label).stage('results-wait')
-      const read = await poll<Record<string, unknown>>(ctx, label, resultKey(label), { network, election, waitMs: 0 },
+      // every peer waits for the verified publication too: the agreement hash covers its flags
+      const read = await poll<Record<string, unknown>>(ctx, label, resultKey(label), { network, election, waitMs: 0, requirePublished: 'true' },
         (v) => v.status === 'tallied', { timeoutMs: 600000, intervalMs: 5000 })
       if (roleOf(label) === 'voter' && read.ok) ctx.peer(label).stage('results-read')
       return { label, read }

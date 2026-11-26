@@ -4,6 +4,7 @@
 // The clock is injected by the test, so timeline waits are instant and observable.
 
 import { randomBytes } from 'node:crypto'
+import { canonicalizeVerificationChecklist, isChecklistGateMet } from '@votetorrent/vote-core'
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { writeRelayEnv } from '../../src/relay/relay-env.js'
@@ -138,7 +139,14 @@ export function happyScript (opts: {
       rows: [...pending].map((requestId) => ({ requestId, status: 'p', issuerType: 'd' })),
       truncated: false
     }),
-    'officer.refuse': () => refused('checklist-incomplete'),
+    // the real D-07 gate: a checklist that meets it refuses the request for good
+    'officer.refuse': (c) => {
+      const items = canonicalizeVerificationChecklist(String(c.args.checklist).split(','))
+      if (!isChecklistGateMet(items)) return refused('checklist-incomplete')
+      const requestId = String(c.args.request)
+      pending.delete(requestId)
+      return reply({ requestId, published: 'published' })
+    },
     'officer.approve': (c) => {
       const requestId = String(c.args.request)
       pending.delete(requestId)

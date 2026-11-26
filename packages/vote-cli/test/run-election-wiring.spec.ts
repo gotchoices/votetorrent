@@ -14,7 +14,7 @@ import { classifyRun } from '../src/run/instruments/classify.js'
 import { RELEASING_AFTER_ACCRUING_MS } from '../src/run/leg-bodies/election.js'
 import { DURATION_KEYS } from '../src/run/results.js'
 import { writeRelayEnv } from '../src/relay/relay-env.js'
-import { ElectionEvent } from '@votetorrent/vote-core'
+import { ElectionEvent, canonicalizeVerificationChecklist, isChecklistGateMet } from '@votetorrent/vote-core'
 import { buildCliTimeline } from '../src/election/parse-timeline.js'
 import { runScriptedElection, type ScriptedRun, type ScriptedTable } from './support/scripted-launcher.js'
 
@@ -85,7 +85,8 @@ describe('run: election wiring (scripted daemons)', function () {
     const r = await runScriptedElection({ stateDir: state() })
     const refusals = r.launcher.calls.filter((c) => c.verb === 'refuse')
     expect(refusals).to.have.length(1)
-    expect(refusals[0]!.args.checklist).to.equal('none')
+    expect(refusals[0]!.args.checklist).to.equal('none,id')
+    expect(isChecklistGateMet(canonicalizeVerificationChecklist(['none', 'id']))).to.equal(false)
     const ok = commands(r).filter((l) => l.includes(' refuse '))
     expect(ok).to.have.length(1)
     expect(ok[0]).to.include(' ok=false ')
@@ -93,6 +94,10 @@ describe('run: election wiring (scripted daemons)', function () {
     const bad = await runScriptedElection({ stateDir: state(), overrides: override })
     expect(bad.code).to.equal(1)
     expect(bad.stdout.at(-1)).to.equal('SUMMARY FAIL h9-voters refuse-gate')
+    // the failed leg's other branches end with the run: no workflow call follows the first stop
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const verbs = bad.launcher.calls.map((c) => c.verb)
+    expect(verbs.slice(verbs.indexOf('stop')).filter((v) => v !== 'stop')).to.deep.equal([])
   })
 
   it('results identity writes one RESULTS key per peer and RESULTS-IDENTICAL, and a differing peer fails results-identity', async () => {
@@ -101,6 +106,7 @@ describe('run: election wiring (scripted daemons)', function () {
       expect(r.results.keys[`RESULTS-${label}`], label).to.match(/^tag=[0-9a-f]{12} status=tallied valid=3 counts=1\/2$/)
     }
     expect(r.results.keys['RESULTS-IDENTICAL']).to.match(/^peers=6 tag=[0-9a-f]{12} equal=true$/)
+    for (const call of r.launcher.calls.filter((c) => c.verb === 'results')) expect(call.args.requirePublished).to.equal('true')
     // the same counts under another agreement hash (a differing root) must still fail, as must a reply without one
     const same = { status: 'tallied', valid: 3, invalid: 0, excluded: 0, counts: [1, 2] }
     for (const result of [{ ...same, agreementSha256: '12'.repeat(32) }, same]) {
