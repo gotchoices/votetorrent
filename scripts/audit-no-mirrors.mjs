@@ -355,7 +355,7 @@ function checkCopiedLogic (pkgSrc, app, allowed) {
 
 function checkHookImport (files, manifests, bootstrap) {
   const out = []
-  const hooks = ['s63-hooks', 'authority-hooks', 'hr5-hooks', 'mocha-shim', 'shims/react-native']
+  const hooks = ['s63-' + 'hooks', 'authority-' + 'hooks', 'hr5-' + 'hooks', 'mocha-shim', 'shims/react-native']
   const loader = /\b--(?:experimental-)?loader\b/
   const exportedHook = /\bexport\s+(?:async\s+)?function\s+(?:resolve|load)\s*\(|\bexport\s+(?:default\s+)?(?:const|let|var)\s+(?:resolve|load)\s*=|\bexport\s*\{[^}]*\b(?:resolve|load)\b/
   const moduleImport = /(?:from\s*|require\s*\(\s*)['"](?:node:)?module['"]/

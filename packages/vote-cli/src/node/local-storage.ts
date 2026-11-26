@@ -1,6 +1,6 @@
 // vote-core's `LocalStorage` (the NetworksEngine's `recentNetworks` home) over the peer's file kv:
 // JSON in and out, `undefined` for an absent key, bigint written as a decimal string. Port of the lean
-// rig's hr5-lib.ts `roleLocalStorage` onto the 67-13 FileKvStorage (strings only, write-through).
+// rig's local storage `roleLocalStorage` onto the 67-13 FileKvStorage (strings only, write-through).
 
 import type { LocalStorage } from '@votetorrent/vote-core'
 import type { FileKvStorage } from '../vault/file-kv.js'

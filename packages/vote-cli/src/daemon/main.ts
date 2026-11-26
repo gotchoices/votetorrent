@@ -1,4 +1,4 @@
-// The role daemon (the daemon half of the lean rig's hr5-peer.ts, over the 67-12 ctl server): output
+// The role daemon (the daemon half of the lean rig's peer driver, over the 67-12 ctl server): output
 // redaction first, the relay env, one booted peer per colocated label (each with its own dir, lock,
 // kv files, device vault, node and crash recorder), one ctl server per peer with its own token and
 // `ctl.port` written LAST (primary last of all), SIGTERM/SIGINT and max-runtime shutdown. It touches

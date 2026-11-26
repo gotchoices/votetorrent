@@ -1,5 +1,5 @@
 // The error view a ctl 500 reply carries: name, optional code, message and the cause chain. It merges
-// the rig's rpc.mjs errorView (name, code, message; never the stack trace) with hr5-peer's 500 body
+// the rig's rpc.mjs errorView (name, code, message; never the stack trace) with peer driver's 500 body
 // (message cut to 200, chainNames to depth 6). The message is redacted FIRST and truncated second:
 // truncating first could cut a registered secret into an unmatched prefix that then leaks.
 

@@ -1,6 +1,6 @@
 /**
- * keyholder-session-leaf.guard.test.ts — the keyholder modules the host lean driver loads under plain Node
- * (64-lean `lean-part2.ts`: keyholder-accept, keyholder-dkg-driver, key-release-ceremony, keyholder-identity) must
+ * keyholder-session-leaf.guard.test.ts — the keyholder modules the `vt` CLI (`packages/vote-cli`) loads under plain Node
+ * (keyholder-accept, keyholder-dkg-driver, key-release-ceremony, keyholder-identity) must
  * never VALUE-import, directly or through a relative import, anything that pulls in the native module or
  * react-native. bcbf1902 broke the driver that way: the callers imported `withKeyholderSession` from
  * `keyholder-seat-vault.ts`, which value-imports `./key-vault` -> `@votetorrent/attestation-native`.

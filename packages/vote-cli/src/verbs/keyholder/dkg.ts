@@ -1,7 +1,7 @@
 // `vt keyholder dkg`: drive this keyholder's half of the DKG (CONTEXT "Workflow coverage": drive DKG)
 // through the shared `driveKeyholderDkg` (@votetorrent/workflows/authority), which does ONE
 // `advanceDkg` per call; the loop, its pauses and its bounds live here, the daemon's side. Port of
-// tools/lean-rig/lean/host-kh.ts 145-158 and lean-part2.ts legDkg 884-927 (the 2026-11-13 rule: an
+// the retired lean rig's keyholder driver 145-158 and main driver legDkg 884-927 (the 2026-11-13 rule: an
 // action-less advancing drive must still pause, or the bound burns in a second). The identity is never
 // an argument: it is resolved from the sealed store by the election its seat belongs to. Approval-
 // class: the token comes only from this call; a token-less drive refuses `auth-denied` at the vault's
@@ -44,7 +44,7 @@ export const DKG_PAUSE_IDLE_MS = 4_000
  * Consecutive drive errors other than `auth-denied` tolerated before the verb refuses with the code:
  * two daemons posting rounds to one strand at the same time can lose a commit (a code-less engine
  * error the driver reports as `unknown`), and the next drive re-reads and continues, as the lean rig's
- * host-kh loop does. `auth-denied` is never retried.
+ * keyholder driver loop does. `auth-denied` is never retried.
  */
 export const DKG_MAX_CONSECUTIVE_ERRORS = 3
 

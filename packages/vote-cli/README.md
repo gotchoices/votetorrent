@@ -214,3 +214,70 @@ Both apps and this CLI consume the BUILT packages: `package.json` `main`/`export
 each exist and are no older than the newest file under that package's `src/`. It refuses with a `StaleBuildError` whose `code` is `not-built`, `stale` or `src-missing` and whose message names the package and the fix, never a path. Importing `src/engine.ts` has no side effect; `vt --help` works on an unbuilt tree.
 
 The fix is always the build order above: vote-core, then vote-engine, then workflows.
+
+## Replaced tools
+
+`tools/vote-cli` (the daemon-per-device JSON-RPC CLI), `tools/lean-rig` (the all-host election driver) and `scripts/seed-election.sh` were deleted at the end of the vt CLI work, after the CLI-06 acceptance run on 2026-11-26. `vt` replaces them. Do not re-create them: extend `vt` instead.
+
+To read the deleted files from history: `git log --diff-filter=D --oneline -- tools/lean-rig tools/vote-cli` gives the deletion commit, and `git show <commit>^:tools/lean-rig/README.md` reads a file as it was. The committed old E2E reports (`tools/vote-cli/reports/*`) are read the same way.
+
+### Rig legs to `vt` verbs
+
+| Rig entry | `vt` replacement |
+|---|---|
+| lean-part1 `found` | `vt officer found` |
+| lean-part1 `mint` | `vt officer mint` |
+| lean-part1 `join` | `vt officer join`, `vt keyholder join` |
+| lean-part1 `owner-setup` | `vt officer owner-setup` |
+| lean-part1 `authority-id` | `vt officer authority-id` |
+| lean-part1 `readback` | `vt officer readback`, `vt keyholder readback`, `vt voter readback` |
+| lean-part1 `capability` | `vt officer capability`, `vt keyholder capability` |
+| lean-part1 `stop` | `vt officer stop`, `vt keyholder stop`, `vt voter stop` |
+| lean-part2 `legReopen` | restart a daemon on its existing state dir with `vt officer start --state <dir>` (its `ctl.port` and `ctl.token` are kept) |
+| lean-part2 `legElection` | `vt officer create-election`, `vt officer keyholder-policy`, `vt officer invite-keyholder`, `vt officer ballot-submit`, `vt officer task-sign`, `vt officer enable-intake` |
+| lean-part2 `legAccept` | `vt keyholder accept` |
+| lean-part2 `legDkg` | `vt keyholder dkg` |
+| lean-part2 `legVoters` | `vt voter join`, `vt voter register`, `vt voter stage-association`, `vt voter answer-challenge`, `vt voter read-decision`, `vt voter cast`, `vt voter send`; officer `vt officer registrations`, `vt officer approve`, `vt officer refuse`, `vt officer peer-sync` |
+| lean-part2 `legRelease` | `vt officer release-window`, `vt keyholder release`, `vt officer tally`, `vt officer publish`, then `vt officer results`, `vt keyholder results` and `vt voter results` on every peer |
+| `host-kh.ts` | a keyholder daemon, now restartable between accept and release because of the file vault (CLI-03) |
+| `host-voter.ts` stages | `vt voter join`, `vt voter register`, `vt voter stage-association`, `vt voter answer-challenge`, `vt voter read-decision`, `vt voter cast`, `vt voter send`, `vt voter results` |
+| `run-lean.sh run` | `vt run election` |
+| `run-lean.sh selfcheck` | `vt selfcheck` |
+| loader hooks `s63-hooks.mjs`, `authority-hooks.mjs`, `hr5-hooks.mjs` | none needed: the shared code lives in `@votetorrent/workflows`, so `dist` loads under plain Node |
+| the in-memory vault | `FileKeyVault`, held by the daemon between calls |
+
+### Old JSON-RPC commands to `vt` verbs
+
+| Old command | `vt` replacement |
+|---|---|
+| `network create` | `vt officer found` |
+| `network join-code` | `vt officer mint` |
+| `network join <code>` | `vt voter join`, `vt keyholder join` |
+| `officer invite`, `keyholder invite` | `vt officer invite-keyholder` |
+| `invite accept <share>`, `keyholder accept` | `vt keyholder accept` |
+| `intake-key register` | not carried (part of the officer's intake setup) |
+| `admin set-scopes` | not carried as a standalone verb; the keyholder policy is `vt officer keyholder-policy` |
+| `election create` | `vt officer create-election` |
+| `election list`, `election show`, `network show`, `network revise`, `admin show` | not carried as standalone verbs |
+| `ballot propose`, `ballot submit`, `ballot confirm` | `vt officer ballot-submit` |
+| `tasks list`, `tasks sign` | `vt officer task-sign` |
+| `registration field-add` | not carried |
+| `registration sync` | `vt officer peer-sync` |
+| `registration approve`, `registration reject` | `vt officer approve`, `vt officer refuse` |
+| `registrants list` | `vt officer registrations` |
+| `keyholder dkg` | `vt keyholder dkg` |
+| `keys release` | `vt keyholder release` |
+| `register`, `registration status` | `vt voter register`, `vt voter read-decision` |
+| `vote cast` | `vt voter cast` |
+| `vote send` | `vt voter send` |
+| `election results` | `vt officer results`, `vt keyholder results`, `vt voter results` |
+
+### What is not carried over
+
+- Partial seeding with a hold on party `votetorrent` and the seeder's interactive menu. For a non-production party, start the daemons and run the verbs up to the stage you want; they stay live until `vt officer stop`, `vt keyholder stop` or `vt voter stop`.
+- A seed that phones can join: it needs party `votetorrent`, which `vt run election` refuses, and token-attested voters are refused there by design. This is deferred with the phone-role work; see the pending todo `2026-11-24-vt-seed-election-for-device-uat`.
+- The `LEAN_PHONE`, `LEAN_PHONE_KH`, `LEAN_PHONE_KH2` and `LEAN_PHONE_VOTER` phone modes. `vt run` keeps the `LEAN-WAIT` / `LEAN-GO` delegation lines so they can return.
+
+### Relay and run dirs (kept)
+
+`VT_LEAN_RELAY_ENV` still names a relay.env file with the four keys `RELAY_MULTIADDR=`, `PEER_ID=`, `LAN_IP=` and `STARTED_AT=`. Pass it as `--relay "$VT_LEAN_RELAY_ENV"`; the address has the shape `/dns4/<host>/tcp/<port>/wss/p2p/<relay peer id>` with angle-bracket example values only. Run state goes outside the repo, conventionally under `VT_LEAN_RUNS` (default `<checkout>/../vt-lean-runs`), and `vt` refuses an in-repo state dir. "One party at a time" is replaced by `--party`.

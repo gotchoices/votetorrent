@@ -1,5 +1,5 @@
 // results-agreement.ts: the results read every peer makes (phase 67 plan 30), and the agreement object the
-// ctl spec compares across the officer, the keyholders and the voters. Replaces tools/lean-rig/lean/lean-part2.ts
+// ctl spec compares across the officer, the keyholders and the voters. Replaces the retired lean rig's main driver
 // legRelease X3 (1330-1371: the same tally root on the officer and a keyholder within 120 s) and X5 (1407-1420:
 // the voters' read) with the shared `readElectionResults` (the Voter Results screen's read), the opened-set
 // check and a canonical agreement hash. Option codes never appear: counts are a sorted multiset plus

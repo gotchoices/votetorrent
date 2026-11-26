@@ -1,6 +1,6 @@
 // One FileRawStorage per cadre-core storage scope (the control scope and one per strand), each in its
 // own 0700 dir under `node/store/scope-<safe>`, so one network's blocks never share a keyspace with
-// another's (the apps' ISO-01 rule). Port of hr5-open.ts lines 62-86. `destroyScope` closes first:
+// another's (the apps' ISO-01 rule). Port of node builder lines 62-86. `destroyScope` closes first:
 // FileRawStorage shares its write log per directory, so a store removed from under a live instance
 // poisons the next one. `closeStores` releases every scope's store.lock after node.stop().
 

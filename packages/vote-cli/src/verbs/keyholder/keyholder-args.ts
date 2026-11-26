@@ -1,6 +1,6 @@
 // Arguments, the seat-share file reader, the per-call approval and the refusal class of the keyholder
-// verbs (`vt keyholder join|accept|dkg|release`). Replaces what tools/lean-rig/lean/host-kh.ts took from
-// its environment (the seat file path, the in-memory vault) and what lean-part2.ts legAccept/legDkg/
+// verbs (`vt keyholder join|accept|dkg|release`). Replaces what the retired lean rig's keyholder driver took from
+// its environment (the seat file path, the in-memory vault) and what main driver legAccept/legDkg/
 // legRelease took from the process-wide `S_` state.
 //
 // Secrecy rules (CONTEXT "Secrecy"): the seat share is read by ABSOLUTE PATH from a 0600, owner-owned,

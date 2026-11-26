@@ -2,7 +2,7 @@
 // plan 30): a VoteRecordWrapProvider that seals the record's data key with AES-256-GCM under the token-derived
 // KEK (`keys.deriveTokenKey(token, CLI_VOTE_RECORD_WRAP_INFO)`, one `approval.token()` per wrap or unwrap), the
 // four shared factories over the daemon's file kv and that provider, and a redacting VoteSendDebug sink.
-// Replaces the lean rig's host voter record handling (tools/lean-rig/host-voter/host-voter.ts 907-1047) with
+// Replaces the lean rig's host voter record handling (the retired lean rig's host voter 907-1047) with
 // the shared store, vault, receipt reader and sent store: no marker, guard, envelope or reveal logic is written
 // here. Error codes use the native set: an absent or refused token is CANCELED, a wrong token on unwrap is
 // UNWRAP_TAG_MISMATCH, anything else WRAP_FAILED / UNWRAP_FAILED. The token copy and the KEK are zero-filled.

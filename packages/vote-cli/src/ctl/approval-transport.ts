@@ -1,7 +1,7 @@
 // Client-side approval token transport for `vt <role> <verb>`: the `--token-file <path>`,
 // `--token-env` and `--token-stdin` flags (CONTEXT "Approval without biometrics or attestation": the
 // token is presented PER CALL by file path, env var or stdin). Replaces the rig's single process-held
-// signer and tools/vote-cli's device key: the client never signs and never keeps a token.
+// signer and the retired JSON-RPC vote-cli's device key: the client never signs and never keeps a token.
 //
 //  - `--token-file` is resolved to an absolute path and NOT read here: the daemon reads it on every
 //    token() call with its own mode/owner check (67-13 readApprovalToken).

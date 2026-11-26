@@ -1,8 +1,8 @@
 // `vt keyholder accept`: accept a keyholder SEAT invitation whose share text sits in a 0600 file
 // (CONTEXT "Workflow coverage": accept invitation (seat share)), through the shared
 // `acceptKeyholderInvitation` (@votetorrent/workflows/authority) with the daemon's file vault view
-// and its sealed identity store. Port of tools/lean-rig/lean/host-kh.ts 121-142 (the seat file wait,
-// the accept retry on a not-yet-replicated slot) and lean-part2.ts legAccept 847-880 (the
+// and its sealed identity store. Port of the retired lean rig's keyholder driver 121-142 (the seat file wait,
+// the accept retry on a not-yet-replicated slot) and main driver legAccept 847-880 (the
 // `acceptUnwraps` delta), with the share text and its private key registered in the daemon's
 // redactor BEFORE the driver sees them. Approval-class: the token comes only from this call.
 //

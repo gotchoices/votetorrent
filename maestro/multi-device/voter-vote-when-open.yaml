@@ -1,7 +1,8 @@
 # Journey (multi-device): on a registered Voter in a real election, wait (real clock, no dev
 # offset) until Home offers "Vote now", vote, read the receipt, then Send the vote to the pool.
-# Sending needs a pool of 3+ voters on the network (e.g. scripts/seed-election.sh voters holds
-# 2 host voters); the flow passes when every ballot reports sent.
+# Sending needs a pool of 3+ voters on the network (a host-seeded election on party `votetorrent`
+# holds 2 host voters; no in-repo seeder since the lean rig was retired, see `packages/vote-cli/README.md`,
+# Replaced tools); the flow passes when every ballot reports sent.
 # Biometrics: run through scripts/run.sh. Home only re-reads the election on focus, so the wait
 # loop toggles tabs to refocus it.
 appId: ${APP_ID}

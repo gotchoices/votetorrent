@@ -2,7 +2,7 @@
 // proves the ciphertext-only state (the lean rig's Q1: phase not reconstructable, every VoteBlock not
 // decryptable, the ballot needle absent raw and as hex from every ciphertext); after their `release` it
 // confirms `releasedCount >= --await-released` and `rejected === 0` (the officer-side confirmation 67-28 left
-// to this plan). Replaces tools/lean-rig/lean/lean-part2.ts legRelease 1245-1294. Read-only: no token (a token
+// to this plan). Replaces the retired lean rig's main driver legRelease 1245-1294. Read-only: no token (a token
 // key is `bad-arg`), no party gate; it never calls a release or key-task method and never returns a share, a
 // task or the timeline. No console, no process.env, no instanceof.
 

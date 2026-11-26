@@ -1,7 +1,7 @@
 // `vt officer peer-sync`: one officer sync over the shared 67-09 `createPeerSyncBinding` (the
 // Authority app's peer binding): intake staged registration and association requests from the strand,
 // publish decided registrations, drive association challenges and associations. Replaces the lean rig's
-// `officerSync` loop body (tools/lean-rig/lean/lean-part2.ts, the `binding.syncNow` call).
+// `officerSync` loop body (the retired lean rig's main driver, the `binding.syncNow` call).
 //
 // The token is OPTIONAL: an unattended sync imports and reads with the at-rest vault, and only a step
 // that must sign fails (`token-absent`, counted). With a token source the preflight runs first. In

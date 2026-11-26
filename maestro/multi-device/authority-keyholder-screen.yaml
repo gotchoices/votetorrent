@@ -1,7 +1,8 @@
 # Journey (multi-device): keyholder screens. Elections > <ELECTION_TITLE> > keyholder card >
 # Keyholder: invite status and DKG status row. Needs an election with keyholder seats on this
-# device's network (e.g. scripts/seed-election.sh keyholders, with this device joined as an
-# officer). The keyholder card has no testID, so it is opened by KEYHOLDER_NAME text.
+# device's network (a host-seeded election on party `votetorrent`, with this device joined as an
+# officer; no in-repo seeder since the lean rig was retired, see `packages/vote-cli/README.md`,
+# Replaced tools). The keyholder card has no testID, so it is opened by KEYHOLDER_NAME text.
 appId: ${APP_ID}
 name: "Authority: keyholder screen"
 tags:

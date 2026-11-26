@@ -1,6 +1,6 @@
 // `vt officer publish`: the officer publishes the tally computed by the shipped ElectionResultsEngine through
 // TallyPublicationEngine.publishElectionTally, the ONE call the Authority ElectionResultsScreen makes
-// (discretion choice 2), signed once through the 67-26 token signer. Replaces tools/lean-rig/lean/lean-part2.ts
+// (discretion choice 2), signed once through the 67-26 token signer. Replaces the retired lean rig's main driver
 // legRelease X4 (1372-1406). Approval-class: the token is read per call, the officer key is preflighted before
 // any engine read, `production-party` is refused; `published` and `already-published` succeed, every other
 // outcome refuses `publish-<outcome>` (the invalid-tally reason text is never carried). The readback counts

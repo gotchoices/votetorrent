@@ -1,4 +1,4 @@
-// The one-call ctl client (port of the rig's hr5-ctl ctlRaw with a per-peer token): it never rejects.
+// The one-call ctl client (port of the rig's ctl layer ctlRaw with a per-peer token): it never rejects.
 // status 0 = unreachable (no or bad ctl.port/ctl.token, connect error, timeout). It refuses a token file
 // another local user could read or swap BEFORE any network I/O, and no returned error ever carries the
 // peer dir, a file path or the token.

@@ -1,7 +1,7 @@
 // `vt officer create-election`: a threshold-N election on the CLI short timeline, through the shared
 // `createElection` workflow (@votetorrent/workflows/authority, the Authority's CreateElectionScreen
-// body). Replaces tools/lean-rig/lean/lean-part2.ts 717-747 (the hand-built init, the two signing
-// seams, the builder-less createElection) and tools/vote-cli/src/workflows/authority.mjs 227-291.
+// body). Replaces the retired lean rig's main driver 717-747 (the hand-built init, the two signing
+// seams, the builder-less createElection) and the retired JSON-RPC vote-cli's authority workflow 227-291.
 // Approval-class: the token is taken per call (`--token-file` / `--token-env` / `--token-stdin`).
 //
 // Check order: args allow-list, party gate, static argument and timeline validation (incl. the Voter's

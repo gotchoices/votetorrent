@@ -1,7 +1,7 @@
 // Verb-side per-call approval (PATTERNS: the client reads the token and sends it in the request body,
 // or forwards a file path; the verb builds an ApprovalContext for the ONE call and drops it). Replaces
-// the rig's process-wide officer signer (tools/lean-rig/lean/lean-part2.ts `S_.officerSign`) and
-// tools/vote-cli's device-held key: here nothing outlives the call.
+// the rig's process-wide officer signer (the retired lean rig's main driver `S_.officerSign`) and
+// the retired JSON-RPC vote-cli's device-held key: here nothing outlives the call.
 //
 // Two sources, exactly one per call:
 //  - `tokenFile` (absolute path): a 67-13 `createApprovalContext({ file })`, so the daemon re-reads the

@@ -1,4 +1,4 @@
-// The CLI short election timeline, built by the lean rig's rule (tools/lean-rig/lean/lean-part2.ts
+// The CLI short election timeline, built by the lean rig's rule (the retired lean rig's main driver
 // 722-734: votingStarts = T + lead, accruingVotes = votingStarts + window, then +60 s steps to closed;
 // registrationEnds = ballotsFinal = votingStarts - 60 s; date = closed; revisionDeadline =
 // ballotDeadline = votingStarts) and checked against the Voter app's OWN timeline rule through the

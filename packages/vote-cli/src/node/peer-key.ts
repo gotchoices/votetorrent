@@ -1,7 +1,7 @@
 // The peer's libp2p identity key: an Ed25519 protobuf, base64 inside `node/peer-key.json`, created
 // ONCE at 0600 (temp + link, so two racing daemons never both win) in the 0700 `node/` dir, and read
 // back with the private-file reader that refuses a group- or other-readable file. Port of the lean
-// rig's hr5-open.ts `peerKey`. Key bytes never reach a log, an error or a return value other than the
+// rig's node builder `peerKey`. Key bytes never reach a log, an error or a return value other than the
 // key object itself; errors carry a code only.
 
 import type { PrivateKey } from '@libp2p/interface'

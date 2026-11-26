@@ -1,7 +1,7 @@
 // `vt officer task-sign`: find the ballot's signature task and sign (or reject) it through the shared
 // `findBallotSignatureTask` / `signTask` / `rejectTask` (@votetorrent/workflows/authority, the
 // Authority's SignatureTaskScreen body), then read the ballot's confirmation back. Replaces
-// tools/lean-rig/lean/lean-part2.ts 802-815 and tools/vote-cli/src/workflows/authority.mjs 420-440.
+// the retired lean rig's main driver 802-815 and the retired JSON-RPC vote-cli's authority workflow 420-440.
 // Approval-class unless `--reject`: a rejection never reads the token (SignatureTaskScreen D-12, kept
 // in the shared rejectTask, which has no signer parameter), so `--reject` with any token key is
 // `bad-arg`.

@@ -11,8 +11,10 @@
 #       (JOIN_VIA=paste). Needs a reachable relay: pass --env RELAY_MULTIADDR=<your relay>.
 #
 #   host-seeded-voter --device <serial> --join-code-file <file>
-#       A host-seeded election (scripts/seed-election.sh voters: officer + keyholders + 2 host
-#       voters, officer auto-approves registrations, held live). The Voter joins with the code in
+#       A host-seeded election on party `votetorrent` (host officer that approves, keyholders and
+#       2 host voters, held live); there is no in-repo seeder since the lean rig was retired, see
+#       `packages/vote-cli/README.md` (Replaced tools) and the pending device-UAT seeding todo.
+#       The Voter joins with the code in
 #       <file>, registers and waits for approval, then votes when voting opens and sends.
 #       Steps: voter-join-network (JOIN_VIA=type) -> voter-register-and-await-decision ->
 #       voter-vote-when-open. Pass --env VOTE_PICK_1=<option code> ... for that ballot.

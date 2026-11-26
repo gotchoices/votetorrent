@@ -337,3 +337,4 @@ Recommended next, in order:
 6. Choose the F1 real fix, before any work with more than one authority.
 7. Commit the Maestro suite once one flow passes on a device. Run `tools/lean-rig` once and merge it.
 8. Then steps 4 and 5 above: weak phones and release timing, and matchmaking when upstream moves.
+Addendum 2026-11-26: `tools/lean-rig`, `tools/vote-cli` and `scripts/seed-election.sh` were deleted after the vt CLI acceptance run; `vt` (`packages/vote-cli`, see its README, Replaced tools) replaces them.

@@ -1,7 +1,7 @@
 // `vt officer results` (and, through the keyholder group, `vt keyholder results`): the authority-side read of
 // the election results through the shared `readElectionResults` (67-19, the Voter Results screen's read, the
 // same two engine calls the Authority ElectionResultsScreen makes) with the opened-set preimage check and the
-// agreement hash every peer computes (src/proof). Replaces tools/lean-rig/lean/lean-part2.ts legRelease X3
+// agreement hash every peer computes (src/proof). Replaces the retired lean rig's main driver legRelease X3
 // (1330-1371). Read-only: no token (a token key is `bad-arg`), no party gate, no officer identity; it works on
 // ANY authority VerbContext through `ctx.openNetwork(hash)` alone. The reply is the voter `results` reply.
 // This module also holds the est opener and the officer results deps the other three results verbs share.

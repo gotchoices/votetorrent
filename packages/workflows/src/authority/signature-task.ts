@@ -4,7 +4,7 @@
  * Extracted by phase 67 plan 10 from `apps/VoteTorrentAuthority/src/screens/tasks/SignatureTaskScreen.tsx`
  * `sign()` (lines 105-140, `signTask`) and `reject()` (lines 150-173, `rejectTask`);
  * `findBallotSignatureTask` is the task lookup the lean rig and the CLI do by hand
- * (`tools/lean-rig/lean/lean-part2.ts:806`, `tools/vote-cli/src/workflows/authority.mjs:427`).
+ * (`the retired lean rig's main driver:806`, `the retired JSON-RPC vote-cli's authority workflow:427`).
  *
  * Secrecy contract: nothing here logs. The signer arrives as a callback factory invoked exactly once per
  * `signTask`; `rejectTask` has NO signer parameter at all, so a rejection can never produce an officer

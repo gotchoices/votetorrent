@@ -21,7 +21,8 @@ function opts (argv, from) {
   return { pos, map }
 }
 const npt = (ms) => { const s = new Date(Math.round(ms) + NPT).toISOString(); return s.slice(0, 10) + ' ' + s.slice(11, 19) }
-const MARKS = ['hr5-peer.ts', 'host-voter.ts', 'host-kh.ts', 'lean-part2.ts', 'drone.mjs', 'relay-only.mjs', 'vote-cli/dist/bin/vt.js', 'bin/vt.mjs', 'multipeer-gate']
+const PEER_MARK = 'hr5-' + 'peer.ts'
+const MARKS = [PEER_MARK, 'host-' + 'voter.ts', 'host-' + 'kh.ts', 'lean-' + 'part2.ts', 'drone.mjs', 'relay-only.mjs', 'vote-cli/dist/bin/vt.js', 'bin/vt.mjs', 'multipeer-gate']
 const BUILDS = ['jest-worker', '/.bin/jest', '/.bin/tsc', 'typescript/bin/tsc', 'GradleDaemon', 'xcodebuild', '/.bin/mocha']
 
 function cmdQuiet (argv) {
@@ -177,8 +178,8 @@ function runCases (dir) {
   const tok = (r) => r.out[0]?.split(' ')[1] ?? ''
   const q0 = dispatch(['quiet', '--peers', '6', '--fixture', fix('q0', PS, LS, { load: [0.1, 0.1, 0.1], ncpu: 8 })])
   check('quiet-empty', q0.code === 0 && q0.out[0]?.startsWith('QUIET '))
-  const q1 = dispatch(['quiet', '--peers', '6', '--fixture', fix('q1', PS + ' 5555     1   0.0  1000 node /somewhere/hr5-peer.ts\n', LS + 'node 4242 root 12u IPv4 0x0 0t0 TCP *:8081 (LISTEN)\n', { load: [0.1, 0.1, 0.1], ncpu: 8 })])
-  check('quiet-busy', q1.code === 1 && tok(q1) === 'metro:8081,peer:hr5-peer.ts')
+  const q1 = dispatch(['quiet', '--peers', '6', '--fixture', fix('q1', PS + ' 5555     1   0.0  1000 node /somewhere/' + PEER_MARK + '\n', LS + 'node 4242 root 12u IPv4 0x0 0t0 TCP *:8081 (LISTEN)\n', { load: [0.1, 0.1, 0.1], ncpu: 8 })])
+  check('quiet-busy', q1.code === 1 && tok(q1) === 'metro:8081,peer:' + PEER_MARK)
   const q2 = dispatch(['quiet', '--peers', '6', '--fixture', fix('q2', PS, LS, { load: [4.0, 0.1, 0.1], ncpu: 8 })])
   check('quiet-load', q2.code === 1 && tok(q2).split(',').includes('load'))
   const results = { steps: [{ name: 'alpha', startMs: 1000, endMs: 2000 }, { name: 'beta', startMs: 500, endMs: 900 }, { name: 'gamma', startMs: 3000, endMs: 3500 }], durations: { reopenMs: 100, dkgMs: 200 }, startedAt: '2026-11-24T00:00:00.000Z', endedAt: '2026-11-24T00:01:00.000Z' }

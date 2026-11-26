@@ -1,5 +1,5 @@
 // The crash recorder: `uncaughtException`, `unhandledRejection` and every thrown verb append one JSON
-// line to a 0600 `crash.jsonl` (port of hr5-peer.ts's recorders onto the 67-12 error view). A record
+// line to a 0600 `crash.jsonl` (port of peer driver's recorders onto the 67-12 error view). A record
 // is `{ at, where, name, code?, message, chain }`: redacted first, the message cut to 200 chars, the
 // cause chain at most 6 names, never a stack trace. The file is capped at `maxRecords`. The process
 // handlers keep the daemon running (as hr5 did) and print only a sanitised name.

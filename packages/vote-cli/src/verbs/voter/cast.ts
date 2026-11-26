@@ -1,6 +1,6 @@
 // `vt voter cast`: build and sign the vote with K_vote under the per-call token, seal the record with the shared
 // vault under the CLI's token-derived wrap key, and save it with the shared store over the daemon's file kv,
-// all through the shared `castVote` (67-22, the Voter's Submit). Replaces tools/lean-rig/host-voter/host-voter.ts
+// all through the shared `castVote` (67-22, the Voter's Submit). Replaces the retired lean rig's host voter
 // 907-1047 (selection rule `options[(N - 1) % len]`, build, sign). Approval-class: the token is read per call,
 // the record is sealed before the store writes it, and the cast's choice projection (ballot id plus answers, no
 // nonce) goes ONLY to a new 0600 file under `secrets/`, whose path the reply returns. The vote plaintext, the

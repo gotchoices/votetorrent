@@ -1,5 +1,5 @@
 // `vt voter send`: pool the saved vote through the authority's rendezvous with the shared `runVoteSend` (67-22,
-// the Voter's send flow) over `sendSavedVote` and vote-engine's PoolAgent. Replaces tools/lean-rig/host-voter/
+// the Voter's send flow) over `sendSavedVote` and vote-engine's PoolAgent. Replaces the retired lean rig/host-voter/
 // host-voter.ts 976-1047 (the pool wiring). Approval-class because the consent signature uses K_vote, but the
 // saved-vote marker is read with NO token and the shared flow runs the reachability probe BEFORE `openRecord`,
 // so an unreachable or absent network costs zero token reads and zero vault prompts. The reply carries ids,

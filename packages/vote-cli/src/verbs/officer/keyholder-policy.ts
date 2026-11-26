@@ -1,7 +1,7 @@
 // `vt officer keyholder-policy`: read, check or propose the election's keyholder policy (seat names
 // and threshold) through the shared `checkElectionKeyholders` / `proposeElectionRevision`
 // (@votetorrent/workflows/authority, the Authority's EditElectionScreen body). Replaces the rig's
-// direct `ElectionRevision` read (tools/lean-rig/lean/lean-part2.ts 758-761) and tools/vote-cli's
+// direct `ElectionRevision` read (the retired lean rig's main driver 758-761) and the retired JSON-RPC vote-cli's
 // keyholder edits. NOT approval-class: `adjustElection` is non-signing, so the token keys are not
 // allowed here and passing one is `bad-arg`.
 //

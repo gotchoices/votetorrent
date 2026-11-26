@@ -1,8 +1,8 @@
 // `vt officer invite-keyholder`: mint one keyholder SEAT invitation through the shared
 // `inviteKeyholderSeat` (@votetorrent/workflows/authority, the KeyholderInvitationScreen send path)
 // and hand the serialized share over as a NEW 0600 file under the peer's `secrets/`. Replaces
-// tools/lean-rig/lean/lean-part2.ts 749-757 (the hand-rolled key, expiry and JSON.stringify share) and
-// tools/vote-cli/src/workflows/authority.mjs 625-636. Approval-class.
+// the retired lean rig's main driver 749-757 (the hand-rolled key, expiry and JSON.stringify share) and
+// the retired JSON-RPC vote-cli's authority workflow 625-636. Approval-class.
 //
 // The reply carries the file path, an 8-character suffix of the public invite key, counts and timings:
 // never the share, the seat private key or the whole invite key (a 16-char window of the share). The

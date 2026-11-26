@@ -446,11 +446,12 @@ describe('officer invite accept (66.1 D-12)', () => {
 })
 
 /**
- * R-62 (66.1-09 finding F-09-4): MIRROR of the officers mapping in
- * tools/vote-cli/src/workflows/authority.mjs adminSetScopes. vote-cli has no unit harness and that module
- * loads the built vote-engine dist and the CadreNode device, so the mapping is copied here verbatim (the
- * `const target`, `const scopes` and `return` lines are byte-identical to the shipped ones) instead of
- * calling adminSetScopes. `device` stands in for the vote-cli device so those lines stay identical.
+ * R-62 (66.1-09 finding F-09-4): MIRROR of the officers mapping in the retired JSON-RPC vote-cli's
+ * `adminSetScopes` (that tool was deleted with the lean rig; `packages/vote-cli/README.md` "Replaced tools"
+ * says how to read it from git history). It had no unit harness and loaded the built vote-engine dist and
+ * the CadreNode device, so the mapping is copied here verbatim (the `const target`, `const scopes` and
+ * `return` lines are byte-identical to the shipped ones) instead of calling adminSetScopes, and this copy
+ * is now this test's own fixture. `device` stands in for that tool's device so those lines stay identical.
  */
 function adminSetScopesOfficers (details: AdminDetails, p: { user?: string; title?: string; scopes?: string }, deviceUserId: string): OfficerSelection[] {
   const device = { user: { id: deviceUserId } }

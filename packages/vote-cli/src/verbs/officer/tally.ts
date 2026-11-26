@@ -1,7 +1,7 @@
 // `vt officer tally`: the officer's decrypt, validate and tally through the shipped ElectionResultsEngine
 // (the same call the Authority ElectionResultsScreen makes), followed by the opened-set preimage check (the
 // lean rig's X1: every block opens, the per-option counts equal the engine's tally, and with `--expected-files`
-// the preimage hash equals the voters' choice files' hash). Replaces tools/lean-rig/lean/lean-part2.ts legRelease
+// the preimage hash equals the voters' choice files' hash). Replaces the retired lean rig's main driver legRelease
 // 1295-1371. Approval-class without signing (discretion choice 3): the token is read per call and the officer
 // key is preflighted (presence, zero signatures) before any engine read; `production-party` is refused. Option
 // codes, shares, the secret key and the tally tree never appear in the reply. No console, no process.env,

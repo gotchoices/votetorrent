@@ -1,4 +1,4 @@
-// Secret registry and redaction, ported from the lean rig (lean-part2.ts secret/redact and the host-voter
+// Secret registry and redaction, ported from the lean rig (main driver secret/redact and the host-voter
 // variant). There is NO module-level registry: colocated peers in one process each hold their own
 // SecretRegistry, so one peer's secrets can never leak through another peer's redactor.
 //

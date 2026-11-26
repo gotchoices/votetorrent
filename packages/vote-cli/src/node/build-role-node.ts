@@ -1,7 +1,7 @@
 // The role node builder: ONE Node CadreNode per peer over per-scope FileRawStorage, a stable 0600 peer
 // key and file-backed durable slots, built from the shared option set (`buildCadreNodeOptions`) and
 // started by the shared boot sequence (`bootCadreNode`) of @votetorrent/workflows, exactly as both apps'
-// CadreNodeProviders are. Port of the lean rig's hr5-open.ts `buildRoleNode` with its inline option
+// CadreNodeProviders are. Port of the lean rig's node builder `buildRoleNode` with its inline option
 // block REPLACED by the shared builder, its shared `party.json` replaced by a `partyId` parameter, and
 // its isolation gater kept only under `--instruments`.
 //

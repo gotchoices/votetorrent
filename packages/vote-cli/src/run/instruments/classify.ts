@@ -1,4 +1,4 @@
-// A port of tools/lean-rig/lib/classify.mjs parseLog + classifyRun over rig-shaped wall leg logs.
+// A port of the retired lean rig's classifier parseLog + classifyRun over rig-shaped wall leg logs.
 //
 // Deviation (recorded in 67-31-SUMMARY.md and here): the phase-64 PINS / MAIN_EVENT_MIN stack gate is
 // NOT ported, because those pins name a superseded stack. `classifyRun` records `rec.stack` but never

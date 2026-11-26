@@ -1,5 +1,5 @@
 // Error-view classifier, hidden/thrown/late wall counters and the D-14 reading. Ported from the rig
-// (tools/lean-rig/lean/lean-part2.ts 100-160). The three error-name literals are assembled from
+// (the retired lean rig's main driver 100-160). The three error-name literals are assembled from
 // fragments so this file never trips a wall grep, and no error text is ever re-emitted.
 
 export type WallPath = 'hidden' | 'thrown' | 'late'

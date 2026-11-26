@@ -6,7 +6,7 @@
  *
  * `withKeyholderSession` lives here, not in the app's seat vault, because accept (`keyholder-identity.ts`),
  * the DKG driver and the release ceremony all call it, and those modules are loaded under plain Node by the
- * host lean driver (64-lean `lean-part2.ts`) and by the vt CLI. The seat vault stays in the app: it
+ * `vt` CLI (`packages/vote-cli`). The seat vault stays in the app: it
  * value-imports the app key vault (the native secret-wrap module), which Node cannot load, so this shared
  * file must never value-import anything. bcbf1902 put the helper in the seat vault and broke that driver.
  *

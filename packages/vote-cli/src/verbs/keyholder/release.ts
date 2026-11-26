@@ -2,7 +2,7 @@
 // open (CONTEXT "Workflow coverage": release share), through the shared `releaseKeyholderShare`
 // (@votetorrent/workflows/authority) over the release-key task the keys-tasks engine seeds at the
 // head of `getKeysToRelease` (D-20 pull-and-seed; nothing here schedules). Port of
-// tools/lean-rig/lean/host-kh.ts 161-184 and lean-part2.ts legRelease 1245-1295. Approval-class and
+// the retired lean rig's keyholder driver 161-184 and main driver legRelease 1245-1295. Approval-class and
 // idempotent: a repeat on an already-released task is still passed to the ceremony (the engine
 // answers `already-released` with zero vault reads) and reports `alreadyReleased: true`.
 //

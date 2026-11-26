@@ -1,5 +1,5 @@
 // The role's NetworksEngine over the shared strand factory and the shared joined-networks store (port
-// of hr5-open.ts `roleNetworksEngine` / `openRoleNetwork`). The authority kind wraps `create` with the
+// of node builder `roleNetworksEngine` / `openRoleNetwork`). The authority kind wraps `create` with the
 // founding window; the voter kind probes the control connections before the joined check (the Voter
 // binding's order, 67-15). `openRoleNetwork` opens a network already in `recentNetworks` and returns
 // the established context, on which NetworksEngine.open already ran `registerDbPlugins`.

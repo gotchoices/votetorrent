@@ -1,7 +1,8 @@
 # Journey (multi-device): on a Voter that has joined a real network with an election, submit a
 # registration request and keep the Confirmation screen open until the election office decides.
 # Pair with multi-device/authority-registration-decision.yaml on the officer's device, or with a
-# host officer that auto-approves (scripts/seed-election.sh voters). Does NOT clear app data.
+# host officer that auto-approves (a host-seeded election on party `votetorrent`; no in-repo seeder
+# since the lean rig was retired, see `packages/vote-cli/README.md`, Replaced tools). Does NOT clear app data.
 # Biometrics: run through scripts/run.sh (host fingerprint helper).
 appId: ${APP_ID}
 name: "Voter: register and wait for the officer's decision"

@@ -1,7 +1,7 @@
 // The per-peer HTTP control endpoint: 127.0.0.1 on an ephemeral port, every request gated on the
 // x-vt-token header (SHA-256 digests compared with timingSafeEqual), verbs dispatched from a static
 // registry, a 64 KiB body cap, a redacted 200-char error view, 0600 files in a 0700 dir and ctl.port
-// written LAST so a poller on it implies READY. Port of the lean rig's hr5-peer server with the
+// written LAST so a poller on it implies READY. Port of the lean rig's peer driver server with the
 // `module` override dropped, the `!==` token compare replaced and the role header added.
 
 import { createHash, timingSafeEqual } from 'node:crypto'

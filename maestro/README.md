@@ -276,8 +276,10 @@ because both debug apps share the one Metro on :8081.
   2. The Voter taps Paste and joins.
 
   Needs a relay both app nodes can reach: `--env RELAY_MULTIADDR=...`.
-- **`host-seeded-voter --device <s> --join-code-file <f>`.** Run `scripts/seed-election.sh voters`
-  first. It holds a host officer that auto-approves, keyholders and two host voters. The Voter then
+- **`host-seeded-voter --device <s> --join-code-file <f>`.** Needs a host-seeded election on party
+  `votetorrent` (no in-repo seeder since the lean rig was retired; see `packages/vote-cli/README.md`,
+  Replaced tools, and the pending device-UAT seeding todo). It holds a host officer that
+  auto-approves, keyholders and two host voters. The Voter then
   joins with that code, registers, waits for approval, votes when voting opens and sends to the pool.
 - **`officer-approves --authority-device <a> --voter-device <v> --join-code-file <f>`.** The Voter
   joins and submits, the officer approves on the Authority device, and the Voter relaunches showing

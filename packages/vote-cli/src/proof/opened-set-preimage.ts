@@ -3,7 +3,7 @@
 // rule V9: import-free, exports `openedSetPreimage`), and an app may never import a vote-cli file (CLI-04), so
 // this file is a second, import-free copy of the same pure function, pinned byte-equal after comment
 // stripping and equal on fixtures by test/opened-set-preimage.spec.ts. Replaces the hashing half of
-// tools/lean-rig/lean/lean-part2.ts legRelease X1 (1295-1328).
+// the retired lean rig's main driver legRelease X1 (1295-1328).
 //
 // Host side: build the expected entries from the choices that were cast, call this function, take the lowercase
 // hex sha256 of the UTF-8 of its result, and compare that with the opened set's digest.

@@ -2,9 +2,9 @@
 // OfficerVerbContext) to the officer election verbs: the refusal class, the argument allow-list, the
 // production-party gate, network access by hash (the hash is always an ARGUMENT), the election and
 // signature-task engines over the established network context, the token-gated signer factory and the
-// per-context write serialization. Replaces what tools/lean-rig/lean/lean-part2.ts legElection took
+// per-context write serialization. Replaces what the retired lean rig's main driver legElection took
 // from its process-wide `roles` map (ctx, sign, engine; lines 697-716, 802-804) and what
-// tools/vote-cli/src/workflows/authority.mjs took from its device record.
+// the retired JSON-RPC vote-cli's authority workflow took from its device record.
 //
 // Context members read here (nowhere else in the election verbs): partyId, secretsDir, secrets,
 // device.vault, user, engine() (through officerEngine). No console, no process.env, no instanceof.

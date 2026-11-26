@@ -1,7 +1,7 @@
 // `vt voter results`: the voter's read of the election results through the shared `readElectionResults` (67-19,
 // the Voter Results screen's read) with the opened-set preimage check and the agreement hash every peer
-// computes (src/proof). Replaces tools/lean-rig/lean/lean-part2.ts legRelease X5 (1407-1420) and
-// tools/lean-rig/host-voter/host-voter.ts 1049+. Read-only: no token (a token key is `bad-arg`), no party
+// computes (src/proof). Replaces the retired lean rig's main driver legRelease X5 (1407-1420) and
+// the retired lean rig's host voter 1049+. Read-only: no token (a token key is `bad-arg`), no party
 // gate. The reply holds ids, counts, booleans, 8-char root prefixes, hashes and timings; option codes never
 // appear. No console, no process.env, no instanceof.
 

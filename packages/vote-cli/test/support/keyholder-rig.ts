@@ -2,7 +2,7 @@
 // loopback relay, driven only through `callCtl`, with per-peer clean restart, ctl reply capture, vault
 // state snapshots (names and hashes, never contents), step timings and the secret scan. The election
 // is set up through the officer verbs of 67-24 and 67-26 in the lean rig's proven order
-// (tools/lean-rig/lean/lean-part2.ts 715-800): found, owner-setup, one mint per keyholder, the
+// (the retired lean rig's main driver 715-800): found, owner-setup, one mint per keyholder, the
 // keyholder joins, create-election, two invite-keyholder seats, ballot-submit. Every officer verb and
 // arg name sits in ONE adapter object (OFFICER_VERBS) so a rename changes one line.
 //

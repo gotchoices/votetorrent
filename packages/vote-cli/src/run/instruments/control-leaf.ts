@@ -1,4 +1,4 @@
-// A port of the phase-64 instrument tools/lean-rig/lib/control-leaf.mjs. The reads below are LOCAL
+// A port of the phase-64 instrument the retired lean rig's control-leaf reader. The reads below are LOCAL
 // ONLY: getBlock never fetches or restores, and the result carries revs and 8-character action
 // prefixes, never a block id, a peer id or a full action id.
 //

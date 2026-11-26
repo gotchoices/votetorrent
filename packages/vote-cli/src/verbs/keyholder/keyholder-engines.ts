@@ -1,6 +1,6 @@
 // Per-call keyholder engines over ONE open network, the identity-for-election lookup, the unwrap
-// meter and the per-peer busy lock. Port of tools/lean-rig/lean/host-kh.ts `getEngine` (the four
-// engines over the established context and the lazily built KeysTasksEngine) and of lean-part2.ts
+// meter and the per-peer busy lock. Port of the retired lean rig's keyholder driver `getEngine` (the four
+// engines over the established context and the lazily built KeysTasksEngine) and of main driver
 // legAccept/legDkg/legRelease's `authPromptCount` deltas, onto 67-23's daemon context.
 //
 // Engines are built for THIS call only, over the approval view this call built from its own token
@@ -129,11 +129,11 @@ export interface KeyholderEngines {
   invitations: InvitationEngine
   dkg: KeyholderDkgEngine
   keyRelease: KeyReleaseEngine
-  /** Lazily built (host-kh.ts `getEngine('keysTasksEngine')`). */
+  /** Lazily built (keyholder driver `getEngine('keysTasksEngine')`). */
   keysTasks(): KeysTasksEngine
   /** The shared drivers' engine lookup: `keyholderDkg`, `invitations`, `keysTasksEngine`. */
   getEngine<T>(name: string): Promise<T>
-  /** The accept driver's seat facts (host-kh.ts): the DKG status, or undefined on a throw. */
+  /** The accept driver's seat facts (keyholder driver): the DKG status, or undefined on a throw. */
   readKeyholderSeatFacts(electionId: string): Promise<SeatFacts | undefined>
 }
 

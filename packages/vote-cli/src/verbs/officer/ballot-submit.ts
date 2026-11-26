@@ -1,7 +1,7 @@
 // `vt officer ballot-submit`: propose a ballot and submit it for confirmation through the shared
 // `proposeBallot` / `submitBallot` / `readBallotConfirmation` (@votetorrent/workflows/authority, the
-// Authority's EditBallotScreen body). Replaces tools/lean-rig/lean/lean-part2.ts 771-801 (the default
-// needle ballot, proposeBallot, submitBallotForConfirmation) and tools/vote-cli/src/workflows/authority.mjs
+// Authority's EditBallotScreen body). Replaces the retired lean rig's main driver 771-801 (the default
+// needle ballot, proposeBallot, submitBallotForConfirmation) and the retired JSON-RPC vote-cli's authority workflow
 // 364-403. Approval-class: the lazy submit signer may sign above a `ceb` threshold of 1.
 //
 // Without `--ballot-file` the rig's default ballot is built: one question, two options, option 0's
@@ -57,7 +57,7 @@ function question(code: string, title: string, instructions: string, options: Ar
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0
 
-/** The tools/vote-cli ballot file shape: `{ questions: [{ code, title, options: [{ code, title }] }], districts? }`. */
+/** The the retired JSON-RPC vote-cli ballot file shape: `{ questions: [{ code, title, options: [{ code, title }] }], districts? }`. */
 function readBallotFile(path: unknown): BallotShape {
   if (typeof path !== 'string' || !isAbsolute(path)) refuse('ballot-file-invalid')
   let st

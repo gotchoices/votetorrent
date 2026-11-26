@@ -1,5 +1,5 @@
 // opened-set-check.ts: the opened-set preimage check every `tally` and `results` call runs (phase 67 plan 30).
-// Replaces tools/lean-rig/lean/lean-part2.ts legRelease X1 (1295-1328) and the per-option comparison of X3
+// Replaces the retired lean rig's main driver legRelease X1 (1295-1328) and the per-option comparison of X3
 // (1330-1371): reconstruct the election key from the PUBLIC released shares, open every VoteBlock and every
 // vote entry, hash `openedSetPreimage` of the projected entries, and require zero open failures, per-option
 // counts equal to the engine's tally and, with expected files, the same preimage hash as the voters' choice
