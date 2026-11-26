@@ -10,7 +10,7 @@
 import { mkdirSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { startCtlServer, type CtlServerHandle } from '../../src/ctl/ctl-server.js'
-import { isRole, type Role } from '../../src/ctl/protocol.js'
+import { isRole, type Role, type VerbHandler } from '../../src/ctl/protocol.js'
 import { defineVerbRegistry } from '../../src/ctl/verb-registry.js'
 
 interface FakeCtx {
@@ -31,8 +31,17 @@ function flag (argv: string[], name: string): string | undefined {
 
 const handles: CtlServerHandle[] = []
 
-const registry = defineVerbRegistry<FakeCtx>({
-  echo: (ctx, args) => ({ n: args.n ?? null, peer: args.peer ?? null, label: ctx.label, role: ctx.role, pid: process.pid }),
+/** Mimics the verbs' strict allow-lists: a body carrying `peer` is refused before any handler runs. */
+const strict = (entries: Record<string, VerbHandler<FakeCtx>>): Record<string, VerbHandler<FakeCtx>> =>
+  Object.fromEntries(Object.entries(entries).map(([name, handler]) => [name, (ctx: FakeCtx, args: Record<string, unknown>) => {
+    if (Object.prototype.hasOwnProperty.call(args, 'peer')) {
+      throw Object.assign(new Error('BadRequest'), { name: 'BadRequest', code: 'bad-request' })
+    }
+    return handler(ctx, args)
+  }]))
+
+const registry = defineVerbRegistry<FakeCtx>(strict({
+  echo: (ctx, args) => ({ n: args.n ?? null, label: ctx.label, pid: process.pid }),
   fail: () => {
     throw Object.assign(new Error('the fake verb failed on purpose'), { name: 'FakeVerbError' })
   },
@@ -56,13 +65,18 @@ const registry = defineVerbRegistry<FakeCtx>({
     preload: (globalThis as { __vtPreload?: unknown }).__vtPreload === 1,
     cpuProf: process.execArgv.includes('--cpu-prof')
   }),
+  'node-flags': () => ({ flags: [...process.execArgv] }),
+  'instr-env': () => ({
+    instrDir: process.env.VT_INSTR_DIR ?? null,
+    instrRole: process.env.VT_INSTR_ROLE ?? null
+  }),
   stop: () => {
     setTimeout(() => {
       void Promise.all(handles.map((h) => h.close())).finally(() => process.exit(0))
     }, 50)
     return { stopping: true }
   }
-})
+}))
 
 async function main (): Promise<void> {
   const argv = process.argv.slice(2)

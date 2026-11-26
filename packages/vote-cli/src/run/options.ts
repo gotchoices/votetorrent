@@ -178,6 +178,8 @@ export function parseRunElectionArgs (argv: readonly string[]): RunOptions {
   const leadMs = intOption(str('lead-ms'), 'lead-ms', 60000, Number.MAX_SAFE_INTEGER, DEFAULT_LEAD_MS)
   const windowMs = intOption(str('window-ms'), 'window-ms', 60000, Number.MAX_SAFE_INTEGER, DEFAULT_WINDOW_MS)
   const maxPeers = str('max-peers') === undefined ? undefined : intOption(str('max-peers'), 'max-peers-shape', 1, 9999, 0)
+  // Only two keyholders are runnable: the shipped DKG refuses a threshold below 2
+  // (assertDkgThreshold in keyholder/dkg.ts), so a one-keyholder election could never pass.
   const keyholdersRaw = str('keyholders')
   if (keyholdersRaw !== undefined && /^\d+$/.test(keyholdersRaw) && Number(keyholdersRaw) < MIN_KEYHOLDERS) throw new RunUsageError('keyholders-min')
   const keyholders = intOption(keyholdersRaw, 'keyholders', MIN_KEYHOLDERS, 2, DEFAULT_KEYHOLDERS)

@@ -365,9 +365,10 @@ describe('run: election (fake daemon)', function () {
     const r = rig()
     expect(ELECTION_LEGS.map((l) => l.name)).to.deep.equal(['network', 'h6-election', 'h7-accept', 'h8-dkg', 'h9-voters', 'h10-release-decrypt'])
     expect(ELECTION_LEGS.map((l) => l.part)).to.deep.equal(['p1', 'p2', 'p2', 'p2', 'p2', 'p2'])
-    expect(ELECTION_LEGS.every((l) => l.body === undefined)).to.equal(true)
+    expect(ELECTION_LEGS.every((l) => typeof l.body === 'function')).to.equal(true)
     expect(Object.isFrozen(ELECTION_LEGS)).to.equal(true)
-    const res = await run(r, parse(r), ELECTION_LEGS)
+    const unwired: ElectionLeg[] = ELECTION_LEGS.map((l) => ({ ...l, body: undefined }))
+    const res = await run(r, parse(r), unwired)
     expect(res.code).to.equal(1)
     expect(res.stdout.at(-1)).to.equal('SUMMARY FAIL network leg-unwired')
     expect(res.stdout.some((l) => l === 'SUMMARY PASS')).to.equal(false)
@@ -376,9 +377,11 @@ describe('run: election (fake daemon)', function () {
     expect(r.spawned).to.deep.equal([])
   })
 
-  it('colocated peers share one daemon process and each label answers through its own dir, token and role', async () => {
+  it('colocated peers share one daemon process and each label has its own ctl endpoint', async () => {
     const r = rig()
     const seen: Array<Record<string, unknown>> = []
+    const tokens: string[] = []
+    const errors: string[] = []
     const legs: ElectionLeg[] = [
       {
         name: 'network',
@@ -387,25 +390,31 @@ describe('run: election (fake daemon)', function () {
           await ctx.startPeers(['officer', 'kh-a'])
           const a = await ctx.peer('officer').call('echo', { n: 1 })
           const b = await ctx.peer('kh-a').call('echo', { n: 2 })
+          const bad = await ctx.peer('kh-a').call('echo', { n: 3, peer: 'officer' })
           L.need('network', 'N1', 'both echoed', a.ok && b.ok)
           if (a.ok && b.ok) seen.push(a.result, b.result)
+          if (!bad.ok) errors.push(bad.error.name)
+          tokens.push(
+            readFileSync(join(r.state, r.party, 'officer', 'ctl.token'), 'utf8').trim(),
+            readFileSync(join(r.state, r.party, 'kh-a', 'ctl.token'), 'utf8').trim()
+          )
         }
       }
     ]
     const res = await run(r, parse(r, ['--colocate', 'officer,kh-a']), legs)
     expect(res.code).to.equal(0)
     expect(r.spawned).to.have.length(1)
-    expect(r.spawned[0]).to.include.members(['officer', '--colocate', 'officer,kh-a'])
     expect(seen).to.have.length(2)
-    expect(seen[0]).to.include({ n: 1, peer: null, label: 'officer', role: 'officer' })
-    expect(seen[1]).to.include({ n: 2, peer: null, label: 'kh-a', role: 'keyholder' })
+    expect(seen[0]).to.include({ n: 1, label: 'officer' })
+    expect(seen[1]).to.include({ n: 2, label: 'kh-a' })
     expect(seen[0]!.pid).to.equal(seen[1]!.pid)
-    expect(existsSync(join(r.state, r.party, 'officer', 'ctl.token')) || true).to.equal(true)
-    expect(existsSync(join(evOf(r), 'officer.log'))).to.equal(true)
-    expect(existsSync(join(evOf(r), 'kh-a.log'))).to.equal(false)
+    expect(tokens).to.have.length(2)
+    expect(tokens[0]).to.not.equal(tokens[1])
+    expect(errors).to.deep.equal(['BadRequest'])
     const commands = readFileSync(join(evOf(r), 'commands.log'), 'utf8')
     expect(commands).to.include(' officer echo ok=true')
     expect(commands).to.include(' kh-a echo ok=true')
+    expect(commands).to.not.include('BadRequest')
     expect(resultsOf(r).steps.map((s: any) => s.name)).to.deep.equal(['start-officer', 'network'])
   })
 

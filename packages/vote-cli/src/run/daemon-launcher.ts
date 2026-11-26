@@ -6,18 +6,26 @@
 // args, and stops everything in a bounded way (stop verb, SIGTERM, SIGKILL). It never deletes a peer dir.
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { closeSync, mkdirSync, openSync, writeSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, rmSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { fileURLToPath } from 'node:url'
 import { callCtl } from '../ctl/ctl-client.js'
 import { readCtlPort } from '../ctl/ctl-files.js'
-import { CTL_TOKEN_FILE, VERB_NAME_RE, type Role } from '../ctl/protocol.js'
+import { CTL_PORT_FILE, CTL_TOKEN_FILE, VERB_NAME_RE, type Role } from '../ctl/protocol.js'
 import type { StepWindow } from './results.js'
 import type { SecretRegistry } from './secret-scan.js'
 
 /** The built vt bin, from dist/run/ (and src/run/, where it names the not-yet-built file). */
 export const VT_BIN = fileURLToPath(new URL('../bin/vt.js', import.meta.url))
+
+/** The opt-in instruments preload, resolved next to this module from src/run/ and dist/run/ alike. */
+export const INSTRUMENTS_PRELOAD = fileURLToPath(new URL('./instruments/daemon-preload.js', import.meta.url))
+
+/** dist always holds the .js; under ts-node the source .ts is its loadable twin. */
+export function loadableInstrumentsPreload (): string {
+  return existsSync(INSTRUMENTS_PRELOAD) ? INSTRUMENTS_PRELOAD : INSTRUMENTS_PRELOAD.replace(/\.js$/, '.ts')
+}
 
 export type DaemonBootCode = 'daemon-boot' | 'daemon-timeout'
 
@@ -30,6 +38,20 @@ export class DaemonBootError extends Error {
     this.name = 'DaemonBootError'
     this.code = code
     this.label = label
+  }
+}
+
+/**
+ * A restart that did not stop cleanly or did not boot again. RUN_TOKENS (67-21) has no room for a new
+ * token, so the code handed to the leg runner stays `daemon-boot`; `detail` keeps the specific reason.
+ */
+export class DaemonRestartError extends DaemonBootError {
+  readonly detail: 'daemon-restart' = 'daemon-restart'
+
+  constructor (label: string, reason: string) {
+    super('daemon-boot', label)
+    this.name = 'DaemonRestartError'
+    this.message = `daemon ${label}: daemon-restart ${reason}`
   }
 }
 
@@ -115,6 +137,8 @@ export interface DaemonLauncherOptions {
 export interface DaemonLauncher {
   start (spec: DaemonSpec): Promise<DaemonHandle>
   handle (label: string): DaemonHandle | undefined
+  /** Stops the label's process group cleanly and spawns the same argv on the same peer dirs. */
+  restart (label: string): Promise<DaemonHandle>
   stopAll (): Promise<{ stopped: number, killed: number }>
   startedCount (): number
 }
@@ -164,15 +188,27 @@ function pipeLines (stream: NodeJS.ReadableStream, fd: () => number): void {
   })
 }
 
-export function roleOfLabel (label: string): Role {
+/** The role header of a label's own ctl server; an unknown label is a boot refusal, not a bad-arg. */
+export function roleForLabel (label: string): Role {
   if (label === 'officer') return 'officer'
   if (/^kh-[a-z0-9]+$/.test(label)) return 'keyholder'
-  if (/^v[1-9][0-9]*$/.test(label)) return 'voter'
-  throw new TypeError('launcher: bad-label')
+  if (/^v[0-9]+$/.test(label)) return 'voter'
+  throw new DaemonBootError('daemon-boot', label)
+}
+
+/** 67-21 name, kept for the callers that already import it. */
+export function roleOfLabel (label: string): Role {
+  return roleForLabel(label)
 }
 
 export function kindOfLabel (label: string): PeerKind {
-  return roleOfLabel(label) === 'voter' ? 'voter' : 'authority'
+  return roleForLabel(label) === 'voter' ? 'voter' : 'authority'
+}
+
+/** The ONLY formatter of ev/commands.log lines: args are never a parameter, and no token reaches it. */
+export function formatCommandLine (line: { iso: string, label: string, verb: string, ok: boolean, ms: number }): string {
+  const verb = VERB_NAME_RE.test(line.verb) ? line.verb : '-'
+  return `${line.iso} ${line.label} ${verb} ok=${line.ok} ms=${line.ms}`
 }
 
 export function defaultDaemonArgv (opts: Pick<DaemonLauncherOptions, 'relayEnvPath' | 'party' | 'instruments'>): (spec: DaemonSpec, peerDir: string) => string[] {
@@ -186,6 +222,7 @@ export function defaultDaemonArgv (opts: Pick<DaemonLauncherOptions, 'relayEnvPa
     opts.relayEnvPath,
     '--party',
     opts.party,
+    ...(spec.role === 'officer' ? ['--accept-token-attestations'] : []),
     ...(spec.labels.length > 1 ? ['--colocate', spec.labels.join(',')] : []),
     ...(opts.instruments ? ['--instruments'] : [])
   ]
@@ -222,7 +259,7 @@ export function createDaemonLauncher (opts: DaemonLauncherOptions): DaemonLaunch
   }
 
   const makeHandle = (proc: Proc, label: string, dir: string): DaemonHandle => {
-    const role = label === proc.spec.label ? proc.spec.role : roleOfLabel(label)
+    const role = roleForLabel(label)
     const kind = label === proc.spec.label ? proc.spec.kind : kindOfLabel(label)
     return {
       label,
@@ -235,8 +272,7 @@ export function createDaemonLauncher (opts: DaemonLauncherOptions): DaemonLaunch
         const reply = await callCtl({ dir, role, verb, args, timeoutMs: o.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS })
         const ms = Math.round(performance.now() - started)
         const ok = reply.status === 200 && reply.body.ok === true
-        const verbName = VERB_NAME_RE.test(verb) ? verb : 'bad-verb'
-        writeSync(commandsLog(), `${new Date(nowMs()).toISOString()} ${label} ${verbName} ok=${ok} ms=${ms}\n`)
+        writeSync(commandsLog(), formatCommandLine({ iso: new Date(nowMs()).toISOString(), label, verb, ok, ms }) + '\n')
         if (ok) return { ok: true, result: reply.body.result ?? {}, ms }
         const err = reply.body.error ?? { name: 'BadResponse' }
         const view: DaemonCallErr['error'] = { name: err.name, message: opts.mask(err.message ?? '') }
@@ -248,6 +284,77 @@ export function createDaemonLauncher (opts: DaemonLauncherOptions): DaemonLaunch
         if (!(VOTER_STAGES as readonly string[]).includes(name)) throw new TypeError('launcher: bad-stage')
         writeSync(proc.logFd, `STAGE ${name}\n`)
       }
+    }
+  }
+
+  function nodeFlagsFor (primaryDir: string): string[] {
+    const flags: string[] = []
+    if (opts.importFile !== undefined) flags.push('--import', opts.importFile)
+    if (opts.instruments) flags.push('--import', loadableInstrumentsPreload())
+    if (opts.cpuProf) flags.push('--cpu-prof', '--cpu-prof-dir', join(primaryDir, 'cpu-prof'))
+    return flags
+  }
+
+  function spawnProc (spec: DaemonSpec, dirs: Map<string, string>, primaryDir: string, existing?: Proc): Proc {
+    const argv = daemonArgv(spec, primaryDir)
+    // A custom argv may omit it; the officer must carry the test-posture flag exactly once.
+    if (spec.role === 'officer' && !argv.includes('--accept-token-attestations')) argv.push('--accept-token-attestations')
+    const logFd = openAppend(join(opts.evDir, `${spec.label}.log`))
+    const env = childEnv()
+    if (opts.instruments) {
+      const instrDir = join(primaryDir, 'instruments')
+      mkdirSync(instrDir, { recursive: true, mode: 0o700 })
+      env.VT_INSTR_DIR = instrDir
+      env.VT_INSTR_ROLE = spec.role
+    }
+    const child = spawn(process.execPath, [...nodeFlagsFor(primaryDir), ...argv], {
+      cwd: opts.cwd ?? process.cwd(),
+      env,
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+    const proc: Proc = existing ?? { spec, child, dirs, exited: false, closed: Promise.resolve(), logFd: -1 }
+    proc.child = child
+    proc.exited = false
+    proc.logFd = logFd
+    proc.closed = new Promise<void>((resolve) => {
+      child.once('close', () => resolve())
+      child.once('error', () => resolve())
+    })
+    child.once('exit', () => {
+      proc.exited = true
+    })
+    child.once('error', () => {
+      proc.exited = true
+    })
+    if (child.stdout !== null) pipeLines(child.stdout, () => proc.logFd)
+    if (child.stderr !== null) pipeLines(child.stderr, () => (spec.kind === 'authority' ? debugLog() : proc.logFd))
+    if (!procs.includes(proc)) procs.push(proc)
+    return proc
+  }
+
+  async function finishBoot (proc: Proc, startMs: number, stepName: string): Promise<DaemonHandle> {
+    const spec = proc.spec
+    try {
+      const deadline = performance.now() + bootTimeoutMs
+      for (;;) {
+        if ([...proc.dirs.values()].every((d) => readCtlPort(d).ok)) break
+        if (proc.exited) throw new DaemonBootError('daemon-boot', spec.label)
+        if (performance.now() > deadline) {
+          proc.child.kill('SIGKILL')
+          throw new DaemonBootError('daemon-timeout', spec.label)
+        }
+        await sleep(POLL_MS)
+      }
+      for (const [, dir] of proc.dirs) opts.registry.registerFile(join(dir, CTL_TOKEN_FILE), { windows: true })
+      let primary: DaemonHandle | undefined
+      for (const [label, dir] of proc.dirs) {
+        const h = makeHandle(proc, label, dir)
+        handles.set(label, h)
+        if (label === spec.label) primary = h
+      }
+      return primary as DaemonHandle
+    } finally {
+      opts.onStep?.({ name: stepName, startMs, endMs: nowMs() })
     }
   }
 
@@ -264,52 +371,7 @@ export function createDaemonLauncher (opts: DaemonLauncherOptions): DaemonLaunch
       dirs.set(label, dir)
     }
     const primaryDir = dirs.get(spec.label) as string
-    const nodeFlags: string[] = []
-    if (opts.importFile !== undefined) nodeFlags.push('--import', opts.importFile)
-    if (opts.cpuProf) nodeFlags.push('--cpu-prof', '--cpu-prof-dir', join(primaryDir, 'cpu-prof'))
-    const argv = daemonArgv(spec, primaryDir)
-    const logFd = openAppend(join(opts.evDir, `${spec.label}.log`))
-    const child = spawn(process.execPath, [...nodeFlags, ...argv], {
-      cwd: opts.cwd ?? process.cwd(),
-      env: childEnv(),
-      stdio: ['ignore', 'pipe', 'pipe']
-    })
-    const proc: Proc = { spec, child, dirs, exited: false, closed: Promise.resolve(), logFd }
-    proc.closed = new Promise<void>((resolve) => {
-      child.once('close', () => resolve())
-      child.once('error', () => resolve())
-    })
-    child.once('exit', () => {
-      proc.exited = true
-    })
-    child.once('error', () => {
-      proc.exited = true
-    })
-    if (child.stdout !== null) pipeLines(child.stdout, () => logFd)
-    if (child.stderr !== null) pipeLines(child.stderr, () => (spec.kind === 'authority' ? debugLog() : logFd))
-    procs.push(proc)
-    try {
-      const deadline = performance.now() + bootTimeoutMs
-      for (;;) {
-        if ([...dirs.values()].every((d) => readCtlPort(d).ok)) break
-        if (proc.exited) throw new DaemonBootError('daemon-boot', spec.label)
-        if (performance.now() > deadline) {
-          child.kill('SIGKILL')
-          throw new DaemonBootError('daemon-timeout', spec.label)
-        }
-        await sleep(POLL_MS)
-      }
-      for (const [, dir] of dirs) opts.registry.registerFile(join(dir, CTL_TOKEN_FILE))
-      let primary: DaemonHandle | undefined
-      for (const [label, dir] of dirs) {
-        const h = makeHandle(proc, label, dir)
-        handles.set(label, h)
-        if (label === spec.label) primary = h
-      }
-      return primary as DaemonHandle
-    } finally {
-      opts.onStep?.({ name: `start-${spec.label}`, startMs, endMs: nowMs() })
-    }
+    return finishBoot(spawnProc(spec, dirs, primaryDir), startMs, `start-${spec.label}`)
   }
 
   const waitExit = async (proc: Proc, ms: number): Promise<boolean> => {
@@ -336,6 +398,48 @@ export function createDaemonLauncher (opts: DaemonLauncherOptions): DaemonLaunch
     }
     await waitExit(proc, KILL_WAIT_MS)
     return { killed: true }
+  }
+
+  async function restart (label: string): Promise<DaemonHandle> {
+    const proc = procs.find((p) => p.spec.labels.includes(label))
+    if (proc === undefined) throw new DaemonBootError('daemon-boot', label)
+    const startMs = nowMs()
+    const primary = proc.spec.label
+    const h = handles.get(primary)
+    if (h !== undefined) await h.call('stop', {}, { timeoutMs: STOP_VERB_TIMEOUT_MS })
+    let killed = false
+    if (!(await waitExit(proc, STOP_WAIT_MS))) {
+      try {
+        proc.child.kill('SIGTERM')
+      } catch {
+        // already gone
+      }
+      if (!(await waitExit(proc, TERM_WAIT_MS))) {
+        try {
+          proc.child.kill('SIGKILL')
+        } catch {
+          // already gone
+        }
+        await waitExit(proc, KILL_WAIT_MS)
+      }
+      killed = true
+    }
+    if (killed || proc.child.exitCode !== 0) throw new DaemonRestartError(label, 'stop-not-clean')
+    const oldFd = proc.logFd
+    const fdIndex = openFds.indexOf(oldFd)
+    if (fdIndex >= 0) openFds.splice(fdIndex, 1)
+    try {
+      closeSync(oldFd)
+    } catch {
+      // closed already
+    }
+    for (const l of proc.spec.labels) {
+      handles.delete(l)
+      const dir = proc.dirs.get(l)
+      if (dir !== undefined) rmSync(join(dir, CTL_PORT_FILE), { force: true })
+    }
+    const primaryDir = proc.dirs.get(primary) as string
+    return finishBoot(spawnProc(proc.spec, proc.dirs, primaryDir, proc), startMs, `restart-${label}`)
   }
 
   async function stopAll (): Promise<{ stopped: number, killed: number }> {
@@ -365,6 +469,7 @@ export function createDaemonLauncher (opts: DaemonLauncherOptions): DaemonLaunch
   return {
     start,
     handle: (label) => handles.get(label),
+    restart,
     stopAll,
     startedCount: () => procs.length
   }

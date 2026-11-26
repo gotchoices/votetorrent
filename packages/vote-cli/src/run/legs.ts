@@ -7,6 +7,7 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
+import type { ProbeSnapshot, WallSnapshot } from './instruments/wall.js'
 import type { ApproveLine, RunOutput } from './output.js'
 import { DURATION_KEYS, TOKEN_RE, type LegStatus, type StepWindow } from './results.js'
 
@@ -58,9 +59,27 @@ export interface LegCtx {
   check (id: string, text: string, pass: boolean, detail?: unknown): boolean
   need (token: string, id: string, text: string, pass: boolean, detail?: unknown): void
   step<T> (stepName: string, fn: () => Promise<T>): Promise<T>
+  /** An unprefixed profile window; the name grammar is the 67-34 compare contract. */
+  window (name: string, startMs: number, endMs: number): void
   duration (key: string, ms: number): void
   delegate (stepName: string, opts: DelegateOptions): Promise<{ ok: boolean, waitedMs: number }>
   approve (a: ApproveLine): void
+}
+
+/** The instrument snapshot the leg runner takes on both sides of a body. */
+export interface LegD14Snapshot {
+  wall: WallSnapshot
+  probe: ProbeSnapshot
+}
+
+export interface LegD14Verdict {
+  inScriptD14: string
+  reason: string
+}
+
+export interface LegD14 {
+  snapshot (): Promise<LegD14Snapshot>
+  verdict (before: LegD14Snapshot, after: LegD14Snapshot): Promise<LegD14Verdict>
 }
 
 export type LegBody = (L: LegCtx) => Promise<void>
@@ -75,6 +94,8 @@ export interface LegRunnerOptions {
   perfNow?: () => number
   /** Resolves with `alarm` or `interrupted`: the running leg ends with that token. */
   abort: Promise<string>
+  /** Opt-in: a measured wall verdict is written into leg-status.json and wall-leg.log. */
+  d14?: LegD14
 }
 
 export interface LegRunner {
@@ -90,6 +111,15 @@ export interface LegRunner {
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 const ERROR_NAME_RE = /[^A-Za-z0-9_.-]/g
 const CRASH_MESSAGE_CHARS = 200
+const WINDOW_RE = /^(reopen|h6-election|h7-accept|h8-dkg|approve[1-9]-(read|decide|publish)|release|tally|h9-voters-active)$/
+const WALL_LEG_SCHEMA = 'vt64-wall-leg/1'
+
+/** Maps an instrument verdict into the three readings results.json accepts; anything else fails closed. */
+function d14Reading (value: string): LegStatus['inScriptD14'] {
+  const r = value.replace(/[^A-Z]/g, '')
+  if (r === 'OFF' || r === 'HIT' || r.endsWith('EAN')) return r as LegStatus['inScriptD14']
+  return 'HIT'
+}
 
 function errorName (e: unknown): string {
   const n = typeof e === 'object' && e !== null ? (e as { name?: unknown }).name : undefined
@@ -179,6 +209,10 @@ export function createLegRunner (opts: LegRunnerOptions): LegRunner {
           steps.push({ name: `${name}/${stepName}`, startMs, endMs: nowMs() })
         }
       },
+      window (windowName, startMs, endMs) {
+        if (!WINDOW_RE.test(windowName)) throw new LegFail('FAIL', 'bad-token')
+        steps.push({ name: windowName, startMs, endMs })
+      },
       duration (key, ms) {
         if (!(DURATION_KEYS as readonly string[]).includes(key)) throw new LegFail('FAIL', 'bad-token')
         durations[key] = Math.round(ms)
@@ -205,6 +239,15 @@ export function createLegRunner (opts: LegRunnerOptions): LegRunner {
       },
       approve (a) {
         out.approve(a)
+      }
+    }
+
+    let d14Before: LegD14Snapshot | undefined
+    if (opts.d14 !== undefined) {
+      try {
+        d14Before = await opts.d14.snapshot()
+      } catch {
+        d14Before = undefined
       }
     }
 
@@ -245,7 +288,42 @@ export function createLegRunner (opts: LegRunnerOptions): LegRunner {
     }
     w('RESULT ' + JSON.stringify({ schema: 'vt-run-leg/1', leg: name, status, token, totalMs: Math.round(perfNow() - t0) }))
     open = false
-    const st: LegStatus = { leg: name, status, token, inScriptD14: 'OFF', reason: 'instruments-off', checks }
+    let reading: LegD14Verdict = { inScriptD14: 'OFF', reason: 'instruments-off' }
+    let d14After: LegD14Snapshot | undefined
+    if (opts.d14 !== undefined) {
+      try {
+        d14After = await opts.d14.snapshot()
+        if (d14Before !== undefined) reading = await opts.d14.verdict(d14Before, d14After)
+        else reading = { inScriptD14: 'HIT', reason: 'measured' }
+      } catch {
+        reading = { inScriptD14: 'HIT', reason: 'measured' }
+      }
+      const reason = TOKEN_RE.test(reading.reason) ? reading.reason : 'measured'
+      const snap = d14After ?? d14Before
+      if (snap !== undefined) {
+        const wallSignals = {
+          hidden: snap.wall.paths.hidden,
+          thrown: snap.wall.paths.thrown,
+          late: snap.wall.paths.late
+        }
+        writeFileSync(
+          join(dir, 'wall-leg.log'),
+          [
+            'LEG-START ' + JSON.stringify({ schema: WALL_LEG_SCHEMA, runId: `vt-${name}`, shape: 'vt' }),
+            'RESULT ' + JSON.stringify({
+              shape: 'vt',
+              instrument: { probeInstalled: snap.probe.installed === true, probeCalls: snap.probe.calls },
+              join: { ok: true, ms: 0 },
+              stack: {},
+              wallSignals
+            })
+          ].join('\n') + '\n',
+          { flag: 'wx', mode: 0o600 }
+        )
+      }
+      reading = { inScriptD14: d14Reading(reading.inScriptD14), reason }
+    }
+    const st: LegStatus = { leg: name, status, token, inScriptD14: reading.inScriptD14 as LegStatus['inScriptD14'], reason: reading.reason, checks }
     writeFileSync(
       join(dir, 'leg-status.json'),
       JSON.stringify({ status, token, inScriptD14: st.inScriptD14, reason: st.reason, checks }) + '\n',

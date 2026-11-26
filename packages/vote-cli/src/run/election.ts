@@ -6,12 +6,15 @@
 
 import { closeSync, mkdirSync, openSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
+import { writeApprovalTokenFile } from '../approval/token.js'
 import { EXIT, type ExitCode } from '../cli/exit-codes.js'
 import type { CliIo } from '../cli/run-cli.js'
 import { StaleBuildError, assertFreshBuild } from '../engine.js'
 import { DaemonBootError, createDaemonLauncher, kindOfLabel, roleOfLabel, type DaemonHandle, type DaemonLauncherOptions, type DaemonSpec } from './daemon-launcher.js'
-import { ELECTION_LEGS, type ElectionLeg, type RunContext, type RunPeer } from './election-legs.js'
-import { LegFail, SOFT_TOKENS, createLegRunner } from './legs.js'
+import { ELECTION_LEGS, type ElectionLeg, type RunContext, type RunPeer, type RunShared } from './election-legs.js'
+import { createRunInstruments, type RunInstruments } from './instruments/run-instruments.js'
+import { d14Verdict } from './instruments/wall.js'
+import { LegFail, SOFT_TOKENS, createLegRunner, type LegD14, type LegD14Snapshot } from './legs.js'
 import { peerLabels, type RunOptions } from './options.js'
 import { createRunOutput } from './output.js'
 import { assertPeerBudget, defaultMaxPeers } from './peer-budget.js'
@@ -26,6 +29,10 @@ export interface RunDeps {
   launcherOverrides?: Partial<DaemonLauncherOptions>
   nowMs?: () => number
   perfNow?: () => number
+  /** A scripted clock may advance instantly instead of waiting on a real timer. */
+  sleepMs?: (ms: number) => Promise<void>
+  /** Instruments seam: the scripted tier supplies a stub RunInstruments. */
+  instrumentsFactory?: (opts: Parameters<typeof createRunInstruments>[0]) => RunInstruments | null
   totalmem?: number
   handleSignals?: boolean
 }
@@ -97,6 +104,13 @@ export async function runElection (opts: RunOptions, deps: RunDeps): Promise<Exi
 
   // 4. secrets, masker, line writer, leg runner
   const registry = new SecretRegistry()
+  // One approval token per peer, written 0600 and registered by file path only. The budget was
+  // asserted above, before this (or any other) disk side effect.
+  for (const label of labels) {
+    const path = join(secretsDir, `${label}.token`)
+    writeApprovalTokenFile(path)
+    registry.registerFile(path, { windows: true })
+  }
   registerRelay(registry, opts.relayEnvPath, opts.relayMultiaddr)
   const mask = createLineMasker({ registry, stateDir })
   const out = createRunOutput({
@@ -113,7 +127,6 @@ export async function runElection (opts: RunOptions, deps: RunDeps): Promise<Exi
   const abort = new Promise<string>((resolve) => {
     resolveAbort = resolve
   })
-  const runner = createLegRunner({ evDir, flagsDir: secretsDir, out, mask, nowMs, ...(deps.perfNow !== undefined ? { perfNow: deps.perfNow } : {}), abort })
   const launcherOptions: DaemonLauncherOptions = {
     stateDir,
     party: opts.party,
@@ -132,6 +145,32 @@ export async function runElection (opts: RunOptions, deps: RunDeps): Promise<Exi
     ...(deps.launcherOverrides ?? {})
   }
   const launcher = deps.launcherFactory !== undefined ? deps.launcherFactory(launcherOptions) : createDaemonLauncher(launcherOptions)
+  const instruments = opts.instruments
+    ? (deps.instrumentsFactory ?? createRunInstruments)({
+      enabled: true,
+      stateDir,
+      party: opts.party,
+      evDir,
+      launcher,
+      out,
+      ...(deps.nowMs !== undefined ? { nowMs } : {})
+    })
+    : null
+  const d14: LegD14 | undefined = instruments === null ? undefined : {
+    async snapshot () {
+      return { wall: instruments.wall.snapshot(), probe: await instruments.probeSnapshot() }
+    },
+    async verdict (before, after) {
+      return d14Verdict({
+        before: before.wall,
+        after: after.wall,
+        probeBefore: before.probe,
+        probeAfter: after.probe,
+        probeInstalled: after.probe.installed
+      })
+    }
+  }
+  const runner = createLegRunner({ evDir, flagsDir: secretsDir, out, mask, nowMs, ...(deps.perfNow !== undefined ? { perfNow: deps.perfNow } : {}), ...(d14 !== undefined ? { d14 } : {}), abort })
   const startedAt = new Date(nowMs()).toISOString()
   out.key('VT-START', `at=${startedAt} party=${opts.party} peers=${requested} maxPeers=${max}`)
   out.runMark('p1-start')
@@ -191,6 +230,29 @@ export async function runElection (opts: RunOptions, deps: RunDeps): Promise<Exi
     peers.set(label, p)
     return p
   }
+  const voters = labels.filter((label) => /^v[0-9]+$/.test(label))
+  const shared: RunShared = {
+    topology: opts.reduced ? 'reduced' : 'full',
+    networkHash: '',
+    networkName: '',
+    authorityId: '',
+    electionId: '',
+    ballotId: '',
+    votingStartsAtMs: 0,
+    closedAtMs: 0,
+    releasingKeysAtMs: 0,
+    seatFiles: {},
+    codeFiles: {},
+    fingerprintFiles: {},
+    needleFile: '',
+    votersChoices: Object.fromEntries(voters.map((label, i) => [label, i === voters.length - 1 && voters.length >= 3 ? 1 : 0])),
+    peerId8: ''
+  }
+  out.key('TOPOLOGY', shared.topology === 'full'
+    ? `full voters=${opts.voters}`
+    : `reduced voters=${opts.voters} skipped=cast,send,pool,tally,publish,results`)
+  out.key('HANDOFF-TOKEN-FILES', 'kh-a=secrets/kh-a.token kh-b=secrets/kh-b.token')
+
   const ctx: RunContext = {
     opts,
     out,
@@ -204,7 +266,21 @@ export async function runElection (opts: RunOptions, deps: RunDeps): Promise<Exi
     },
     registerSecretFile (path, o) {
       registry.registerFile(path, o)
-    }
+    },
+    tokenFile (label) {
+      if (!labels.includes(label)) throw new TypeError('run: unknown-peer')
+      return join(secretsDir, `${label}.token`)
+    },
+    async restart (label) {
+      const started = nowMs()
+      const handle = await launcher.restart(label)
+      runner.steps.push({ name: `restart-${label}`, startMs: started, endMs: nowMs() })
+      return handle
+    },
+    shared,
+    instruments,
+    nowMs,
+    sleep: deps.sleepMs ?? ((ms): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms)))
   }
 
   // 7. the legs
@@ -253,6 +329,16 @@ export async function runElection (opts: RunOptions, deps: RunDeps): Promise<Exi
     include: (p) => p.startsWith(evDir + '/') || p.endsWith('.log')
   })
   let summary = summaryLine({ statuses: runner.statuses, planLength: legs.length, scan, ...(driverToken !== undefined ? { driverToken } : {}) })
+  let wall: Record<string, unknown> | undefined
+  if (instruments !== null) {
+    try {
+      await instruments.lateFromCrashLogs()
+      await instruments.writeClassify(evDir, legs)
+      wall = await instruments.wallForResults() as unknown as Record<string, unknown>
+    } catch {
+      driverToken ??= 'crash'
+    }
+  }
   try {
     writeResults(
       join(evDir, 'results.json'),
@@ -264,7 +350,8 @@ export async function runElection (opts: RunOptions, deps: RunDeps): Promise<Exi
         secretScan: scan,
         keys: out.keys(),
         startedAt,
-        endedAt: new Date(nowMs()).toISOString()
+        endedAt: new Date(nowMs()).toISOString(),
+        ...(wall !== undefined ? { wall } : {})
       })
     )
   } catch {
