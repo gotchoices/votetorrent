@@ -682,7 +682,7 @@ describe('voter verb units', function () {
       expect(VOTER_VERB_ENTRIES[name], name).to.equal(VOTER_VERBS[name])
       expect(VOTER_VERB_ENTRIES[name]).to.be.a('function')
     }
-    expect(Object.keys(VOTER_VERB_ENTRIES).sort()).to.deep.equal(['answer-challenge', 'join', 'read-decision', 'readback', 'register', 'stage-association', 'stop'])
+    expect(Object.keys(VOTER_VERB_ENTRIES).sort()).to.deep.equal(['answer-challenge', 'cast', 'join', 'read-decision', 'readback', 'register', 'results', 'send', 'stage-association', 'stop'])
     expect(Object.isFrozen(VOTER_VERBS)).to.equal(true)
   })
 })

@@ -8,7 +8,6 @@
 
 import { ElectionResultsEngine, TallyPublicationEngine } from '@votetorrent/vote-engine/rn'
 import type { EngineContext } from '@votetorrent/vote-engine/rn'
-import type { SignCallback } from '@votetorrent/workflows/platform'
 import { CALL_APPROVAL_ARG_KEYS, withCallApproval } from '../../approval/call-approval.js'
 import type { VerbHandler } from '../../ctl/protocol.js'
 import type { VerbContext } from '../../daemon/verb-context.js'
@@ -19,28 +18,21 @@ import { requireTallied } from './tally.js'
 const ALLOWED: readonly string[] = ['network', 'election', ...CALL_APPROVAL_ARG_KEYS]
 const ROWS_SQL = 'select count(*) as n from ElectionTally where ElectionId = :e'
 
-export interface PublishOutcome {
-  outcome: string
-  revision?: number
-  tallyRoot?: string
-  publishedAt?: string
-}
-
-export interface TallyPublisher {
-  userId: string
-  signingPublicKey: string
-  sign: SignCallback
-}
+/** The one publication call this verb makes, as the engine declares it. */
+type PublicationEngineLike = Pick<TallyPublicationEngine, 'publishElectionTally'>
+type PublishCall = TallyPublicationEngine['publishElectionTally']
+export type TallyPublisher = Parameters<PublishCall>[1]
+export type PublishOutcome = Awaited<ReturnType<PublishCall>>
 
 /** The results and publication engines, injectable by the unit spec. */
 export interface PublishSeams {
   resultsEngine: (est: EngineContext) => { getElectionResults(electionId: string): Promise<unknown> }
-  publication: (est: EngineContext) => { publishElectionTally(tally: unknown, publisher: TallyPublisher): Promise<PublishOutcome> }
+  publication: (est: EngineContext) => PublicationEngineLike
 }
 
 export const DEFAULT_PUBLISH_SEAMS: PublishSeams = Object.freeze({
   resultsEngine: (est: EngineContext) => new ElectionResultsEngine(est),
-  publication: (est: EngineContext) => new TallyPublicationEngine(est) as unknown as { publishElectionTally(tally: unknown, publisher: TallyPublisher): Promise<PublishOutcome> }
+  publication: (est: EngineContext) => new TallyPublicationEngine(est)
 })
 
 export async function runPublish(deps: OfficerResultsDeps, args: Record<string, unknown>, seams: PublishSeams = DEFAULT_PUBLISH_SEAMS): Promise<Record<string, unknown>> {
@@ -61,17 +53,17 @@ export async function runPublish(deps: OfficerResultsDeps, args: Record<string, 
       const officer = deps.officer
       const publisher: TallyPublisher = { userId: officer.userId, signingPublicKey: officer.signerKey, sign: await signer.createSigner() }
       const tPublish = startedNow()
-      const outcome = await seams.publication(est).publishElectionTally(results.tally, publisher)
+      const outcome: PublishOutcome = await seams.publication(est).publishElectionTally(results.tally as Parameters<PublishCall>[0], publisher)
       const publishMs = elapsedMs(tPublish)
       if (outcome.outcome !== 'published' && outcome.outcome !== 'already-published') refuse(`publish-${outcome.outcome}`)
       let rows = 0
       for await (const row of est.db.eval(ROWS_SQL, { e: electionId })) rows = Number((row as { n?: unknown }).n)
       return {
         electionId,
-        revision: outcome.revision ?? results.revision,
+        revision: outcome.revision,
         outcome: outcome.outcome,
-        publishedAt: outcome.publishedAt ?? null,
-        tallyRoot8: String(outcome.tallyRoot ?? results.tallyRoot).slice(0, 8),
+        publishedAt: outcome.publishedAt,
+        tallyRoot8: outcome.tallyRoot.slice(0, 8),
         rows,
         signatures: signer.signatures(),
         publishMs,
