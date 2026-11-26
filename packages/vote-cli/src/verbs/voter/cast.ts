@@ -78,9 +78,10 @@ export function selectionsForChoiceIndex(context: Pick<VoteContext, 'electionId'
   return out
 }
 
-/** The choice file path for an election: `<secretsDir>/vote-choice-<first 8 of the id>.json`. */
+/** The choice file path for an election: `<secretsDir>/vote-choice-<election id>.json`. The whole id, because
+ * ids are `election-<ms>` and any prefix would give every election the same file (`choice-file-exists`). */
 export function choiceFilePath(secretsDir: string, electionId: string): string {
-  return join(secretsDir, 'vote-choice-' + electionId.slice(0, 8) + '.json')
+  return join(secretsDir, 'vote-choice-' + electionId + '.json')
 }
 
 function exists(path: string): boolean {

@@ -19,7 +19,7 @@ import { scanSecrets } from '../src/secrecy/scan-secrets.js'
 import { openDeviceVault, type DeviceVault } from '../src/vault/device-vault.js'
 import { openFileKv, type FileKvStorage } from '../src/vault/file-kv.js'
 import { ensurePrivateDir } from '../src/vault/private-file.js'
-import { runCast } from '../src/verbs/voter/cast.js'
+import { choiceFilePath, runCast } from '../src/verbs/voter/cast.js'
 import { VOTER_VERB_ENTRIES } from '../src/verbs/voter/registry.js'
 import { runVoterResults } from '../src/verbs/voter/results.js'
 import { VOTER_RESULTS_VERB_NAMES, VOTER_RESULTS_VERBS } from '../src/verbs/voter/results-verbs.js'
@@ -252,7 +252,9 @@ describe('voter vote verbs', function () {
 
   it('cast refuses choice-file-exists before any token read', async () => {
     h = await makeHarness()
-    const choice = join(h.home, 'secrets', 'vote-choice-' + ELECTION.slice(0, 8) + '.json')
+    // two elections whose ids share a long prefix keep separate files
+    expect(choiceFilePath('/s', 'election-1000000000001')).to.not.equal(choiceFilePath('/s', 'election-1000000000002'))
+    const choice = join(h.home, 'secrets', 'vote-choice-' + ELECTION + '.json')
     writeFileSync(choice, '[]', { mode: 0o600 })
     const e = await refusal(runCast(h.deps, { network: HASH, election: ELECTION, tokenFile: '/nonexistent/dir/token' }))
     expect(e.code).to.equal('choice-file-exists')
