@@ -14,7 +14,7 @@ const HASH_RE = /^[0-9a-f]{32}$/
 function expectedVerbs (role: string): string[] {
   return [
     ...CLI01_VERB_INVENTORY.filter((v) => v.role === role).map((v) => v.verb),
-    ...SUPPORT_VERBS.filter((v) => v.role === role || v.role === 'builtin' || v.verb === BUILTIN_VERBS_VERB).map((v) => v.verb)
+    ...SUPPORT_VERBS.filter((v) => v.role === role && v.verb !== BUILTIN_VERBS_VERB).map((v) => v.verb)
   ]
 }
 
