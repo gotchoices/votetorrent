@@ -243,7 +243,7 @@ To read the deleted files from history: `git log --diff-filter=D --oneline -- to
 | `host-voter.ts` stages | `vt voter join`, `vt voter register`, `vt voter stage-association`, `vt voter answer-challenge`, `vt voter read-decision`, `vt voter cast`, `vt voter send`, `vt voter results` |
 | `run-lean.sh run` | `vt run election` |
 | `run-lean.sh selfcheck` | `vt selfcheck` |
-| loader hooks `s63-hooks.mjs`, `authority-hooks.mjs`, `hr5-hooks.mjs` | none needed: the shared code lives in `@votetorrent/workflows`, so `dist` loads under plain Node |
+| the three retired loader hooks (the s63, authority and hr5 hook files) | none needed: the shared code lives in `@votetorrent/workflows`, so `dist` loads under plain Node |
 | the in-memory vault | `FileKeyVault`, held by the daemon between calls |
 
 ### Old JSON-RPC commands to `vt` verbs
@@ -280,4 +280,4 @@ To read the deleted files from history: `git log --diff-filter=D --oneline -- to
 
 ### Relay and run dirs (kept)
 
-`VT_LEAN_RELAY_ENV` still names a relay.env file with the four keys `RELAY_MULTIADDR=`, `PEER_ID=`, `LAN_IP=` and `STARTED_AT=`. Pass it as `--relay "$VT_LEAN_RELAY_ENV"`; the address has the shape `/dns4/<host>/tcp/<port>/wss/p2p/<relay peer id>` with angle-bracket example values only. Run state goes outside the repo, conventionally under `VT_LEAN_RUNS` (default `<checkout>/../vt-lean-runs`), and `vt` refuses an in-repo state dir. "One party at a time" is replaced by `--party`.
+`VT_LEAN_RELAY_ENV` still names a relay.env file with the four keys `RELAY_MULTIADDR=`, `PEER_ID=`, `LAN_IP=` and `STARTED_AT=`. Pass it as `--relay "$VT_LEAN_RELAY_ENV"`; the multiaddr names a DNS host, a TCP port, a wss transport and a relay peer id, written only as angle-bracket placeholders (`<host>`, `<port>`, `<relay peer id>`). Run state goes outside the repo, conventionally under `VT_LEAN_RUNS` (default `<checkout>/../vt-lean-runs`), and `vt` refuses an in-repo state dir. "One party at a time" is replaced by `--party`.
