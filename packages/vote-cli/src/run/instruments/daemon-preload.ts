@@ -18,12 +18,16 @@ import { readControlLeaf, type ControlLeafResult } from './control-leaf.js'
 
 applyDaemonEnv()
 
-/** Anchored at packages/vote-engine/package.json: the copy the engine and the daemon both load. */
-export const ENGINE_PACKAGE_URL = new URL('../../../../vote-engine/package.json', import.meta.url)
+/**
+ * Anchored at this package's package.json: the daemon's node builder imports cadre-core from
+ * packages/vote-cli/node_modules, and each workspace holds its own copy, so any other anchor wraps a
+ * class the running node never uses.
+ */
+export const DAEMON_PACKAGE_URL = new URL('../../../package.json', import.meta.url)
 
 /** ESM-only packages have an `import`-only exports map, so CJS require.resolve cannot name them. */
-export function engineModuleUrl (requireFromEngine: NodeRequire, spec: string): string {
-  let dir = dirname(requireFromEngine.resolve('./package.json'))
+export function daemonModuleUrl (requireFromDaemon: NodeRequire, spec: string): string {
+  let dir = dirname(requireFromDaemon.resolve('./package.json'))
   for (;;) {
     const manifest = join(dir, 'node_modules', ...spec.split('/'), 'package.json')
     try {
@@ -157,7 +161,7 @@ async function pumpRequests (dir: string, nodes: Set<unknown>): Promise<void> {
     }
     const peerId8 = typeof request.peerId8 === 'string' && /^[A-Za-z0-9_-]{8}$/.test(request.peerId8) ? request.peerId8 : ''
     let node: unknown
-    for (const candidate of nodes) {
+    for (const candidate of peerId8.length === 0 ? [] : nodes) {
       const id = (candidate as { peerId?: { toString(): string } } | null)?.peerId
       if (id !== undefined && typeof id.toString === 'function' && id.toString().endsWith(peerId8)) {
         node = candidate
@@ -177,9 +181,9 @@ async function boot (): Promise<void> {
   let cluster: any
   let cadre: any
   try {
-    const requireFromEngine = createRequire(fileURLToPath(ENGINE_PACKAGE_URL))
-    const p2p = await import(engineModuleUrl(requireFromEngine, '@optimystic/db-p2p'))
-    const core = await import(engineModuleUrl(requireFromEngine, '@serfab/cadre-core'))
+    const requireFromDaemon = createRequire(fileURLToPath(DAEMON_PACKAGE_URL))
+    const p2p = await import(daemonModuleUrl(requireFromDaemon, '@optimystic/db-p2p'))
+    const core = await import(daemonModuleUrl(requireFromDaemon, '@serfab/cadre-core'))
     cluster = p2p.ClusterClient
     cadre = core.CadreNode
   } catch {
@@ -206,6 +210,8 @@ async function boot (): Promise<void> {
   probeTimer.unref()
   process.once('beforeExit', writeProbe)
   process.once('SIGTERM', writeProbe)
+  // the daemon ends through process.exit, which emits neither of the two above
+  process.once('exit', writeProbe)
   writeProbe()
 }
 

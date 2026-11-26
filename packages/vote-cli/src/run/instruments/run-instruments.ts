@@ -174,8 +174,12 @@ export function createRunInstruments (opts: RunInstrumentsOptions): RunInstrumen
       } catch {
         // an unreachable peer reads as unreadable, never as a fork
       }
+      if (peerId8.length === 0) {
+        readers[label] = async () => ({ unreadable: 'readback-failed' })
+        continue
+      }
       const seq = ++seqCounter
-      const dir = join(handle.dir, 'instruments')
+      const dir = handle.instrDir
       try {
         writeControlLeafRequest(dir, seq, peerId8)
       } catch {

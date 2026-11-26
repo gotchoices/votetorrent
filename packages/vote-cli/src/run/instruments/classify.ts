@@ -3,7 +3,8 @@
 // Deviation (recorded in 67-31-SUMMARY.md and here): the phase-64 PINS / MAIN_EVENT_MIN stack gate is
 // NOT ported, because those pins name a superseded stack. `classifyRun` records `rec.stack` but never
 // refuses a run for a different version. classifyBatch, makeOrder, the CLI and CLASSIFY_MUTATE are not
-// ported: vt has no batch run.
+// ported: vt has no batch run. A second deviation: a `vt` leg (shape `vt`) has no spike-106 join
+// precondition (its legs are election legs, not the two-node join shapes), so that gate is skipped.
 
 export const WALL_LEG_SCHEMA = 'vt64-wall-leg/1'
 
@@ -116,7 +117,7 @@ export function classifyRun (text: string, rec: Record<string, unknown> = {}): C
     const instrument = r.instrument ?? {}
     if (instrument.probeInstalled === false || num(instrument.probeCalls) === 0) return voidRun('instrument-detached', 'size probe saw no cluster send')
     const pre = r.preconditions ?? {}
-    const bad = r.shape === 'l1' ? (pre.vAuthorizedBeforeFound !== true || num(pre.aConnectionsAtFound) < 1) : pre.memberBeforeStrand !== true
+    const bad = r.shape === 'vt' ? false : r.shape === 'l1' ? (pre.vAuthorizedBeforeFound !== true || num(pre.aConnectionsAtFound) < 1) : pre.memberBeforeStrand !== true
     if (bad) return voidRun('precondition-not-met', `precondition not met for ${str(r.shape)}`)
   }
 

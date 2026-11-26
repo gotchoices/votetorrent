@@ -158,6 +158,10 @@ describe('run: launcher wiring', function () {
     const tokens = ['officer', 'kh-a', 'kh-b'].map((l) => readFileSync(join(r.state, r.party, l, 'ctl.token'), 'utf8').trim())
     expect(new Set(tokens).size).to.equal(3)
     expect(r.spawned).to.have.length(1)
+    // one process, one preload: every label's instrument requests go to the primary's directory
+    for (const label of ['officer', 'kh-a', 'kh-b']) {
+      expect(r.launcher.handle(label)!.instrDir).to.equal(join(r.state, r.party, 'officer', 'instruments'))
+    }
   })
 
   it('the colocated boot waits for every label\'s ctl.port and registers every label\'s token', async () => {

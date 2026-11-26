@@ -149,6 +149,13 @@ describe('run: instruments', function () {
     expect(control.cls).to.equal('CONTROL WALL SHOWN')
     expect(classifyRun(log(start)).cls).to.equal('HIT')
     expect(classifyRun('').cls).to.equal('VOID-run (instrument-never-started)')
+    // a vt election leg has no two-node join precondition: its status and its own signals decide
+    const vt = (extra: Record<string, unknown>): string => log(start, `RESULT ${JSON.stringify({
+      shape: 'vt', instrument: { probeInstalled: true, probeCalls: 4 }, join: { ok: true, ms: 1 }, ...extra
+    })}`)
+    expect(classifyRun(vt({})).cls).to.equal('CLEAN')
+    expect(classifyRun(vt({ join: { ok: false, ms: 1 } })).cls).to.equal('HIT')
+    expect(classifyRun(vt({ wallSignals: { thrown: { superMajority: 1 } } })).cls).to.equal('HIT')
   })
 
   it('d14Verdict is CLEAN, HIT or INSTRUMENT from the snapshots', () => {
@@ -193,6 +200,8 @@ describe('run: instruments', function () {
     delete process.env.VT_INSTR_DIR
     try {
       const preload = await import('../src/run/instruments/daemon-preload.js')
+      // each workspace holds its own cadre-core: the wrapped classes must be the daemon's copy
+      expect(preload.DAEMON_PACKAGE_URL.pathname).to.match(/\/packages\/vote-cli\/package\.json$/)
       const state = { installed: false, calls: 0, maxBytes: 0, oversized: 0 }
       const sentinel = { handled: true }
       const proto = { send: async (_message: unknown) => sentinel }

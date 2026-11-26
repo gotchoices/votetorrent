@@ -109,6 +109,8 @@ export interface DaemonHandle {
   /** The label's own dir: `<state>/<party>/<label>`, holding ctl.port and ctl.token. */
   readonly dir: string
   readonly pid: number
+  /** Where this label's process watches for instrument requests: the group primary's, when colocated. */
+  readonly instrDir: string
   call (verb: string, args?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<DaemonCallResult>
   /** Voters only: writes `STAGE <name>` into ev/<label>.log. */
   stage (name: string): void
@@ -267,6 +269,7 @@ export function createDaemonLauncher (opts: DaemonLauncherOptions): DaemonLaunch
       kind,
       dir,
       pid: proc.child.pid ?? -1,
+      instrDir: join(proc.dirs.get(proc.spec.label) as string, 'instruments'),
       async call (verb, args = {}, o = {}) {
         const started = performance.now()
         const reply = await callCtl({ dir, role, verb, args, timeoutMs: o.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS })

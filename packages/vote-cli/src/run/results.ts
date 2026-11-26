@@ -41,7 +41,9 @@ const SUMMARY_RE = /^(PASS|FAIL [a-z0-9][a-z0-9-]* [a-z0-9][a-z0-9-]*)$/
 const ISO_RE = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/
 
 export type LegStatusValue = 'PASS' | 'FAIL' | 'VOID'
-export type InScriptD14 = 'OFF' | 'CLEAN' | 'HIT'
+export type InScriptD14 = 'OFF' | 'CLEAN' | 'HIT' | 'INSTRUMENT'
+
+export const IN_SCRIPT_D14: readonly InScriptD14[] = Object.freeze(['OFF', 'CLEAN', 'HIT', 'INSTRUMENT'])
 
 export interface LegStatus {
   leg: string
@@ -109,7 +111,7 @@ export function buildResults (input: ResultsInput): RunResults {
     if (!TOKEN_RE.test(l.leg)) bad('leg')
     if (l.status !== 'PASS' && l.status !== 'FAIL' && l.status !== 'VOID') bad('status')
     if (l.token !== '' && !TOKEN_RE.test(l.token)) bad('token')
-    if (l.inScriptD14 !== 'OFF' && l.inScriptD14 !== 'CLEAN' && l.inScriptD14 !== 'HIT') bad('inScriptD14')
+    if (!(IN_SCRIPT_D14 as readonly string[]).includes(l.inScriptD14)) bad('inScriptD14')
     if (!TOKEN_RE.test(l.reason)) bad('reason')
     return { leg: l.leg, status: l.status, token: l.token, inScriptD14: l.inScriptD14, reason: l.reason }
   })

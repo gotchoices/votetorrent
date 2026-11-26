@@ -7,9 +7,9 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
-import type { ProbeSnapshot, WallSnapshot } from './instruments/wall.js'
+import { createWallCounters, type ProbeSnapshot, type WallSnapshot } from './instruments/wall.js'
 import type { ApproveLine, RunOutput } from './output.js'
-import { DURATION_KEYS, TOKEN_RE, type LegStatus, type StepWindow } from './results.js'
+import { DURATION_KEYS, IN_SCRIPT_D14, TOKEN_RE, type InScriptD14, type LegStatus, type StepWindow } from './results.js'
 
 export { TOKEN_RE }
 
@@ -114,11 +114,9 @@ const CRASH_MESSAGE_CHARS = 200
 const WINDOW_RE = /^(reopen|h6-election|h7-accept|h8-dkg|approve[1-9]-(read|decide|publish)|release|tally|h9-voters-active)$/
 const WALL_LEG_SCHEMA = 'vt64-wall-leg/1'
 
-/** Maps an instrument verdict into the three readings results.json accepts; anything else fails closed. */
-function d14Reading (value: string): LegStatus['inScriptD14'] {
-  const r = value.replace(/[^A-Z]/g, '')
-  if (r === 'OFF' || r === 'HIT' || r.endsWith('EAN')) return r as LegStatus['inScriptD14']
-  return 'HIT'
+/** An instrument verdict outside the readings results.json accepts is an instrument fault. */
+function d14Reading (value: string): InScriptD14 {
+  return (IN_SCRIPT_D14 as readonly string[]).includes(value) ? value as InScriptD14 : 'INSTRUMENT'
 }
 
 function errorName (e: unknown): string {
@@ -289,41 +287,39 @@ export function createLegRunner (opts: LegRunnerOptions): LegRunner {
     w('RESULT ' + JSON.stringify({ schema: 'vt-run-leg/1', leg: name, status, token, totalMs: Math.round(perfNow() - t0) }))
     open = false
     let reading: LegD14Verdict = { inScriptD14: 'OFF', reason: 'instruments-off' }
-    let d14After: LegD14Snapshot | undefined
     if (opts.d14 !== undefined) {
+      // a reading that could not be taken is INSTRUMENT, never a clean or a hit
+      reading = { inScriptD14: 'INSTRUMENT', reason: 'snapshot-failed' }
       try {
-        d14After = await opts.d14.snapshot()
-        if (d14Before !== undefined) reading = await opts.d14.verdict(d14Before, d14After)
-        else reading = { inScriptD14: 'HIT', reason: 'measured' }
+        const after = await opts.d14.snapshot()
+        if (d14Before !== undefined) {
+          reading = await opts.d14.verdict(d14Before, after)
+          // this leg's own signals: the difference of the two snapshots, as the rig records them
+          const delta = createWallCounters().delta(d14Before.wall, after.wall)
+          writeFileSync(
+            join(dir, 'wall-leg.log'),
+            [
+              'LEG-START ' + JSON.stringify({ schema: WALL_LEG_SCHEMA, runId: `vt-${name}`, shape: 'vt' }),
+              'RESULT ' + JSON.stringify({
+                shape: 'vt',
+                instrument: { probeInstalled: after.probe.installed === true, probeCalls: after.probe.calls },
+                join: { ok: status === 'PASS', ms: Math.round(perfNow() - t0) },
+                oversizedTotal: after.probe.oversized - d14Before.probe.oversized,
+                stack: {},
+                wallSignals: delta,
+                otherSignals: { transferLimit: delta.hidden.transferLimit + delta.thrown.transferLimit + delta.late.transferLimit }
+              })
+            ].join('\n') + '\n',
+            { flag: 'wx', mode: 0o600 }
+          )
+        }
       } catch {
-        reading = { inScriptD14: 'HIT', reason: 'measured' }
+        reading = { inScriptD14: 'INSTRUMENT', reason: 'snapshot-failed' }
       }
       const reason = TOKEN_RE.test(reading.reason) ? reading.reason : 'measured'
-      const snap = d14After ?? d14Before
-      if (snap !== undefined) {
-        const wallSignals = {
-          hidden: snap.wall.paths.hidden,
-          thrown: snap.wall.paths.thrown,
-          late: snap.wall.paths.late
-        }
-        writeFileSync(
-          join(dir, 'wall-leg.log'),
-          [
-            'LEG-START ' + JSON.stringify({ schema: WALL_LEG_SCHEMA, runId: `vt-${name}`, shape: 'vt' }),
-            'RESULT ' + JSON.stringify({
-              shape: 'vt',
-              instrument: { probeInstalled: snap.probe.installed === true, probeCalls: snap.probe.calls },
-              join: { ok: true, ms: 0 },
-              stack: {},
-              wallSignals
-            })
-          ].join('\n') + '\n',
-          { flag: 'wx', mode: 0o600 }
-        )
-      }
       reading = { inScriptD14: d14Reading(reading.inScriptD14), reason }
     }
-    const st: LegStatus = { leg: name, status, token, inScriptD14: reading.inScriptD14 as LegStatus['inScriptD14'], reason: reading.reason, checks }
+    const st: LegStatus = { leg: name, status, token, inScriptD14: reading.inScriptD14 as InScriptD14, reason: reading.reason, checks }
     writeFileSync(
       join(dir, 'leg-status.json'),
       JSON.stringify({ status, token, inScriptD14: st.inScriptD14, reason: st.reason, checks }) + '\n',
