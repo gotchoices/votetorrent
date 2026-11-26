@@ -184,7 +184,13 @@ export async function runElection (opts: RunOptions, deps: RunDeps): Promise<Exi
     process.on('SIGTERM', onSignal)
   }
 
-  // 6. the run context
+  // 6. the run context. A failed or aborted leg leaves its parallel branches (voter flows, the officer
+  // loop) pending; once the legs are over, their next call or sleep ends them, so no branch polls a
+  // stopped daemon and the process can exit right after SUMMARY.
+  let over = false
+  const endIfOver = (): void => {
+    if (over) throw new LegFail('FAIL', 'interrupted')
+  }
   const groupOf = (label: string): string[] => (opts.colocate?.includes(label) === true ? [...opts.colocate] : [label])
   const starts = new Map<string, Promise<void>>()
   const startGroup = (group: string[]): Promise<void> => {
@@ -220,10 +226,13 @@ export async function runElection (opts: RunOptions, deps: RunDeps): Promise<Exi
       label,
       ready,
       async call (verb, args, o) {
+        endIfOver()
         await ready()
+        endIfOver()
         return handleOf().call(verb, args, o)
       },
       stage (name) {
+        endIfOver()
         handleOf().stage(name)
       }
     }
@@ -275,7 +284,11 @@ export async function runElection (opts: RunOptions, deps: RunDeps): Promise<Exi
     shared,
     instruments,
     nowMs,
-    sleep: deps.sleepMs ?? ((ms): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms)))
+    async sleep (ms) {
+      endIfOver()
+      await (deps.sleepMs ?? ((t: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, t))))(ms)
+      endIfOver()
+    }
   }
 
   // 7. the legs
@@ -306,6 +319,7 @@ export async function runElection (opts: RunOptions, deps: RunDeps): Promise<Exi
   }
 
   // 8. teardown: marks, daemons, scan, results, RESULT, SUMMARY (always the last line)
+  over = true
   if (!out.hasMark('p1-end')) out.runMark('p1-end')
   if (out.hasMark('p2-start') && !out.hasMark('p2-end')) out.runMark('p2-end')
   clearTimeout(alarm)
