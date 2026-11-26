@@ -5,6 +5,9 @@ import { HANDOFF_KEYS } from '../results.js'
 import type { ElectionLegBody } from '../election-legs.js'
 import { callVerb, needOk, nowMs, number, stringOf } from './common.js'
 
+/** releasingKeys = accruingVotes + 2 x 60 s (the CLI timeline); a spec pins it to buildCliTimeline. */
+export const RELEASING_AFTER_ACCRUING_MS = 120000
+
 export const electionBody: ElectionLegBody = async (L, ctx) => {
   const t0 = nowMs(ctx)
   const networkHash = ctx.shared.networkHash
@@ -32,11 +35,9 @@ export const electionBody: ElectionLegBody = async (L, ctx) => {
   const closed = created.ok ? stringOf(created.result.closedAt) : ''
   ctx.shared.votingStartsAtMs = Date.parse(starts)
   ctx.shared.closedAtMs = Date.parse(closed)
-  const fromResult = created.ok ? stringOf(created.result.releasingKeysAt) : ''
-  // A reduced topology has no votes to wait for, so its release window opens at votingStarts.
-  ctx.shared.releasingKeysAtMs = ctx.opts.reduced
-    ? ctx.shared.votingStartsAtMs
-    : fromResult.length > 0 ? Date.parse(fromResult) : ctx.shared.closedAtMs + 120000
+  // The create-election reply carries no releasingKeys instant: it is the timeline rule the verb builds
+  // (election/parse-timeline.ts, as the rig), in a full and a reduced topology alike.
+  ctx.shared.releasingKeysAtMs = ctx.shared.votingStartsAtMs + ctx.opts.windowMs + RELEASING_AFTER_ACCRUING_MS
   ctx.out.key(HANDOFF_KEYS.election, `electionId=${electionId}`)
   ctx.out.key('ELECTION', `id8=${electionId.slice(-8)} votingStartsAt=${starts} releasingKeysAt=${new Date(ctx.shared.releasingKeysAtMs).toISOString()}`)
 

@@ -7,11 +7,12 @@ import { roleForLabel, type DaemonCallResult } from '../daemon-launcher.js'
 import { LEG_VERBS, type LegVerbInput, type LegVerbKey } from '../leg-verbs.js'
 import type { LegCtx } from '../legs.js'
 import type { RunContext } from '../election-legs.js'
+import { CLI01_VERB_INVENTORY, NOT_IN_RUN, SUPPORT_VERBS } from '../verb-inventory.js'
 
 export const nowMs = (ctx: RunContext): number => ctx.nowMs()
 export const sleep = (ctx: RunContext, ms: number): Promise<void> => ctx.sleep(ms)
 
-export async function callVerb (
+async function invoke (
   ctx: RunContext,
   label: string,
   key: LegVerbKey,
@@ -22,7 +23,17 @@ export async function callVerb (
   if (roleForLabel(label) !== entry.role) throw new TypeError('leg-bodies: wrong-role')
   const args: Record<string, string> = entry.args(input)
   if (entry.approval) args.tokenFile = ctx.tokenFile(label)
-  const reply = await ctx.peer(label).call(entry.verb, args, opts)
+  return ctx.peer(label).call(entry.verb, args, opts)
+}
+
+export async function callVerb (
+  ctx: RunContext,
+  label: string,
+  key: LegVerbKey,
+  input: LegVerbInput,
+  opts: { timeoutMs?: number } = {}
+): Promise<DaemonCallResult> {
+  const reply = await invoke(ctx, label, key, input, opts)
   if (!reply.ok) ctx.instruments?.wall.record('thrown', reply.error)
   return reply
 }
@@ -49,7 +60,8 @@ export async function poll<T> (
   const t0 = nowMs(ctx)
   let last: T | undefined
   for (;;) {
-    const reply = await callVerb(ctx, label, key, input)
+    // a failed poll is a hidden wall signal only: it never counts as thrown as well
+    const reply = await invoke(ctx, label, key, input)
     if (!reply.ok) ctx.instruments?.wall.record('hidden', reply.error)
     else {
       last = reply.result as T
@@ -58,6 +70,23 @@ export async function poll<T> (
     if (nowMs(ctx) - t0 >= opts.timeoutMs) return { ok: false, value: last, waitedMs: nowMs(ctx) - t0 }
     await sleep(ctx, opts.intervalMs)
   }
+}
+
+/**
+ * The need `verb-missing`: the daemon's built-in listing holds every registered verb its role serves
+ * in the inventory and the support list. A verb the run never calls (NOT_IN_RUN) is not required.
+ */
+export async function needServedVerbs (ctx: RunContext, L: LegCtx, label: string): Promise<void> {
+  const role = roleForLabel(label)
+  const reply = await callVerbs(ctx, label)
+  needOk(L, 'verb-missing', `V-${label}`, `${label} serves the built-in listing`, reply)
+  const served = reply.ok && Array.isArray(reply.result.verbs) ? reply.result.verbs.map(String) : []
+  const skipped = (verb: string): boolean => NOT_IN_RUN.some((n) => n.role === role && n.verb === verb)
+  const expected = [...CLI01_VERB_INVENTORY, ...SUPPORT_VERBS]
+    .filter((v) => v.role === role && !skipped(v.verb))
+    .map((v) => v.verb)
+  const missing = [...new Set(expected)].filter((v) => !served.includes(v))
+  L.need('verb-missing', `VM-${label}`, `${label} serves every verb of its role`, missing.length === 0, { count: missing.length })
 }
 
 export function needOk (

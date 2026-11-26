@@ -25,15 +25,16 @@ export const releaseBody: ElectionLegBody = async (L, ctx) => {
   const network = ctx.shared.networkHash
   const election = ctx.shared.electionId
 
+  // The wait is bounded: an instant further away than the run's window plus ten minutes is refused
+  // before waiting, and the run alarm covers a wait that never ends.
   const waitStart = nowMs(ctx)
-  while (nowMs(ctx) < ctx.shared.releasingKeysAtMs && nowMs(ctx) - waitStart < 600000) await sleep(ctx, 1000)
-  L.need('release-wait', 'Q0', 'the key-release window was reached by the real clock',
-    nowMs(ctx) >= ctx.shared.releasingKeysAtMs && nowMs(ctx) - waitStart <= 600000,
-    { waitedMs: nowMs(ctx) - waitStart })
+  const bound = ctx.opts.leadMs + ctx.opts.windowMs + 600000
+  L.need('release-wait', 'Q0', 'the key-release instant is within the wait bound',
+    ctx.shared.releasingKeysAtMs - waitStart <= bound, { remainingMs: ctx.shared.releasingKeysAtMs - waitStart, boundMs: bound })
+  while (nowMs(ctx) < ctx.shared.releasingKeysAtMs) await sleep(ctx, 1000)
 
   const window = await callVerb(ctx, 'officer', 'officer.release-window', { network, election })
-  needOk(L, 'release-wait', 'Q1', 'the officer opened the release window', window)
-  L.need('release-wait', 'Q2', 'the release window is open', window.ok && (stringOf(window.result.phase) === 'reconstructable' || number(window.result.releasedCount) >= 2))
+  needOk(L, 'release-wait', 'Q1', 'the officer sees the release window open', window)
 
   const releaseStart = nowMs(ctx)
   const released = await Promise.all(['kh-a', 'kh-b'].map((label) => callVerb(ctx, label, 'keyholder.release', {
@@ -42,6 +43,8 @@ export const releaseBody: ElectionLegBody = async (L, ctx) => {
     awaitCount: 2
   }, { timeoutMs: 900000 })))
   for (let i = 0; i < released.length; i++) needOk(L, 'release', `L-${i}`, `keyholder ${i + 1} released its share`, released[i]!)
+  L.need('release', 'L-2', 'two releases are accepted and none rejected',
+    released.every((r) => r.ok && number(r.result.rejected) === 0) && released.some((r) => r.ok && number(r.result.releasedCount) >= 2))
   L.duration('releaseMs', nowMs(ctx) - releaseStart)
   L.window('release', releaseStart, nowMs(ctx))
 
@@ -51,12 +54,15 @@ export const releaseBody: ElectionLegBody = async (L, ctx) => {
     const tallyStart = nowMs(ctx)
     const tally = await callVerb(ctx, 'officer', 'officer.tally', { network, election }, { timeoutMs: 900000 })
     needOk(L, 'decrypt', 'X1', 'the officer tallied the votes', tally)
-    L.need('decrypt', 'X2', 'three valid votes, no failures', tally.ok && number(tally.result.valid) === 3 && number(tally.result.invalid) === 0 && number(tally.result.excluded) === 0)
+    const cast = ctx.opts.voters
+    L.need('decrypt', 'X2', 'every cast vote is valid, none invalid or excluded', tally.ok && number(tally.result.valid) === cast && number(tally.result.invalid) === 0 && number(tally.result.excluded) === 0)
+    L.need('block', 'X2b', 'every vote is in one pool block', tally.ok && number(tally.result.blockCount) === 1, { blocks: tally.ok ? number(tally.result.blockCount) : 0 })
     L.duration('decryptMs', nowMs(ctx) - tallyStart)
     L.window('tally', tallyStart, nowMs(ctx))
 
     const published = await callVerb(ctx, 'officer', 'officer.publish', { network, election })
     needOk(L, 'results', 'X3', 'the officer published the tally', published)
+    L.need('results', 'X3b', 'the tally was published by this call', published.ok && stringOf(published.result.outcome) === 'published')
 
     const reads = await Promise.all(labels.map(async (label) => {
       if (roleOf(label) === 'voter') ctx.peer(label).stage('results-wait')
@@ -74,7 +80,13 @@ export const releaseBody: ElectionLegBody = async (L, ctx) => {
     let equal = true
     for (const r of reads) {
       const result = r.read.value ?? {}
-      const tag = resultsTag(result)
+      // a reply that cannot be projected is a differing peer, never a crash
+      let tag = 'unreadable'
+      try {
+        tag = resultsTag(result)
+      } catch {
+        equal = false
+      }
       tags.push(tag)
       if (firstTag.length === 0) firstTag = tag
       if (tag !== firstTag) equal = false
@@ -85,8 +97,9 @@ export const releaseBody: ElectionLegBody = async (L, ctx) => {
     L.need('results-identity', 'X5', 'all peers read byte-identical canonical results', equal, { peers: tags.length })
     const officerResult: Record<string, unknown> = reads.find((r) => r.label === 'officer')?.read.value ?? {}
     const counts = Array.isArray(officerResult.counts) ? officerResult.counts.map((c) => number(c)) : []
-    L.need('results', 'X6', 'the count multiset equals the three cast choices',
-      [...counts].sort((a, b) => b - a).join('/') === '2/1', { counts: counts.join('/') })
+    // option 0 for every voter but the last, who takes option 1 (election.ts votersChoices)
+    L.need('results', 'X6', 'the count multiset equals the cast choices',
+      [...counts].sort((a, b) => b - a).join('/') === `${ctx.opts.voters - 1}/1`, { counts: counts.join('/') })
   }
 
   const reads = await Promise.all(labels.map((label) => callVerb(ctx, label, readbackKey(label), {})))
@@ -94,7 +107,7 @@ export const releaseBody: ElectionLegBody = async (L, ctx) => {
   ctx.out.key('PEER-RSS-MB', labels.map((label, i) => `${label}=${reads[i]!.ok ? number(reads[i]!.result.rssMb) : 0}`).join(' '))
 
   if (ctx.instruments !== null) {
-    const pre = await ctx.instruments.forkPrecheck('exit', L.dir, labels)
-    L.need(`fork-precheck-${pre.token || 'unreadable'}`, 'X2', 'fork precheck at exit', pre.pass)
+    const pre = await ctx.instruments.forkPrecheck('exit', L.dir, ['officer', 'kh-a', 'kh-b'])
+    L.need(`fork-precheck-${pre.token || 'unreadable'}`, 'X7', 'fork precheck at exit', pre.pass)
   }
 }

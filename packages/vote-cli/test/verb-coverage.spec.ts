@@ -36,12 +36,25 @@ describe('run: verb coverage', function () {
   }
 
   it('the CLI-01 inventory names every workflow from REQUIREMENTS CLI-01 and CONTEXT workflow coverage', () => {
-    expect(CLI01_VERB_INVENTORY).to.have.length(28)
     const counts: Record<string, number> = { officer: 0, keyholder: 0, voter: 0 }
     for (const e of CLI01_VERB_INVENTORY) counts[e.role] = (counts[e.role] ?? 0) + 1
-    expect(counts).to.deep.equal({ officer: 16, keyholder: 4, voter: 8 })
+    expect(counts).to.deep.equal({ officer: 20, keyholder: 5, voter: 8 })
     const pairs = CLI01_VERB_INVENTORY.map((e) => `${e.role} ${e.verb}`)
     expect(new Set(pairs).size).to.equal(pairs.length)
+    // the inventory is derived from the landed registries: every registered verb except the daemon support verbs
+    const support = (role: string, verb: string): boolean => verb === 'readback' || verb === 'stop' || verb === 'capability'
+    const registered = (['officer', 'keyholder', 'voter'] as const)
+      .flatMap((role) => Object.keys(REGISTRIES[role]).filter((v) => !support(role, v)).map((v) => `${role} ${v}`))
+    expect(pairs).to.have.members(registered)
+    // the CONTEXT workflow-coverage list, by name
+    for (const pair of [
+      'officer found', 'officer mint', 'officer create-election', 'officer keyholder-policy', 'officer invite-keyholder',
+      'officer ballot-submit', 'officer task-sign', 'officer enable-intake', 'officer approve', 'officer refuse',
+      'officer peer-sync', 'officer release-window', 'officer tally', 'officer publish', 'officer results',
+      'officer dashboard-code', 'keyholder join', 'keyholder accept', 'keyholder dkg', 'keyholder release',
+      'voter join', 'voter register', 'voter stage-association', 'voter answer-challenge', 'voter read-decision',
+      'voter cast', 'voter send', 'voter results'
+    ]) expect(pairs).to.include(pair)
     expect(CLI01_VERB_INVENTORY.find((e) => e.verb === 'refuse')?.runUse).to.equal('negative-control')
     for (const e of CLI01_VERB_INVENTORY) expect(e.source).to.include('REQUIREMENTS CLI-01')
   })
@@ -64,6 +77,11 @@ describe('run: verb coverage', function () {
     }
     expect(SUPPORT_VERBS.some((e) => e.verb === BUILTIN_VERBS_VERB)).to.equal(true)
     expect(NOT_IN_RUN.find((e) => e.role === 'officer' && e.verb === 'join')?.reason).to.include('one-officer')
+    // only a verb listed not-in-run may be excused from coverage, and it is never called by the run
+    const excused = CLI01_VERB_INVENTORY.filter((e) => e.runUse === 'not-in-run').map((e) => `${e.role} ${e.verb}`)
+    expect(excused).to.deep.equal(['officer join'])
+    for (const e of excused) expect(NOT_IN_RUN.map((n) => `${n.role} ${n.verb}`)).to.include(e)
+    expect(Object.values(LEG_VERBS).some((e) => NOT_IN_RUN.some((n) => n.role === e.role && n.verb === e.verb))).to.equal(false)
   })
 
   it('the leg-verb adapter uses only registered verbs', () => {

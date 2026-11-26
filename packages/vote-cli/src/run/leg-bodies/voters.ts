@@ -1,22 +1,22 @@
 // The h9-voters leg: mint one code per voter, drive the voter registration/association ceremony and
-// the officer approval loop concurrently, then pool all votes at the real voting window. With fewer
-// than three voters the leg stops after association and records pool-skipped (a check, not a soft fail).
+// the officer approval loop concurrently, then cast once voting has opened (eligibility refuses a cast
+// before the window) and pool all votes together. With fewer than three voters the leg stops after
+// association and records pool-skipped (a check, not a soft fail).
 
 import { writeFileSync } from 'node:fs'
 import type { ElectionLegBody } from '../election-legs.js'
-import { callVerb, callVerbs, needOk, nowMs, number, poll, sleep, stringOf } from './common.js'
+import { callVerb, needOk, needServedVerbs, nowMs, number, poll, sleep, stringOf } from './common.js'
 
 interface VoterMetric {
-  label: string
   joinMs: number
   associatedMs: number
-  cid8: string
-  sendMs: number
 }
+
+const AUTHORITIES = ['officer', 'kh-a', 'kh-b'] as const
 
 export const votersBody: ElectionLegBody = async (L, ctx) => {
   const reduced = ctx.opts.voters < 3
-  const target = reduced ? ctx.opts.voters : 3
+  const target = ctx.opts.voters
   const voters: string[] = []
   for (let i = 1; i <= ctx.opts.voters; i++) voters.push(`v${i}`)
   const network = ctx.shared.networkHash
@@ -34,13 +34,7 @@ export const votersBody: ElectionLegBody = async (L, ctx) => {
     ctx.shared.fingerprintFiles[label] = fingerprintFile
   }
   await ctx.startPeers(voters)
-  for (const label of voters) {
-    const reply = await callVerbs(ctx, label)
-    needOk(L, 'verb-missing', `V-${label}`, `${label} serves the built-in listing`, reply)
-    const served = reply.ok && Array.isArray(reply.result.verbs) ? reply.result.verbs.map(String) : []
-    const missing = ['join', 'register', 'stage-association', 'answer-challenge', 'read-decision', 'cast', 'send', 'results', 'readback', 'stop'].filter((v) => !served.includes(v))
-    L.need('verb-missing', `VM-${label}`, `${label} serves every voter verb`, missing.length === 0, { count: missing.length })
-  }
+  for (const label of voters) await needServedVerbs(ctx, L, label)
 
   const approvals = new Set<string>()
   let challenges = 0
@@ -94,7 +88,7 @@ export const votersBody: ElectionLegBody = async (L, ctx) => {
         L.window(`approve${n}-read`, callStart, callStart + readMs)
         L.window(`approve${n}-decide`, callStart + readMs, callStart + readMs + decideMs)
         L.window(`approve${n}-publish`, callStart + readMs + decideMs, callStart + readMs + decideMs + publishMs)
-        approvals.add(request)
+        if (approve.ok) approvals.add(request)
       }
 
       const after = await callVerb(ctx, 'officer', 'officer.peer-sync', { authority: ctx.shared.authorityId, network })
@@ -107,6 +101,9 @@ export const votersBody: ElectionLegBody = async (L, ctx) => {
       if (nowMs(ctx) >= ended) break
       await sleep(ctx, 5000)
     }
+    // one more sync after the last association, so every decision is published to its voter
+    const last = await callVerb(ctx, 'officer', 'officer.peer-sync', { authority: ctx.shared.authorityId, network })
+    needOk(L, 'officer-loop', 'S4', 'the officer ran the closing sync', last)
     L.need('officer-loop', 'G1', `${target} registrations were approved once each`, approvals.size >= target, { approvals: approvals.size })
     L.need('officer-loop', 'G2', `${target} challenges were issued`, challenges >= target, { challenges })
     L.need('officer-loop', 'G3', `${target} associations were published`, associations >= target, { associations })
@@ -126,7 +123,7 @@ export const votersBody: ElectionLegBody = async (L, ctx) => {
       timeoutMs: 420000
     })
     needOk(L, 'join-outcome', `V-${label}`, `${label} joined the network`, joined)
-    if (!joined.ok) return { label, joinMs: 0, associatedMs: 0, cid8: '', sendMs: 0 }
+    if (!joined.ok) return { joinMs: 0, associatedMs: 0 }
     const joinMs = Math.max(1, nowMs(ctx) - joinStart)
     peer.stage('joined')
 
@@ -156,18 +153,19 @@ export const votersBody: ElectionLegBody = async (L, ctx) => {
     const associatedMs = Math.max(joinMs, nowMs(ctx) - joinStart)
     peer.stage('associated')
     peer.stage('eligible')
-    if (reduced) return { label, joinMs, associatedMs, cid8: '', sendMs: 0 }
-
-    const choice = ctx.shared.votersChoices[label] ?? (label === 'v3' ? 1 : 0)
-    const cast = await callVerb(ctx, label, 'voter.cast', { network, election, choiceIndex: choice })
-    needOk(L, 'vote-built', `B-${label}`, `${label} built and signed its vote`, cast)
-    peer.stage('vote-built')
+    if (reduced) return { joinMs, associatedMs }
 
     const untilOpen = ctx.shared.votingStartsAtMs + 1000
     while (nowMs(ctx) < untilOpen) await sleep(ctx, 1000)
     peer.stage('voting-open')
+    const choice = ctx.shared.votersChoices[label] ?? 0
+    const cast = await callVerb(ctx, label, 'voter.cast', { network, election, choiceIndex: choice })
+    needOk(L, 'vote-built', `B-${label}`, `${label} built and signed its vote`, cast)
+    // the choice file travels by the path in the reply; whole value only, its text embeds public ids
+    if (cast.ok) ctx.registerSecretFile(stringOf(cast.result.choiceFile))
+    peer.stage('vote-built')
     peer.stage('ready-to-send')
-    return { label, joinMs, associatedMs, cid8: '', sendMs: 0 }
+    return { joinMs, associatedMs }
   }
 
   const metrics = await Promise.all([loopPromise, ...voters.map(prepare)])
@@ -185,30 +183,22 @@ export const votersBody: ElectionLegBody = async (L, ctx) => {
     atSend >= ctx.shared.votingStartsAtMs && atSend <= ctx.shared.closedAtMs - 180000,
     { at: atSend, opens: ctx.shared.votingStartsAtMs, closes: ctx.shared.closedAtMs })
 
-  const sent = await Promise.all(voters.map(async (label) => {
+  for (const label of voters) ctx.peer(label).stage('pooling')
+  // The send reply carries no block id; one pool is proven by the tally's blockCount in the next leg.
+  const sendMs = await Promise.all(voters.map(async (label) => {
     const sendStart = nowMs(ctx)
     const result = await callVerb(ctx, label, 'voter.send', { network, election }, { timeoutMs: 900000 })
-    needOk(L, 'hv-commit', `P-${label}`, `${label} committed its vote`, result)
-    if (result.ok && result.result.committed !== 1) {
-      L.need('hv-commit', `P2-${label}`, `${label} committed exactly one vote`, false, { stage: stringOf(result.result.reason) })
-    }
+    needOk(L, 'hv-commit', `P-${label}`, `${label}'s send finished`, result)
+    const committed = result.ok ? number(result.result.committed) : 0
+    L.need('hv-commit', `P2-${label}`, `${label} committed exactly one ballot`, committed === 1, { committed })
     ctx.peer(label).stage('committed')
-    return { label, cid8: result.ok ? stringOf(result.result.cid8) : '', sendMs: nowMs(ctx) - sendStart, sentAt: sendStart }
+    return nowMs(ctx) - sendStart
   }))
-  for (const s of sent) {
-    const m = voterMetrics.find((x) => x.label === s.label)
-    if (m !== undefined) {
-      m.cid8 = s.cid8
-      m.sendMs = s.sendMs
-    }
-  }
-  const cids = sent.map((s) => s.cid8)
-  L.need('cid-disagree', 'P1', 'all voters committed the same block', cids.every((c) => c.length > 0 && c === cids[0]), { count: cids.length })
-  L.duration('poolMs', Math.max(0, ...sent.map((s) => s.sendMs)))
+  L.duration('poolMs', Math.max(0, ...sendMs))
   L.window('h9-voters-active', firstJoinStart, nowMs(ctx))
 
   if (ctx.instruments !== null) {
-    const pre = await ctx.instruments.forkPrecheck('block', L.dir, voters)
+    const pre = await ctx.instruments.forkPrecheck('block', L.dir, AUTHORITIES)
     L.need(`fork-precheck-${pre.token || 'unreadable'}`, 'P5', 'fork precheck after the block', pre.pass)
   }
 }

@@ -23,7 +23,6 @@ const RELAY_ADDR = '/ip4/127.0.0.1/tcp/1/ws/p2p/12D3KooWSyntheticRe1ayPeerXyzABC
 const HASH = 'ab'.repeat(16)
 const AUTHORITY_ID = 'cd'.repeat(4)
 const JOINT_TAG = '0123456789abcdef'
-const CID = 'cafe1234'
 const AGREEMENT = 'ef'.repeat(32)
 
 const SERVED: Record<string, string[]> = Object.freeze({
@@ -81,8 +80,11 @@ export function happyScript (opts: {
     return path
   }
   const associations = (): number => (approved.size >= opts.target ? opts.target : approved.size)
+  // the timeline rule of the real create-election verb: releasingKeys = starts + window + 120 s
+  const releaseAt = startMs + 480000 + 120000
+  const windowClosed = (code: string): ScriptedReply => ({ ok: false, error: { name: 'VerbRefusal', code, message: `verb refused (${code})` }, ms: 2 })
   const results = (): ScriptedReply => reply({
-    status: 'tallied', valid: 3, invalid: 0, excluded: 0, counts: [2, 1],
+    status: 'tallied', valid: 3, invalid: 0, excluded: 0, counts: [1, 2],
     blockCount: 1, openedCount: 3, agreementSha256: AGREEMENT
   }, 3)
 
@@ -111,7 +113,7 @@ export function happyScript (opts: {
     'officer.enable-intake': () => reply({ state: 'enabled', changed: true }),
     'officer.create-election': () => reply({
       electionId: 'election-script-0001', authorityId8: AUTHORITY_ID, title: 'vt-election', threshold: 2, seats: 2,
-      votingStartsAt: iso(startMs), closedAt: iso(startMs + 480000), releasingKeysAt: iso(startMs + 600000),
+      votingStartsAt: iso(startMs), closedAt: iso(startMs + 480000 + 360000),
       electionCount: 1, signatures: 2, ms: 4
     }, 4),
     'officer.keyholder-policy': () => reply({ mode: 'read', electionId: 'election-script-0001', threshold: 2, seats: 2, invitedSeats: 2 }),
@@ -145,11 +147,15 @@ export function happyScript (opts: {
     },
     'keyholder.accept': () => reply({ accepted: true, attempts: 1, acceptUnwraps: 0, election8: 'election', userId8: AUTHORITY_ID }),
     'keyholder.dkg': () => reply({ phase: 'complete', hasShare: true, jointKeyTag: JOINT_TAG, threshold: 2, participants: 2, drives: 3, actions: 5, dkgUnwraps: 10 }, 6),
-    'officer.release-window': () => reply({ electionId: 'election-script-0001', releasingKeysAt: iso(startMs + 600000), waitedMs: 0, phase: 'reconstructable', releasedCount: 2, rejected: 0, preRelease: null, statusReads: 1 }, 2),
-    'keyholder.release': () => reply({ alreadyReleased: false, released: 1, releasedCount: 2, rejected: 0, releaseUnwraps: 2 }, 3),
+    'officer.release-window': () => opts.nowMs() < releaseAt
+      ? windowClosed('window-not-open')
+      : reply({ electionId: 'election-script-0001', releasingKeysAt: iso(releaseAt), waitedMs: 0, phase: 'releasing', releasedCount: 0, rejected: 0, preRelease: { checked: true, blocks: 1 }, statusReads: 1 }, 2),
+    'keyholder.release': () => opts.nowMs() < releaseAt
+      ? windowClosed('window-not-open')
+      : reply({ released: true, alreadyReleased: false, releasedCount: 2, rejected: 0, releaseUnwraps: 2 }, 3),
     'officer.tally': () => reply({
       electionId: 'election-script-0001', revision: 1, status: 'tallied', blockCount: 1,
-      valid: 3, invalid: 0, excluded: 0, counts: [2, 1], tallyRoot8: 'aabbccdd', blockRoot8: 'ddeeffaa',
+      valid: 3, invalid: 0, excluded: 0, counts: [1, 2], tallyRoot8: 'aabbccdd', blockRoot8: 'ddeeffaa',
       openedCount: 3, openedFailures: 0, signatures: 0, tallyMs: 4, decryptMs: 4
     }, 4),
     'officer.publish': () => reply({ electionId: 'election-script-0001', revision: 1, outcome: 'published', publishedAt: iso(opts.nowMs()), tallyRoot8: 'aabbccdd', rows: 1, signatures: 1, publishMs: 3 }, 3),
@@ -167,13 +173,14 @@ export function happyScript (opts: {
     },
     'voter.answer-challenge': () => reply({ outcome: 'answered', challengeStatus: 'c', steps: 1 }),
     'voter.cast': (c) => {
-      const name = `vote-choice-${String(c.args.election).slice(0, 8)}.json`
+      if (opts.nowMs() < startMs) return windowClosed('ineligible:window-closed')
+      const name = `vote-choice-${c.label}-${String(c.args.election)}.json`
       const choiceFile = write(name, JSON.stringify([{ ballotId: 'ballot-script-1', answers: [{ questionCode: 'vt-q1', optionCodes: ['vt-opt'] }] }]))
       return reply({ electionId: 'election-script-0001', ballots: ['ballot-script-1'], choiceFile, castUnwraps: 1, tokenReads: 3, castMs: 3 }, 3)
     },
     'voter.send': () => {
       sendTimes.push(opts.nowMs())
-      return reply({ electionId: 'election-script-0001', ballots: [{ ballotId: 'ballot-script-1', phase: 'sent' }], committed: 1, cid8: CID, tokenReads: 2, sendMs: 4 }, 4)
+      return reply({ electionId: 'election-script-0001', ballots: [{ ballotId: 'ballot-script-1', phase: 'sent' }], committed: 1, tokenReads: 2, sendMs: 4 }, 4)
     },
 
     'officer.stop': () => reply({}),
@@ -224,6 +231,7 @@ export class ScriptedLauncher implements DaemonLauncher {
       kind: roleForLabel(label) === 'voter' ? 'voter' : 'authority',
       dir: join(this.options.stateDir, this.options.party, label),
       pid: 1,
+      instrDir: join(this.options.stateDir, this.options.party, label, 'instruments'),
       call: async (verb, args = {}, o = {}) => {
         const now = this.options.nowMs?.() ?? Date.now()
         const iso = new Date(now).toISOString()

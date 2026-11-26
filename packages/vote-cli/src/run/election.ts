@@ -271,12 +271,7 @@ export async function runElection (opts: RunOptions, deps: RunDeps): Promise<Exi
       if (!labels.includes(label)) throw new TypeError('run: unknown-peer')
       return join(secretsDir, `${label}.token`)
     },
-    async restart (label) {
-      const started = nowMs()
-      const handle = await launcher.restart(label)
-      runner.steps.push({ name: `restart-${label}`, startMs: started, endMs: nowMs() })
-      return handle
-    },
+    restart: (label) => launcher.restart(label),
     shared,
     instruments,
     nowMs,

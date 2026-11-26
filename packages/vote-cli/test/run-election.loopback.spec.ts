@@ -11,7 +11,7 @@ import { DURATION_KEYS, RESULTS_KEYS } from '../src/run/results.js'
 import { readControlLeafReply, writeControlLeafRequest } from '../src/run/instruments/run-instruments.js'
 import { REPO_ROOT } from '../src/run/options.js'
 import { checkCommandsLogCoverage, parseCommandsLog } from '../src/run/verb-inventory.js'
-import { daemonEnv, PACKAGE_ROOT, VT_DIST_BIN } from './support/daemon-fixture.js'
+import { daemonEnv, PACKAGE_ROOT, startDaemon, VT_DIST_BIN } from './support/daemon-fixture.js'
 import { hostTierEnabled } from './support/host-tier.js'
 import { startLoopbackRelay, type LoopbackRelay } from './support/loopback-relay.js'
 
@@ -194,6 +194,33 @@ async function startInstrumentedOfficer (root: string, relay: LoopbackRelay, par
   return { runDir, peerDir, instrDir, ready, stop }
 }
 
+/** Mints a code on the instrumented officer, joins one plain keyholder daemon with it and stops it again. */
+async function joinKeyholder (officer: InstrumentDaemon, relay: LoopbackRelay, party: string, networkHash: string): Promise<void> {
+  const secrets = join(officer.runDir, 'secrets')
+  const codeFile = join(secrets, 'code-kh-a.txt')
+  const fingerprintFile = join(secrets, 'fp-kh-a.txt')
+  const tokenFile = join(secrets, 'kh-a.token')
+  writeApprovalTokenFile(tokenFile)
+  const peerDir = join(officer.runDir, 'state', party, 'kh-a')
+  mkdirSync(peerDir, { recursive: true, mode: 0o700 })
+  const keyholder = await startDaemon({ role: 'keyholder', peerDir, relayEnvPath: relay.relayEnvPath, party, logDir: join(officer.runDir, 'logs') })
+  try {
+    expect(keyholder.ready, 'keyholder boot').to.equal(true)
+    const minted = await callCtl({ dir: officer.peerDir, role: 'officer', verb: 'mint', args: { networkHash, codeFile, fingerprintFile }, timeoutMs: 300_000 })
+    expectCtl(minted, 'mint')
+    const joined = await callCtl({
+      dir: peerDir,
+      role: 'keyholder',
+      verb: 'join',
+      args: { networkHash, codeFile, expectFingerprintFile: fingerprintFile, expectName: NETWORK_NAME, tokenFile },
+      timeoutMs: 600_000
+    })
+    expectCtl(joined, 'keyholder join')
+  } finally {
+    await keyholder.stop()
+  }
+}
+
 function expectPassRun (run: RecordedRun): ResultsView {
   expect(run.code, 'run exit code').to.equal(0)
   expect(readFileSync(run.exitPath, 'utf8').trim(), 'run.exit').to.equal('0')
@@ -217,6 +244,8 @@ function expectPassRun (run: RecordedRun): ResultsView {
   expect(results.secretScan.whole, 'secretScan whole').to.equal(0)
   expect(results.secretScan.windows, 'secretScan windows').to.equal(0)
   expect(results.secretScan.files, 'secretScan files').to.be.greaterThan(0)
+  expect(results.keys['HANDOFF-NETWORK'] ?? '', 'HANDOFF-NETWORK').to.match(/^networkHash=[0-9a-f]{32}$/)
+  expect(results.keys['HANDOFF-ELECTION'] ?? '', 'HANDOFF-ELECTION').to.match(/^electionId=election-\d+$/)
   const identityNames = Object.keys(results.keys).filter((k) => k.startsWith('RESULTS-') && k !== 'RESULTS-IDENTICAL')
   expect(identityNames, 'RESULTS peer keys').to.have.length(6)
   const tags = identityNames.map((k) => /tag=([a-z0-9]+)/.exec(results.keys[k] ?? '')?.[1])
@@ -267,6 +296,12 @@ describe('run: election on the loopback relay', function () {
         timeoutMs: 600_000
       })
       expectCtl(found, 'found')
+      const owner = await callCtl({ dir: daemon.peerDir, role: 'officer', verb: 'owner-setup', args: {}, timeoutMs: 300_000 })
+      expectCtl(owner, 'owner-setup')
+      // A lone officer is its own whole cohort and sends nothing over ClusterClient, so one keyholder
+      // (no preload) joins: the officer's writes then have a second cohort member to ask.
+      const networkHash = String((found.body.result ?? {}).networkHash ?? '')
+      await joinKeyholder(daemon, relay!, party, networkHash)
       const after = await callCtl({ dir: daemon.peerDir, role: 'officer', verb: 'readback', args: {}, timeoutMs: 30_000 })
       expectCtl(after, 'readback after')
       const peerId8 = String((after.body.result ?? {}).peerId8 ?? '')
@@ -277,6 +312,8 @@ describe('run: election on the loopback relay', function () {
       expect(Number.isInteger((reply.read as { leafRev?: unknown }).leafRev), 'leafRev integer').to.equal(true)
       expect(Number.isInteger((reply.read as { tailRev?: unknown }).tailRev), 'tailRev integer').to.equal(true)
       await expectProbe(daemon.instrDir)
+      const probe = JSON.parse(readFileSync(join(daemon.instrDir, 'size-probe.json'), 'utf8')) as Record<string, unknown>
+      console.log(`      SMOKE probe calls=${String(probe.calls)} maxBytes=${String(probe.maxBytes)} oversized=${String(probe.oversized)} controlLeaf=${JSON.stringify(reply.read)}`)
     } finally {
       await daemon.stop()
     }
