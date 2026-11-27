@@ -1,0 +1,2 @@
+const onFail = (fatalError: unknown) => {
+  setInitError(String(fatalError));

@@ -150,9 +150,24 @@ describe('IsUserValid — ProposedAdmin Class A signer/key gate (D-21)', () => {
     const effectiveAtCanon = toCanonicalDatetime(effectiveAt)
     const thresholdPolicies = [{ policy: 'rad' as Scope, threshold: 1 }]
     const thresholdPoliciesJson = JSON.stringify(thresholdPolicies)
+    // 57-01 (D-02): proposeAdmin now folds the resolved roster into the
+    // digest too. Mirror the engine's '.existing' name-bridge (User.Name)
+    // instead of hardcoding it, so this stays correct if the fixture's
+    // seeded user name ever changes.
+    const userRow = await ctx.db.prepare('select Name from User where Id = :id').get({ id: auth.user.id })
+    // 57-13 (CR-01): sortRosterEntries now serializes an explicit userId key
+    // (null for '.init' officers) — this '.existing' officer's userId must be
+    // supplied here too, or the digest this test pre-computes and signs will
+    // not match what proposeAdmin recomputes engine-side via resolveAdminRoster.
+    const officersJson = JSON.stringify([{ proposedName: userRow?.Name as string, userId: auth.user.id, title: 'Chair', scopes: ['rad'] }])
     const digestRow = await ctx.db
-      .prepare('select Digest(:authorityId, :effectiveAt, :thresholdPolicies) as d')
-      .get({ authorityId: auth.authority.id, effectiveAt: effectiveAtCanon, thresholdPolicies: thresholdPoliciesJson })
+      .prepare('select Digest(:authorityId, :effectiveAt, :officers, :thresholdPolicies) as d')
+      .get({
+        authorityId: auth.authority.id,
+        effectiveAt: effectiveAtCanon,
+        officers: officersJson,
+        thresholdPolicies: thresholdPoliciesJson
+      })
     if (!digestRow || digestRow.d == null) throw new Error('case 3: Digest() returned null')
     const sig = signTestDigest(auth.user, digestRow.d as string)
 

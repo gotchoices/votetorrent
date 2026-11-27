@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { ThemedText } from "../../../components/ThemedText";
 import { CustomButton } from "../../../components/CustomButton";
 import { CustomTextInput } from "../../../components/CustomTextInput";
+import { InlineError } from "../../../components/InlineError";
 import { globalStyles } from "../../../theme/styles";
 
 /**
@@ -83,19 +84,43 @@ export interface RejectReasonCardProps {
 	onConfirm: (reason: string) => void | Promise<void>;
 	onDismiss: () => void;
 	/**
+	 * The D-07 checklist gate state, owned by the host. The engine refuses an
+	 * ungated reject (WR-02); this mirrors it so Confirm Rejection cannot be
+	 * pressed (and no biometric prompt spent) while the checklist is unmet.
+	 */
+	decisionGateMet: boolean;
+	/**
 	 * Defaults to `"reject-reason"`, which resolves the rendered testIDs to
 	 * `reject-reason-card`, `reject-reason-title`, `reject-reason-body`,
 	 * `reject-reason-reason-input`, `reject-reason-confirm`, and
 	 * `reject-reason-dismiss`.
 	 */
 	testIDPrefix?: string;
+	/**
+	 * Failure copy owned by the host, shown inside the card above the buttons so a failed
+	 * confirmation is visible next to the control just pressed (UAT 62 gap 4 item 1). The card
+	 * only displays what it is given; it never derives copy from a caught error.
+	 */
+	errorMessage?: string;
+	/**
+	 * Copy keys for the title, body (interpolates `{{name}}`) and confirm button. Default to the
+	 * reject copy; the stale close (Close as Rejected) passes its own.
+	 */
+	titleKey?: string;
+	bodyKey?: string;
+	confirmKey?: string;
 }
 
 export function RejectReasonCard({
 	requesterName,
 	onConfirm,
 	onDismiss,
+	decisionGateMet,
 	testIDPrefix = "reject-reason",
+	errorMessage,
+	titleKey = "registrationRequestRejectTitle",
+	bodyKey = "registrationRequestRejectBody",
+	confirmKey = "registrationRequestRejectConfirmButton",
 }: RejectReasonCardProps) {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
@@ -121,7 +146,7 @@ export function RejectReasonCard({
 		setReasonValue("");
 	}, [requesterName, testIDPrefix]);
 
-	const canConfirm = submitState === "idle" && isRejectReasonValid(reasonValue);
+	const canConfirm = submitState === "idle" && decisionGateMet && isRejectReasonValid(reasonValue);
 
 	// Three-state submit latch: idle -> submitting -> submitted. A resolved
 	// submit latches permanently (the card's owner is expected to unmount it
@@ -161,7 +186,7 @@ export function RejectReasonCard({
 			style={[styles.cardSurface, { backgroundColor: colors.card, borderLeftWidth: 4, borderLeftColor: colors.error }]}
 		>
 			<ThemedText type="defaultSemiBold" testID={`${testIDPrefix}-title`}>
-				{t("registrationRequestRejectTitle")}
+				{t(titleKey)}
 			</ThemedText>
 			{/*
 			 * D-06's actual purpose, not a generic "are you sure": this body
@@ -171,7 +196,7 @@ export function RejectReasonCard({
 			 * would defeat the decision it implements.
 			 */}
 			<ThemedText type="default" testID={`${testIDPrefix}-body`}>
-				{t("registrationRequestRejectBody", { name: requesterName })}
+				{t(bodyKey, { name: requesterName })}
 			</ThemedText>
 			<CustomTextInput
 				testID={`${testIDPrefix}-reason-input`}
@@ -185,8 +210,27 @@ export function RejectReasonCard({
 				// disabled.
 				autoCapitalize="sentences"
 			/>
+			{!decisionGateMet ? (
+				<ThemedText type="small" testID={`${testIDPrefix}-gate-hint`} style={{ color: colors.textSecondary }}>
+					{t("registrationRequestRejectChecklistRequired")}
+				</ThemedText>
+			) : null}
+			{errorMessage ? (
+				<View testID={`${testIDPrefix}-error`}>
+					<InlineError message={errorMessage} />
+				</View>
+			) : null}
 			<View style={localStyles.buttonRow}>
 				<View testID={`${testIDPrefix}-dismiss`} style={localStyles.buttonSlot}>
+					{/*
+						 * Geometry: each slot is a ROW (see buttonSlot) so CustomButton's `flex`
+						 * (flex:1 + alignSelf:stretch, built for a row parent) stretches the button to
+						 * the row height instead of collapsing. In the earlier column-slot form it
+						 * zeroed the vertical flex-basis: 32px on Pixel_8 (UAT 62 test 13). Dropping
+						 * `flex` alone (62-52 first attempt) left a one-line thin button at its natural
+						 * 36dp (95px measured on device) beside a 2-line neighbour: below the 44dp floor
+						 * and uneven. The geometry gate is scripts/assert-card-button-geometry.mjs.
+						 */}
 					<CustomButton
 						size="thin"
 						flex
@@ -197,10 +241,19 @@ export function RejectReasonCard({
 					/>
 				</View>
 				<View testID={`${testIDPrefix}-confirm`} style={localStyles.buttonSlot}>
+					{/*
+						 * Geometry: each slot is a ROW (see buttonSlot) so CustomButton's `flex`
+						 * (flex:1 + alignSelf:stretch, built for a row parent) stretches the button to
+						 * the row height instead of collapsing. In the earlier column-slot form it
+						 * zeroed the vertical flex-basis: 32px on Pixel_8 (UAT 62 test 13). Dropping
+						 * `flex` alone (62-52 first attempt) left a one-line thin button at its natural
+						 * 36dp (95px measured on device) beside a 2-line neighbour: below the 44dp floor
+						 * and uneven. The geometry gate is scripts/assert-card-button-geometry.mjs.
+						 */}
 					<CustomButton
 						size="thin"
 						flex
-						title={t("registrationRequestRejectConfirmButton")}
+						title={t(confirmKey)}
 						backgroundColor={colors.error}
 						disabled={!canConfirm}
 						onPress={canConfirm ? handleConfirm : NOOP}
@@ -211,6 +264,11 @@ export function RejectReasonCard({
 	);
 }
 
+/** Minimum clickable height of a card button, dp (Android 48dp touch target). */
+const BUTTON_MIN_HEIGHT = 48;
+/** CustomButton styles.button.marginVertical, dp, each side. */
+const BUTTON_MARGIN_VERTICAL = 8;
+
 const localStyles = StyleSheet.create({
 	buttonRow: {
 		flexDirection: "row",
@@ -219,6 +277,16 @@ const localStyles = StyleSheet.create({
 		marginTop: 8,
 	},
 	buttonSlot: {
+		// Row direction on purpose: CustomButton's `flex` assumes a row parent (see the note at
+		// each button). The slot still splits the row 50/50 via flex:1 + minWidth:0.
+		flexDirection: "row",
+		// Floor on the CLICKABLE button, not the slot: `flex` stretches the button to the slot
+		// height MINUS CustomButton's own marginVertical (8 top + 8 bottom). A one-line thin
+		// button is 36dp natural (95px on Pixel_8), so a bare 48 slot floor never bound (36 + 16
+		// = 52 > 48) and the button stayed at 36dp. So the slot floor is 48dp of button plus the
+		// margins. If CustomButton's marginVertical changes, update BUTTON_MARGIN_VERTICAL
+		// (the jest structural pin reads the real margin and fails on a mismatch).
+		minHeight: BUTTON_MIN_HEIGHT + 2 * BUTTON_MARGIN_VERTICAL,
 		flex: 1,
 		minWidth: 0,
 	},

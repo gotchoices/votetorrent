@@ -477,7 +477,8 @@ describe("AccessHistorySection — D-01/D-02 reviewer surface", () => {
     const errorView = findOne(tr, "access-history-error");
     const errorTexts = errorView.findAllByType(ThemedText);
     expect(errorTexts.length).toBe(1);
-    expect(errorTexts[0]!.props.children).toBe("access trail read failed");
+    expect(errorTexts[0]!.props.children).toBe("errorLoadFailedGeneric");
+    expect(JSON.stringify(errorTexts[0]!.props.children)).not.toContain("access trail read failed");
     expect(existsTestID(tr, "access-history-empty")).toBe(false);
     expect(
       tr.root.findAll((node) => typeof node.props.testID === "string" && node.props.testID.startsWith("access-history-row-"))

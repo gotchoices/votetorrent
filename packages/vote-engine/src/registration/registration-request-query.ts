@@ -1,4 +1,5 @@
 import type { RegistrationRequestListFilter, RegistrationRequestStatus } from '@votetorrent/vote-core'
+import { registrationRequestNotClosedSql } from './duplicate-closure.js'
 
 /**
  * D-06/D-08/D-09 (Phase 48 plan 08): the SINGLE shared predicate builder
@@ -81,50 +82,53 @@ function buildRegistrationRequestListFragment (filter?: RegistrationRequestListF
   if (filter?.status !== undefined) {
     where += ' and R.Status = :status'
     params.status = filter.status
+    if (filter.status === STATUS_PENDING) {
+      // D-44 (62-19): a pending request closed or closing as a duplicate is not in the pending
+      // queue — an UNFILTERED list still shows it, flagged (RegistrationEngine.listRegistrationRequests
+      // sets duplicateClosure on the row instead). Appended right after the status predicate so
+      // the page and count SQL (the SAME shared fragment) can never disagree about this.
+      where += ` and ${registrationRequestNotClosedSql('R')}`
+    }
   }
   if (filter?.issuerType !== undefined) {
     where += ' and R.IssuerType = :issuerType'
     params.issuerType = filter.issuerType
   }
-  if (filter?.name !== undefined) {
-    // WR-12. The previous predicate was `R.Payload like '%<name>%'` — a raw substring match over
-    // the WHOLE serialized RegisterInit, private tier included. That made the inbox search box an
-    // ORACLE over the private tier: typing a candidate SSN, date of birth or phone number
-    // confirmed or denied its presence in a pending request, defeating the never-log/never-
-    // disclose discipline the rest of this phase maintains around `private.details`. It also
-    // matched ids, keys, cids and timestamps — any of which could make an unrelated request
-    // surface under a name search.
-    //
-    // The predicate is now restricted to the PUBLIC tier's two name fields, read structurally via
-    // `json_extract` (the same `cast(json_extract(...) as text)` idiom votetorrent.qsql already
-    // uses for `SlotCidValid`; the cast is required because json_extract's JSON-typed return is
-    // not directly comparable). A missing path, a malformed Payload or a non-string value all
-    // yield `null` rather than throwing, so such a row is simply excluded — a request whose
-    // payload will not parse must not crash the officer's inbox.
-    //
-    // `instr(lower(...), lower(:nameQuery)) > 0` replaces `like` deliberately, and it closes the
-    // second half of WR-12 at the same time: `like`'s `%`/`_` are wildcards, and Quereus does NOT
-    // support the `escape` clause (re-confirmed by probe against the installed engine — the same
-    // finding this module's previous comment recorded as D-04/RESEARCH-Open-Question-2), so an
-    // unescaped bound term containing `%` silently broadened the query and no escape mechanism
-    // existed to fix it in place. `instr` has no metacharacters at all, so the search term matches
-    // literally and there is nothing to escape. `lower(...)` on both sides makes the match
-    // case-insensitive, which also brings this read into parity with
-    // `MockRegistrationEngine.listRegistrationRequests` — that mock already filtered
-    // case-insensitively on exactly these two public fields, so the mock was right and the real
-    // engine was the surface that disagreed.
-    //
-    // One documented limitation is unchanged: RegistrationRequest carries no denormalized
-    // LastName/FirstName column (unlike RegistrantPublic on the roster read), so this remains an
-    // unindexed per-row JSON read. A generated column populated at INSERT is still the obvious
-    // future improvement.
-    where +=
-      " and (instr(lower(cast(json_extract(R.Payload, '$.public.lastName') as text)), lower(:nameQuery)) > 0" +
-      " or instr(lower(cast(json_extract(R.Payload, '$.public.firstName') as text)), lower(:nameQuery)) > 0)"
-    params.nameQuery = filter.name
-  }
+  // D-49 (62-31, WR-12 continuation): `filter.name` is DELIBERATELY not a predicate here anymore.
+  // WR-12 (48-xx) already moved the search off a raw `Payload like '%<name>%'` oracle onto the two
+  // structural `json_extract` name paths, because `Payload` could carry the private tier in clear
+  // — but `Payload` may now hold a sealed D-49 envelope with no SQL-visible names at all. A sealed
+  // column has nothing for `json_extract` to read. `RegistrationEngine.listRegistrationRequests`
+  // now performs the name match itself, in memory, over OPENED payloads: it scans this fragment's
+  // name-free keyset in `REGISTRATION_REQUEST_NAME_SCAN_BATCH`-row batches via
+  // `buildRegistrationRequestListPageSql`, opens each row once, and keeps the ones for which
+  // `registrationRequestNameMatches` is true — a case-insensitive literal substring on either
+  // public name, the SAME semantics the old SQL predicate had. An unread row's names are always
+  // `undefined` and can never match. The unindexed-scan cost (one open per row per search) is a
+  // recorded performance residual; a generated column populated at seal time is the obvious future
+  // improvement. See `sealed-registration-content.ts` for the open path and `62-31-SECURITY-REVIEW.md`.
 
   return { from, where, params }
+}
+
+/** The bounded batch size `listRegistrationRequests` scans while searching `filter.name` over
+ * opened payloads (see the fragment builder's own header comment above). */
+export const REGISTRATION_REQUEST_NAME_SCAN_BATCH = 200
+
+/**
+ * D-49/WR-12: true iff EITHER opened public name contains `nameQuery` as a case-insensitive
+ * literal substring — the exact semantics the retired SQL `instr(lower(...), lower(:nameQuery))`
+ * predicate had (no wildcards, no regex, no trimming). An empty `nameQuery` matches every row
+ * (an empty string is a substring of everything, same as the old SQL form); an undefined name
+ * field never matches a non-empty query.
+ */
+export function registrationRequestNameMatches (names: { lastName?: string; firstName?: string }, nameQuery: string): boolean {
+  const needle = nameQuery.toLowerCase()
+  const lastName = names.lastName?.toLowerCase()
+  const firstName = names.firstName?.toLowerCase()
+  if (lastName !== undefined && lastName.includes(needle)) return true
+  if (firstName !== undefined && firstName.includes(needle)) return true
+  return false
 }
 
 /**
@@ -170,7 +174,7 @@ export function buildRegistrationRequestListPageSql (
 ): { sql: string; params: Record<string, unknown> } {
   const fragment = buildRegistrationRequestListFragment(filter)
   const selectList =
-    'select R.Id, R.AuthorityId, R.Status, R.IssuerType, R.BridgeId, R.SubmittedAt, R.ReceivedAt, R.RequesterKey, R.Payload, B.Label as BridgeLabel '
+    'select R.Id, R.AuthorityId, R.Status, R.IssuerType, R.BridgeId, R.SubmittedAt, R.ReceivedAt, R.RequesterKey, R.Payload, R.PayloadCid, B.Label as BridgeLabel '
   let sql = selectList + fragment.from + ' left join RegistrationBridgeKey B on B.Id = R.BridgeId ' + fragment.where
   const params: Record<string, unknown> = { ...fragment.params }
 

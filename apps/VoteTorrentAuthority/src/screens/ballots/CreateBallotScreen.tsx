@@ -1,6 +1,6 @@
-import { ExtendedTheme, useTheme, useRoute, useNavigation, useFocusEffect } from "@react-navigation/native";
+import { ExtendedTheme, useTheme, useRoute, useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { View } from "react-native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -30,6 +30,11 @@ import type { Authority, Ballot, INetworkEngine, Question } from "@votetorrent/v
  * 09-10 G12: reads electionEngine from route.params; handlePropose calls
  * engine.proposeBallot(ballot) then goBack so the template appears in
  * ElectionDetails on focus.
+ *
+ * Submit for confirmation / Withdraw are NOT offered here: this screen's draft id is
+ * client-minted and has no ProposedBallot row, so the engine refuses a submit. After
+ * Propose, the persisted ballot opens EditBallotScreen, which hosts both actions
+ * (UAT 62 test 13).
  */
 export default function CreateBallotScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
@@ -46,9 +51,6 @@ export default function CreateBallotScreen() {
 	const { getEngine } = useApp();
 	const [errorMessage, setErrorMessage] = useState("");
 	const [proposing, setProposing] = useState(false);
-	const [submitting, setSubmitting] = useState(false);
-	const [withdrawing, setWithdrawing] = useState(false);
-	const [confirmationLocked, setConfirmationLocked] = useState(false);
 	const [authorities, setAuthorities] = useState<Authority[]>([]);
 	const { ballotDraft, setBallotDraft, addQuestion, updateQuestion, removeQuestion } = useBallotDraft();
 
@@ -99,7 +101,7 @@ export default function CreateBallotScreen() {
 	// fires once and never clobbers a user choice.
 	useEffect(() => {
 		if (primaryAuthorityId && !(ballotDraft as any).authority) {
-			setBallotDraft({ ...ballotDraft, authority: primaryAuthorityId } as any);
+			setBallotDraft((prev) => ({ ...prev, authority: primaryAuthorityId }) as any);
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [primaryAuthorityId, (ballotDraft as any).authority]);
@@ -141,66 +143,6 @@ export default function CreateBallotScreen() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [removeQuestionCode]);
 
-	// D-05: poll the confirmation lock state on every focus so the UI reflects
-	// the current engine state (e.g. the user submitted in a prior session).
-	const currentBallotId = (ballotDraft as any).id as string | undefined;
-	useFocusEffect(
-		useCallback(() => {
-			if (!electionEngine || !currentBallotId) return;
-			const checkLock = async () => {
-				try {
-					const state = await electionEngine.getBallotConfirmationState(currentBallotId);
-					setConfirmationLocked(state.locked);
-				} catch (error) {
-					console.warn("getBallotConfirmationState error", error);
-				}
-			};
-			checkLock();
-		}, [electionEngine, currentBallotId])
-	);
-
-	// D-03: Submit the ballot for confirmation — creates the signature task in the inbox.
-	const handleSubmitForConfirmation = async () => {
-		if (!electionEngine) return;
-		setErrorMessage("");
-		setSubmitting(true);
-		try {
-			const ballotId = (ballotDraft as any).id as string | undefined;
-			if (!ballotId) {
-				setErrorMessage("No ballot to submit.");
-				return;
-			}
-			await electionEngine.submitBallotForConfirmation(ballotId);
-			setConfirmationLocked(true);
-		} catch (error) {
-			console.warn("submitBallotForConfirmation error", error);
-			setErrorMessage(error instanceof Error ? error.message : String(error));
-		} finally {
-			setSubmitting(false);
-		}
-	};
-
-	// D-05: Withdraw the pending confirmation — unlocks the ballot for editing.
-	const handleWithdrawConfirmation = async () => {
-		if (!electionEngine) return;
-		setErrorMessage("");
-		setWithdrawing(true);
-		try {
-			const ballotId = (ballotDraft as any).id as string | undefined;
-			if (!ballotId) {
-				setErrorMessage("No ballot to withdraw.");
-				return;
-			}
-			await electionEngine.withdrawBallotConfirmation(ballotId);
-			setConfirmationLocked(false);
-		} catch (error) {
-			console.warn("withdrawBallotConfirmation error", error);
-			setErrorMessage(error instanceof Error ? error.message : String(error));
-		} finally {
-			setWithdrawing(false);
-		}
-	};
-
 	const handlePropose = async () => {
 		// G12: persist template via engine then goBack so ElectionDetails' useFocusEffect
 		// re-fetches getBallots() and shows the new card.
@@ -224,22 +166,22 @@ export default function CreateBallotScreen() {
 			navigation.goBack();
 		} catch (error) {
 			console.warn("proposeBallot error", error);
-			setErrorMessage(error instanceof Error ? error.message : String(error));
+			setErrorMessage(t("ballotProposeFailed"));
 		} finally {
 			setProposing(false);
 		}
 	};
 
 	const handleDescriptionChange = (description: string) => {
-		setBallotDraft({ ...ballotDraft, description });
+		setBallotDraft((prev) => ({ ...prev, description }));
 	};
 
 	const handleAuthorityChange = (authority: string) => {
-		setBallotDraft({ ...ballotDraft, authority } as any);
+		setBallotDraft((prev) => ({ ...prev, authority }) as any);
 	};
 
 	const handleDistrictsChange = (districts: string[]) => {
-		setBallotDraft({ ...ballotDraft, districts });
+		setBallotDraft((prev) => ({ ...prev, districts }));
 	};
 
 	const handleAddQuestion = () => {
@@ -271,45 +213,20 @@ export default function CreateBallotScreen() {
 				districts={ballotDraft.districts ?? []}
 				onDistrictsChange={handleDistrictsChange}
 				questions={ballotDraft.questions ?? []}
-				onAddQuestion={confirmationLocked ? undefined : handleAddQuestion}
-				onEditQuestion={confirmationLocked ? undefined : handleEditQuestion}
-				disabled={confirmationLocked}
+				onAddQuestion={handleAddQuestion}
+				onEditQuestion={handleEditQuestion}
 			/>
 			<InlineError message={errorMessage} />
-			{/* Footer: PROPOSE + confirmation actions (D-03/D-05).
-			    Edit/propose disabled while a confirmation is pending (D-05). */}
+			{/* Footer: PROPOSE only. Submit/Withdraw for confirmation live on EditBallotScreen. */}
 			<View style={[globalStyles.footer, { backgroundColor: colors.card, paddingBottom: insets.bottom + 16 }]}>
-				{/* D-05: Withdraw action — shown only when locked */}
-				{confirmationLocked ? (
-					<CustomButton
-						title={t("withdrawConfirmation")}
-						icon="rotate-left"
-						onPress={handleWithdrawConfirmation}
-						backgroundColor={colors.warning ?? colors.accent}
-						disabled={withdrawing}
-					/>
-				) : (
-					<>
-						<CustomButton
-							title={t("propose")}
-							icon="floppy-disk"
-							onPress={handlePropose}
-							backgroundColor={colors.success}
-							forceDarkText={true}
-							disabled={proposing || confirmationLocked}
-						/>
-						{/* D-03: Submit for confirmation — shown when the ballot is saved but not yet submitted */}
-						{currentBallotId && electionEngine && (
-							<CustomButton
-								title={t("submitForConfirmation")}
-								icon="paper-plane"
-								onPress={handleSubmitForConfirmation}
-								backgroundColor={colors.accent}
-								disabled={submitting || proposing}
-							/>
-						)}
-					</>
-				)}
+				<CustomButton
+					title={t("propose")}
+					icon="floppy-disk"
+					onPress={handlePropose}
+					backgroundColor={colors.success}
+					forceDarkText={true}
+					disabled={proposing}
+				/>
 			</View>
 		</View>
 	);

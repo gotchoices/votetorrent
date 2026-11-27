@@ -69,6 +69,8 @@ jest.mock("../../../providers/SettingsProvider", () => ({
 jest.mock("../../../providers/AppProvider", () => ({
 	useApp: () => ({ getEngine: async () => null }),
 }));
+// Settings renders the owner-trust notice, which reads the cadre-node context; no ownerTrust means "ok", so nothing renders.
+jest.mock("../../../providers/CadreNodeProvider", () => ({ useCadreNode: () => ({ node: null }) }));
 
 jest.mock("../../../engines/engine-factory", () => ({
 	// Keeps the no-network path silent per that file's own comment — this

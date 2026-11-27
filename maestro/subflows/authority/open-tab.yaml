@@ -1,0 +1,6 @@
+# Open an Authority bottom tab by testID. env: APP_ID, TAB (elections | tasks | authorities | settings)
+appId: ${APP_ID}
+---
+- runFlow: ../common/dismiss-logbox.yaml
+- tapOn:
+    id: "tab-${TAB}"

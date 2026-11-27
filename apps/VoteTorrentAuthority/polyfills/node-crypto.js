@@ -90,4 +90,32 @@ export function randomUUID() {
 	);
 }
 
-export default { createHash, randomUUID };
+/**
+ * timingSafeEqual(a, b) — constant-time byte comparison.
+ *
+ * Added when Phase 51 wired the iOS verifier into engine-factory, but it was
+ * ALREADY missing for Android: `verifiers/key-attestation.ts` (reached by the
+ * shipping `PlayIntegrityVerifier`) imports it too, and a named import of an
+ * export this module never had resolves to `undefined` — so the call site threw
+ * `TypeError: timingSafeEqual is not a function` on device while every Node
+ * test passed, because Node has the real thing. Both attestation halves depend
+ * on it; adding it here fixes both.
+ *
+ * Node's version THROWS when the lengths differ. Both call sites length-check
+ * first, so this matches that contract rather than silently returning false —
+ * a shim that is more permissive than the thing it stands in for hides the bug
+ * it is meant to reproduce.
+ */
+export function timingSafeEqual(a, b) {
+	if (a.length !== b.length) {
+		throw new RangeError('Input buffers must have the same byte length');
+	}
+	// Accumulate over EVERY byte — no early return. An early exit on the first
+	// mismatch is what makes a naive comparison timing-attackable, which is the
+	// entire reason these call sites do not just use a loop with `!==`.
+	let diff = 0;
+	for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+	return diff === 0;
+}
+
+export default { createHash, randomUUID, timingSafeEqual };

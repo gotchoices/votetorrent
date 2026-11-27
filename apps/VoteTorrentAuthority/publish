@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Publish the signed release APK to votetorrent.org.
+# Mirrors ser/health/apps/mobile/publish. Build first with `yarn build:apk`.
+set -euo pipefail
+
+APK="android/app/build/outputs/apk/release/app-release.apk"
+DEST="root@gotchoices.org:/var/www/votetorrent.org/authority.apk"
+
+[ -s "$APK" ] || { echo "No APK at $APK — run 'yarn build:apk' first." >&2; exit 1; }
+
+# Refuse to publish a debug-signed APK. `yarn build:apk:dev` and CI both write to
+# this same path, so without this check a dev build could reach the public site —
+# a different app identity, which forces every tester to uninstall and reinstall.
+SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}"
+APKSIGNER=$(ls -1 "$SDK"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)
+[ -x "$APKSIGNER" ] || { echo "apksigner not found under $SDK/build-tools — set ANDROID_HOME." >&2; exit 1; }
+if "$APKSIGNER" verify --print-certs "$APK" | grep -q 'CN=Android Debug'; then
+  echo "REFUSING: $APK is signed with the DEBUG key. Rebuild with 'yarn build:apk'." >&2
+  exit 1
+fi
+
+scp "$APK" "$DEST"
+echo "Published to $DEST"
+echo "  https://votetorrent.org/authority.apk"

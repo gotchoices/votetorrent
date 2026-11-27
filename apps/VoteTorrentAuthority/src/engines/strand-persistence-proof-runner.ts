@@ -39,6 +39,7 @@ import { LevelDB, LevelDBWriteBatch } from 'rn-leveldb';
 import { openOptimysticRNDb, loadOrCreateRNPeerKey } from '@optimystic/db-p2p-storage-rn';
 import { createScopedRnStorageProvider } from './storage-guard';
 import { CadreNode } from '@serfab/cadre-core';
+import { registerVoteTorrentFunctions } from '@votetorrent/vote-engine/rn';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
 import { STRAND_PERSISTENCE_PROOF_ENABLED } from './proof-flags.generated';
@@ -53,6 +54,7 @@ const L = (...a: unknown[]) => console.info('[strand-persistence-proof]', ...a);
 // NEVER 'votetorrent-cadre-node' — that store holds the stable peerId (T-23-03-02).
 // NEVER the solo 'votetorrent-q2-*' naming scheme — that is the rnDbFactory solo store.
 const CADRE_STORE = 'votetorrent-cadre-probe-persistence';
+const PROOF_STORAGE = createScopedRnStorageProvider('votetorrent-persistence-strand');
 
 /**
  * Boot entry point. Fire-and-forget from index.js after AppRegistry.registerComponent.
@@ -84,7 +86,7 @@ export async function runStrandPersistenceProof(): Promise<void> {
       // D-06: bootstrap/solo ONLY — never inject CONTROL_ADDR/STRAND_BOOTSTRAP_ADDR
       // placeholders here; cross-peer is explicitly out of scope for this proof.
       controlNetwork: { partyId: 'votetorrent', bootstrapNodes: [] },
-      profile: 'transaction',
+      nodeClass: 'device',
       // 40-03 (PUB-03): published @serfab/cadre-core@0.8.1 added a fail-closed sApp-schema
       // signature policy (requireSignedSchemas defaults true) — an unsigned sAppConfig is
       // rejected at strand bring-up with SchemaVerificationError('missing signature'). This
@@ -96,7 +98,7 @@ export async function runStrandPersistenceProof(): Promise<void> {
       requireSignedSchemas: false,
       strandFilter: { mode: 'all' },
       // ISO-01 per-scope storage + persistence guardrail (aligned with the app providers).
-      storage: { provider: createScopedRnStorageProvider('votetorrent-persistence-strand') },
+      storage: { open: (scopeId: string) => PROOF_STORAGE.open(scopeId) },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       network: {
         transports: [webSockets(), circuitRelayTransport()],
@@ -107,6 +109,9 @@ export async function runStrandPersistenceProof(): Promise<void> {
         strandBootstrapNodes: [],
       } as any,
       hibernation: { enabled: false },
+      // quereus 5.6 refuses a CHECK that calls an unregistered function at CREATE TABLE; cadre-core applies the
+      // sApp schema inside the strand build, so register VoteTorrent's SQL functions there first (as the providers do).
+      strandDatabaseSetup: registerVoteTorrentFunctions,
     });
 
     await node.start();

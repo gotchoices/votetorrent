@@ -1,0 +1,26 @@
+# Journey: first launch of a fresh DEBUG Authority. No dev seed exists in this app, so it lands
+# on the Elections tab with the "Choose a network to get started" empty state.
+appId: ${APP_ID}
+name: "Authority: fresh launch"
+tags:
+  - authority
+  - smoke
+  - launch
+env:
+  APP_ID: "${typeof AUTHORITY_APP_ID == 'undefined' ? 'org.votetorrent.authority' : AUTHORITY_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/authority/launch.yaml
+    env:
+      CLEAR_STATE: "true"
+- extendedWaitUntil:
+    visible: "Choose a network to get started"
+    timeout: 60000
+- assertVisible:
+    id: "tab-tasks"
+- assertVisible:
+    id: "tab-authorities"
+- assertVisible:
+    id: "tab-settings"
+- assertVisible: "Choose network"

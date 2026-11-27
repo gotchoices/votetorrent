@@ -177,4 +177,23 @@ describe("PriorRejectionsCallout — D-06", () => {
 		expect(String(row.props.children)).toContain("not-a-date");
 		tr.unmount();
 	});
+
+	it("R3 sibling-renders half: a genuine earlier sibling rejection — distinct requestId from the request on screen — still renders its date, officer and reason (this file cannot observe the engine-level exclusion itself, only that a surfaced sibling row still renders correctly)", () => {
+		const tr = renderCallout({
+			rejections: [
+				makeRejection({
+					requestId: "req-sibling-earlier",
+					rejectedAt: "2026-02-10T09:00:00.000Z",
+					rejectionReason: "Roll entry not found",
+					decidingOfficerUserId: "officer-11",
+				}),
+			],
+		});
+		const row = tr.root.findAllByProps({ testID: `${PREFIX}-row-req-sibling-earlier` }, { deep: false })[0];
+		const text = String(row.props.children);
+		expect(text).toContain("2026-02-10");
+		expect(text).toContain("officer-11");
+		expect(text).toContain("Roll entry not found");
+		tr.unmount();
+	});
 });

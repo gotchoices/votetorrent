@@ -30,7 +30,15 @@ import path from "path";
 // 18/18 in isolation). A timeout-flaky navigator proof is worse than a slow
 // one: the gate can no longer tell a real route regression from scheduler
 // noise. Raised deliberately rather than by shortening the render.
-jest.setTimeout(30_000);
+//
+// 2026-08-29 re-measurement (Phase 51 Nyquist audit): `yarn jest --clearCache
+// && yarn jest` on this 10-core host still failed 30_000ms — full-suite run
+// clocked this file at 35.774s (cold). Solo (still cold-cache, no other
+// worker contention) it took 23.286s. The gap is scheduler contention across
+// ~98 parallel suites on a cold Babel-transform cache, not a hang or a real
+// perf regression: isolated cold time is stable and well under any of these
+// budgets. Raised again, with headroom above the observed 35.774s worst case.
+jest.setTimeout(60_000);
 
 jest.mock("react-native-vector-icons/FontAwesome6", () => "FontAwesome6");
 

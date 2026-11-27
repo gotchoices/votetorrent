@@ -18,7 +18,7 @@ export default function HostingScreen() {
 
 	return (
 		<View style={styles.container}>
-			<ScrollView contentContainerStyle={{paddingBottom: keyboardInset}}>
+			<ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{paddingBottom: keyboardInset}}>
 				<View style={styles.section}>
 					<ThemedText type="title" style={styles.sectionTitle}>
 						{t('statistics')}

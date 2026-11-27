@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { INetworkEngine, Scope } from "@votetorrent/vote-core";
 import { useApp } from "../providers/AppProvider";
 import { getOrCreateDeviceUser } from "../engines/device-user";
@@ -45,12 +45,16 @@ import { getOrCreateDeviceUser } from "../engines/device-user";
 export interface CurrentOfficerScopesResult {
 	scopes: Scope[] | undefined;
 	loading: boolean;
+	/** Re-runs the officer lookup (additive; e.g. on screen focus so a decision gate never stays stale). */
+	refresh: () => void;
 }
 
 export function useCurrentOfficerScopes(authorityId: string): CurrentOfficerScopesResult {
 	const { getEngine } = useApp();
 	const [scopes, setScopes] = useState<Scope[] | undefined>(undefined);
 	const [loading, setLoading] = useState<boolean>(true);
+	const [reloadNonce, setReloadNonce] = useState(0);
+	const refresh = useCallback(() => setReloadNonce((n) => n + 1), []);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -81,13 +85,13 @@ export function useCurrentOfficerScopes(authorityId: string): CurrentOfficerScop
 		return () => {
 			cancelled = true;
 		};
-		// Plain effect, deliberately NOT a focus-triggered re-fetch: officer scopes are
+		// Plain effect by default (a caller opts into re-reads through `refresh`), NOT a focus-triggered re-fetch: officer scopes are
 		// administration-level data that only change through a proposeAdmin ceremony on
 		// another screen, so re-querying on every screen focus buys nothing beyond what
 		// the next mount already re-resolves. (useTaskCount's badge needs a focus-driven
 		// refetch because it must track mutations made elsewhere in the same session;
 		// this gate does not.)
-	}, [getEngine, authorityId]);
+	}, [getEngine, authorityId, reloadNonce]);
 
-	return { scopes, loading };
+	return { scopes, loading, refresh };
 }

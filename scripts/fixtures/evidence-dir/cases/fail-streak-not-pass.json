@@ -1,0 +1,15 @@
+{
+  "base": "base-device",
+  "args": [
+    "--streak",
+    "3"
+  ],
+  "ops": [
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/run-2/summary.md",
+      "content": "RUN: FAIL dkg-timeout\n"
+    }
+  ],
+  "expect": "streak-not-pass"
+}

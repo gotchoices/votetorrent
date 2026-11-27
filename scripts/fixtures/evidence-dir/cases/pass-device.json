@@ -1,0 +1,15 @@
+{
+  "base": "base-device",
+  "args": [
+    "--streak",
+    "3"
+  ],
+  "ops": [
+    {
+      "op": "symlink",
+      "path": "64-device-evidence/replay/node_modules",
+      "target": "../../../../../packages/vote-engine/node_modules"
+    }
+  ],
+  "expect": "PASS"
+}

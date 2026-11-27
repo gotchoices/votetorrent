@@ -7,6 +7,9 @@ import { useTranslation } from "react-i18next";
 
 interface ElectionDetailsBlockProps {
 	electionDetails: ElectionDetails;
+	/** The authority's display name when the caller knows it (the election list row does); the
+	 *  header falls back to the raw authority id only when it is absent. */
+	authorityName?: string;
 }
 
 /**
@@ -18,7 +21,7 @@ interface ElectionDetailsBlockProps {
  * removed from here — they live in ElectionDetailsScreen's current-revision
  * section to avoid duplication.
  */
-export function ElectionDetailsBlock({ electionDetails }: ElectionDetailsBlockProps) {
+export function ElectionDetailsBlock({ electionDetails, authorityName }: ElectionDetailsBlockProps) {
 	const { t } = useTranslation();
 	const { election } = electionDetails;
 
@@ -40,7 +43,9 @@ export function ElectionDetailsBlock({ electionDetails }: ElectionDetailsBlockPr
 			<View style={[styles.section, styles.detailContainer]}>
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("authority")}: </ThemedText>
-					<ThemedText>{election.authorityId}</ThemedText>
+					<ThemedText testID="election-details-authority" numberOfLines={1} ellipsizeMode="middle" style={{ flexShrink: 1 }}>
+						{authorityName || election.authorityId}
+					</ThemedText>
 				</View>
 				<View style={styles.detail}>
 					<ThemedText type="defaultSemiBold">{t("type")}: </ThemedText>

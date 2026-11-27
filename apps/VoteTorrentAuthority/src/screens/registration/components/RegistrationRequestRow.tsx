@@ -7,8 +7,8 @@ import type { RegistrationRequestListRow } from "@votetorrent/vote-core";
 import { ThemedText } from "../../../components/ThemedText";
 import { globalStyles } from "../../../theme/styles";
 import {
-	REGISTRATION_REQUEST_STATUS_META,
 	registrationRequestDisplayName,
+	resolveRequestRowStatusMeta,
 	resolveBridgeLabel,
 	resolveRowTimestamps,
 } from "../registration-request-display";
@@ -36,7 +36,8 @@ export function RegistrationRequestRow({ row, onPress }: RegistrationRequestRowP
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 
-	const meta = REGISTRATION_REQUEST_STATUS_META[row.status];
+	// A duplicate-closed request keeps status 'p'; the pill must read closed (UAT 62 test 12).
+	const meta = resolveRequestRowStatusMeta(row);
 	const isBridge = row.issuerType === "bridge";
 	const bridgeLabel = isBridge ? resolveBridgeLabel(row) : undefined;
 	const stamps = resolveRowTimestamps(row);
@@ -65,13 +66,18 @@ export function RegistrationRequestRow({ row, onPress }: RegistrationRequestRowP
 			<View style={localStyles.row}>
 				<View style={localStyles.leftColumn}>
 					<View style={localStyles.headerLine}>
-						<ThemedText type="defaultSemiBold" numberOfLines={1}>
+						<ThemedText
+							testID={"registration-request-row-name-" + row.requestId}
+							type="defaultSemiBold"
+							numberOfLines={1}
+							style={localStyles.name}
+						>
 							{registrationRequestDisplayName(row)}
 						</ThemedText>
 						{meta ? (
 							<View
 								testID={"registration-request-row-status-" + row.requestId}
-								style={[pillStyles.pill, { backgroundColor: tintPill(colors[meta.colorKey]) }]}
+								style={[pillStyles.pill, localStyles.headerTrailing, { backgroundColor: tintPill(colors[meta.colorKey]) }]}
 							>
 								<ThemedText type="smallBold" style={{ color: colors[meta.colorKey] }}>
 									{t(meta.labelKey)}
@@ -81,7 +87,7 @@ export function RegistrationRequestRow({ row, onPress }: RegistrationRequestRowP
 							// An unknown status code (a future schema revision) must never
 							// crash the inbox — render the raw code with no pill instead of
 							// throwing on the REGISTRATION_REQUEST_STATUS_META lookup miss.
-							<ThemedText type="small" style={{ color: colors.textSecondary }}>
+							<ThemedText type="small" style={[localStyles.headerTrailing, { color: colors.textSecondary }]}>
 								{row.status}
 							</ThemedText>
 						)}
@@ -171,7 +177,7 @@ export function RegistrationRequestRow({ row, onPress }: RegistrationRequestRowP
 						</View>
 					) : null}
 				</View>
-				<FontAwesome6 name="chevron-right" size={16} color={colors.accent} />
+				<FontAwesome6 name="chevron-right" size={16} color={colors.accent} style={localStyles.chevron} />
 			</View>
 		</TouchableOpacity>
 	);
@@ -183,9 +189,26 @@ const localStyles = StyleSheet.create({
 		alignItems: "center",
 		gap: 12,
 	},
+	// minWidth 0 (RN's default, declared as intent): the column takes the width left after the
+	// chevron and never grows past it to fit a long name.
 	leftColumn: {
 		flex: 1,
+		minWidth: 0,
 		gap: 4,
+	},
+	// Yoga defaults flexShrink to 0, so a one-line name measured at the FULL column width and
+	// the status pill then hung past the card's right edge over the chevron (360dp, a long
+	// "Last, First"). The name gives up width first and ellipsizes; a short name is unchanged.
+	name: {
+		flexShrink: 1,
+		minWidth: 0,
+	},
+	// The status pill (incl. the duplicate-closed variant) and the raw-status fallback never shrink.
+	headerTrailing: {
+		flexShrink: 0,
+	},
+	chevron: {
+		flexShrink: 0,
 	},
 	headerLine: {
 		flexDirection: "row",

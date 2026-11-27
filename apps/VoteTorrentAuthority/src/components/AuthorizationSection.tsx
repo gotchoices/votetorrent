@@ -21,9 +21,17 @@ interface AuthorizationSectionProps {
 	/** Invoked when ADJUST PROPOSAL is tapped. Callers wire this to their
 	 *  revision flow (e.g. NetworkDetails → NetworkRevision). Defaults to no-op. */
 	onAdjustProposal?: () => void;
+	/** The viewing officer. With `onSign`, only THIS officer's SIGN button is live — an officer can
+	 *  only ever sign as themself. */
+	currentUserId?: string;
+	/** Signs (approves) the proposal as `currentUserId`. When omitted the section renders exactly
+	 *  as before (callers that have no signing flow yet). */
+	onSign?: () => void;
+	/** True while `onSign` is running — disables the button against a double submit. */
+	signing?: boolean;
 }
 
-export function AuthorizationSection({ admin, signedOfficerIds, onAdjustProposal }: AuthorizationSectionProps) {
+export function AuthorizationSection({ admin, signedOfficerIds, onAdjustProposal, currentUserId, onSign, signing }: AuthorizationSectionProps) {
 	const { t } = useTranslation();
 	const { colors } = useTheme() as ExtendedTheme;
 	const { getEngine } = useApp();
@@ -82,7 +90,15 @@ export function AuthorizationSection({ admin, signedOfficerIds, onAdjustProposal
 						forceDarkText={true}
 						size="thin"
 						flex={true}
-						onPress={() => {}}
+						disabled={
+							onSign !== undefined &&
+							(officerDetail.isSigned || officerDetail.userId !== currentUserId || signing === true)
+						}
+						onPress={
+							onSign !== undefined && officerDetail.userId === currentUserId && !officerDetail.isSigned
+								? onSign
+								: () => {}
+						}
 					/>
 				</View>
 			))}

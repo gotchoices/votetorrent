@@ -1,0 +1,3 @@
+# The repo ignores log files; these fixtures are logs on purpose.
+!*.log
+!logs/

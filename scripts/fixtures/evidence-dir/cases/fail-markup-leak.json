@@ -1,0 +1,11 @@
+{
+  "base": "base-host",
+  "ops": [
+    {
+      "op": "append",
+      "path": "64-evidence/baselines/RESULTS.md",
+      "content": "{{PLANT:markup}}\n"
+    }
+  ],
+  "expect": "markup-leak"
+}

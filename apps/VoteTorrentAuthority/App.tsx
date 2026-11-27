@@ -6,10 +6,11 @@ import i18n from './src/i18n';
 import {RootNavigator} from './src/navigation';
 import {BallotDraftProvider} from './src/screens/ballots/providers/BallotDraftProvider';
 import {darkTheme, lightTheme} from './src/theme/themes';
-import {useColorScheme} from 'react-native';
+import {StatusBar, useColorScheme} from 'react-native';
 import {AppProvider} from './src/providers/AppProvider';
 import {CadreNodeProvider} from './src/providers/CadreNodeProvider';
 import {SettingsProvider} from './src/providers/SettingsProvider';
+import {ToastProvider} from './src/components/Toast';
 
 export default function App() {
 	const colorScheme = useColorScheme();
@@ -25,6 +26,10 @@ export default function App() {
 
 	return (
 		<SafeAreaProvider>
+			{/* Edge-to-edge (targetSdk 35) draws the status bar over the app header, and the
+			    AppCompat theme never requests dark icons — so without this the clock and
+			    battery are white-on-white on every light screen. */}
+			<StatusBar barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'} />
 			<SettingsProvider>
 			<CadreNodeProvider>
 			<AppProvider>
@@ -35,7 +40,10 @@ export default function App() {
 					    EditQuestion/EditQuestionOption. Per-flow reset happens on
 					    CreateBallot mount (fresh) and EditBallot load (from engine). */}
 					<BallotDraftProvider>
-						<RootNavigator />
+						{/* Inside NavigationContainer: the toast reads the theme. */}
+						<ToastProvider>
+							<RootNavigator />
+						</ToastProvider>
 					</BallotDraftProvider>
 				</NavigationContainer>
 			</AppProvider>

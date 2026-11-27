@@ -17,7 +17,7 @@ import { useCurrentOfficerScopes } from "../../hooks/useCurrentOfficerScopes";
 import { createDeviceSigner } from "../../engines/device-signer";
 import type { SignCallback } from "../../engines/device-signer";
 import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
-import { scopeDescriptions } from "@votetorrent/vote-core";
+import { scopeLabel } from "../../utils/scopeLabel";
 import type { IAuthorityConfigEngine, PollingDevice } from "@votetorrent/vote-core";
 import type { NavigationProp, RootStackParamList } from "../../navigation/types";
 import {
@@ -31,6 +31,7 @@ import {
 // confirmation card.
 import { LifecycleConfirmCard } from "../registration/components/LifecycleConfirmCard";
 import { useKeyboardInset } from "../../hooks/useKeyboardInset";
+import { errorCopy } from "../../utils/errorCopy";
 
 // A stable no-op for the (non-optional) CustomButton.onPress prop when a gate
 // is unmet — belt-and-suspenders alongside `disabled`, mirroring
@@ -115,7 +116,7 @@ export default function PollingDevicesScreen() {
 			);
 			if (!unmountedRef.current) setDevices(sorted);
 		} catch (err) {
-			if (!unmountedRef.current) setErrorMessage(err instanceof Error ? err.message : String(err));
+			if (!unmountedRef.current) setErrorMessage(errorCopy(err, t, "read"));
 		} finally {
 			if (!unmountedRef.current) setLoading(false);
 		}
@@ -198,7 +199,7 @@ export default function PollingDevicesScreen() {
 			// costs no retyping.
 			const outcome = handleDeviceSigningError(err);
 			if (!unmountedRef.current && !outcome.handled) {
-				setErrorMessage(outcome.message ?? (err instanceof Error ? err.message : String(err)));
+				setErrorMessage(outcome.message ?? errorCopy(err, t, "write"));
 			}
 		} finally {
 			if (!unmountedRef.current) setAddSubmitting(false);
@@ -215,7 +216,7 @@ export default function PollingDevicesScreen() {
 		} catch (err) {
 			const outcome = handleDeviceSigningError(err);
 			if (!unmountedRef.current && !outcome.handled) {
-				setErrorMessage(outcome.message ?? (err instanceof Error ? err.message : String(err)));
+				setErrorMessage(outcome.message ?? errorCopy(err, t, "write"));
 			}
 			// Re-throw: 47-10's downstream contract requires a REJECTED
 			// onConfirm so the card re-enables for a retry; swallowing the
@@ -233,7 +234,7 @@ export default function PollingDevicesScreen() {
 	}
 
 	return (
-		<ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: insets.bottom + 24 + keyboardInset }}>
+		<ScrollView keyboardShouldPersistTaps="handled" style={styles.container} contentContainerStyle={{ paddingBottom: insets.bottom + 24 + keyboardInset }}>
 			<View style={styles.section}>
 				<InlineError message={errorMessage} />
 			</View>
@@ -256,7 +257,7 @@ export default function PollingDevicesScreen() {
 					<View testID="polling-devices-readonly-banner" style={localStyles.banner}>
 						<FontAwesome6 name="lock" size={14} color={colors.textSecondary} />
 						<ThemedText type="small" style={{ color: colors.textSecondary }}>
-							{t("registrantScopeReadOnlyBanner", { scope: scopeDescriptions.vrg })}
+							{t("registrantScopeReadOnlyBanner", { scope: scopeLabel("vrg", t) })}
 						</ThemedText>
 					</View>
 				)

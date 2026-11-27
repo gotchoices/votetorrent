@@ -256,6 +256,15 @@ export function LifecycleConfirmCard({
 
 			<View style={localStyles.buttonRow}>
 				<View testID={`${testIDPrefix}-dismiss`} style={localStyles.buttonSlot}>
+					{/*
+						 * Geometry: each slot is a ROW (see buttonSlot) so CustomButton's `flex`
+						 * (flex:1 + alignSelf:stretch, built for a row parent) stretches the button to
+						 * the row height instead of collapsing. In the earlier column-slot form it
+						 * zeroed the vertical flex-basis: 32px on Pixel_8 (UAT 62 test 13). Dropping
+						 * `flex` alone (62-52 first attempt) left a one-line thin button at its natural
+						 * 36dp (95px measured on device) beside a 2-line neighbour: below the 44dp floor
+						 * and uneven. The geometry gate is scripts/assert-card-button-geometry.mjs.
+						 */}
 					<CustomButton
 						size="thin"
 						flex
@@ -266,6 +275,15 @@ export function LifecycleConfirmCard({
 					/>
 				</View>
 				<View testID={`${testIDPrefix}-confirm`} style={localStyles.buttonSlot}>
+					{/*
+						 * Geometry: each slot is a ROW (see buttonSlot) so CustomButton's `flex`
+						 * (flex:1 + alignSelf:stretch, built for a row parent) stretches the button to
+						 * the row height instead of collapsing. In the earlier column-slot form it
+						 * zeroed the vertical flex-basis: 32px on Pixel_8 (UAT 62 test 13). Dropping
+						 * `flex` alone (62-52 first attempt) left a one-line thin button at its natural
+						 * 36dp (95px measured on device) beside a 2-line neighbour: below the 44dp floor
+						 * and uneven. The geometry gate is scripts/assert-card-button-geometry.mjs.
+						 */}
 					<CustomButton
 						size="thin"
 						flex
@@ -279,6 +297,11 @@ export function LifecycleConfirmCard({
 		</View>
 	);
 }
+
+/** Minimum clickable height of a card button, dp (Android 48dp touch target). */
+const BUTTON_MIN_HEIGHT = 48;
+/** CustomButton styles.button.marginVertical, dp, each side. */
+const BUTTON_MARGIN_VERTICAL = 8;
 
 const localStyles = StyleSheet.create({
 	buttonRow: {
@@ -302,6 +325,16 @@ const localStyles = StyleSheet.create({
 	// instead of clipping. `minWidth: 0` is already RN's flex default; it
 	// is declared explicitly as the intent marker this rule pins.
 	buttonSlot: {
+		// Row direction on purpose: CustomButton's `flex` assumes a row parent (see the note at
+		// each button). The slot still splits the row 50/50 via flex:1 + minWidth:0.
+		flexDirection: "row",
+		// Floor on the CLICKABLE button, not the slot: `flex` stretches the button to the slot
+		// height MINUS CustomButton's own marginVertical (8 top + 8 bottom). A one-line thin
+		// button is 36dp natural (95px on Pixel_8), so a bare 48 slot floor never bound (36 + 16
+		// = 52 > 48) and the button stayed at 36dp. So the slot floor is 48dp of button plus the
+		// margins. If CustomButton's marginVertical changes, update BUTTON_MARGIN_VERTICAL
+		// (the jest structural pin reads the real margin and fails on a mismatch).
+		minHeight: BUTTON_MIN_HEIGHT + 2 * BUTTON_MARGIN_VERTICAL,
 		flex: 1,
 		minWidth: 0,
 	},

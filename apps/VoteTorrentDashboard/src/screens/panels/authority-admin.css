@@ -1,0 +1,108 @@
+/*
+ * authority-admin.css -- styling for the six Authority Administration panel
+ * bodies (Network Settings, Authority Profile, Authority Peers,
+ * Administration & Officers, Keyholders, Invite Authorities). Built ONLY
+ * from `@votetorrent/ui-web`'s tokens.css custom properties: no new hex
+ * literal, no new raw spacing value. Declares only what panels.css does
+ * not -- no `.panel`, `.panel-body` or `.panel--denied` rule lives here.
+ *
+ * Every class here is `aa-`-prefixed. This is DELIBERATE: global CSS has no
+ * module boundary, and 50-10 fills the other three panel stubs in this SAME
+ * wave with its own `election-ops.css` -- an unprefixed `.kv` or `.row` in
+ * two sibling plans would silently collide. `aa-` keeps this file's rules
+ * from ever shadowing (or being shadowed by) anything outside its own six
+ * components.
+ */
+
+.aa-kv {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	column-gap: var(--space-md);
+	row-gap: var(--space-xs);
+	margin: 0;
+}
+
+.aa-kv dt {
+	color: var(--muted);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+.aa-kv dd {
+	margin: 0;
+	color: var(--text);
+}
+
+.aa-row {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-xs);
+	padding: var(--space-xs) 0;
+	border-bottom: 1px solid var(--border);
+}
+
+.aa-row:last-child {
+	border-bottom: none;
+}
+
+/* A field or row that can carry the brief "updated" mark. The mark draws a
+   2px bar on the element's inline-start edge; this constant padding keeps
+   that bar off the text, and because it applies whether or not the mark is
+   showing, adding or dropping the mark never moves anything. */
+.aa-markable {
+	padding-inline-start: var(--space-xs);
+}
+
+.aa-scope {
+	display: inline-flex;
+	align-items: center;
+	padding: 0 var(--space-sm);
+	border-radius: var(--radius);
+	background: var(--surface2);
+	border: 1px solid var(--border);
+	color: var(--muted);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+	margin-right: var(--space-xs);
+}
+
+.aa-scope-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-xs);
+}
+
+.aa-mono {
+	font-family: ui-monospace, monospace;
+}
+
+.aa-empty {
+	margin: 0;
+	color: var(--muted);
+}
+
+.aa-section {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-sm);
+	padding-top: var(--space-sm);
+	border-top: 1px solid var(--border);
+}
+
+.aa-section:first-child {
+	padding-top: 0;
+	border-top: none;
+}
+
+/* C5 -- the Keyholders enrolled-vs-threshold meter's wrapper (60-03's Meter
+   primitive owns its own vt-chart* classes, declared in
+   packages/ui-web/src/components.css; this rule is the surrounding column
+   layout only). */
+.aa-meter {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-xs);
+	padding: var(--space-xs) 0;
+}

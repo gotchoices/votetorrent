@@ -1,4 +1,4 @@
-import type { Timestamp } from '../common/index.js'
+import type { Signature, Timestamp } from '../common/index.js'
 
 /** ********* Enums (D-08, text codes — avoids the number/boolean-in-Digest pitfalls) ***********/
 
@@ -79,7 +79,31 @@ export interface RegistrantPrivate {
 
   /** json array of { name, value, hint? } triples (recursive); never disclosed */
   privateDetails?: PrivateDetail[]
+
+  /**
+   * D-49: how `privateDetails` was read on THIS device. Optional — undefined when the reading
+   * engine does not report it (e.g. `MockRegistrationEngine`); the real `RegistrationEngine`
+   * always sets it. See `RegistrationContentAccess`'s own doc comment for the full vocabulary.
+   */
+  detailsAccess?: RegistrationContentAccess
 }
+
+/**
+ * D-49: how a stored registration payload / private tier was read on THIS device.
+ *
+ * - `'opened'`          sealed envelope, opened with this device's officer key, PayloadCid recheck passed
+ * - `'unsealed'`        stored without sealing (a pre-D-49 legacy row, or the constant '[]' for empty
+ *                        private details), PayloadCid recheck passed where one applies
+ * - `'no-opener'`       sealed, and this context has no opener (a voter, a host that has not wired one,
+ *                        or no local key)
+ * - `'not-a-recipient'` sealed, and this device's key is not among its recipients (e.g. an officer added
+ *                        later, D-51)
+ * - `'unreadable'`      malformed envelope, failed authentication, vault error, or plaintext that is not
+ *                        the expected JSON shape
+ * - `'tampered'`        Digest(opened or unsealed plaintext) !== PayloadCid (RegistrationRequest only)
+ */
+export type RegistrationContentAccess =
+  'opened' | 'unsealed' | 'no-opener' | 'not-a-recipient' | 'unreadable' | 'tampered'
 
 /**
  * Flat salted-leaf disclosure attribute (RegistrantSelective.SelectiveDetails, D-11/D-12/D-13).
@@ -127,7 +151,7 @@ export type RegisterSelectivePayload = SelectiveFieldInput[]
 
 /** ********* RegistrantSelective (authority-held, insert-only, 'vrg'-signed) ***********/
 export interface RegistrantSelective {
-  /** Content-addressed CIDv1 of this record: cid(set_commit(SelectiveDetails)) */
+  /** Content-addressed CIDv1 of the PLAINTEXT leaves: cid(set_commit(<plaintext leaves>)) */
   cid: string
 
   /** references Registrant.id */
@@ -137,6 +161,12 @@ export interface RegistrantSelective {
 
   /** json array of flat { name, value, salt } salted leaves (SaltedLeaf[]) */
   selectiveDetails?: SaltedLeaf[]
+
+  /**
+   * D-52: how `selectiveDetails` was read on THIS device. `selectiveDetails` is `undefined`
+   * unless this is `'opened'` or `'unsealed'`. Undefined = not reported (e.g. `MockRegistrationEngine`).
+   */
+  detailsAccess?: RegistrationContentAccess
 }
 
 /**
@@ -155,6 +185,13 @@ export interface DisclosedSelective {
   root: string
   disclosed: SelectiveLeaf[]
   hidden: string[]
+
+  /**
+   * D-52: how the underlying `RegistrantSelective` leaves were read on THIS device. When it is not
+   * `'opened'` or `'unsealed'`, `disclosed` and `hidden` are empty and `root` is `''`.
+   * Undefined = not reported (e.g. the mock engine).
+   */
+  access?: RegistrationContentAccess
 }
 
 /** DisclosureAudience(Code) — which recipients a selective field may be revealed to. */
@@ -444,6 +481,37 @@ export interface RegistrationRequestInit {
 }
 
 /**
+ * 62-01 (D-45): the plaintext a 62-04 `SealedEnvelope` seals into
+ * `RegistrationRequestStaging.InitJson`. `registrationCode` exists ONLY inside this ciphertext —
+ * it is NEVER copied into `RegisterInit`, `RegistrationRequest.Payload`, or any schema column
+ * (since D-49 `RegistrationRequest.Payload` is itself sealed, 62-31; the code stays out of it
+ * regardless, because the Authority's strand path hands that table's own Quereus DB to every peer
+ * on the strand).
+ *
+ * The durable carrier of the code is the `RegistrationRequestStaging` row itself (kept forever,
+ * D-07; sealed, D-04) — an officer matches a re-association by opening the ORIGINAL staging row
+ * after decrypt (62-18), with a constant-time compare. Known limits: an officer added AFTER the
+ * registration is not a recipient of the old envelope and must use the identity fallback
+ * ({@link AssociationStagingPlaintext.identityFields}); a registration that arrived by REST bridge
+ * or filesystem import has no staging row at all and always uses the identity fallback.
+ */
+export interface RegistrationStagingPlaintext {
+  version: 1
+  init: RegistrationRequestInit
+  registrationCode?: string
+
+  /**
+   * V-3 / D-45: the requester's signature over
+   * `sha256(REGISTRATION_CODE_BINDING_DOMAIN + '\n' + requestId + '\n' + code)`, verified
+   * officer-side against the approved `RegistrationRequest.RequesterKey`. Present whenever
+   * `registrationCode` is (written by `P2pRegistrationTransport.submitRequest`); a row with a code
+   * and no valid binding signature is never a code match: it reads `unverifiable` and never takes
+   * the automatic route.
+   */
+  registrationCodeSignature?: Signature
+}
+
+/**
  * The single-request read backing the approval screen's three modes
  * (pending / approved / rejected).
  *
@@ -481,6 +549,15 @@ export interface RegistrationRequestRead {
   verificationCid?: string
   verificationChecklist?: RegistrationVerificationChecklistItem[]
   registrantId?: string
+
+  /**
+   * D-49: how `payload` was read on THIS device (see `RegistrationContentAccess`'s doc comment).
+   * Optional — undefined when the reading engine does not report it (e.g. `MockRegistrationEngine`);
+   * the real `RegistrationEngine` always sets it. When `payloadAccess` is anything other than
+   * `'opened'`/`'unsealed'`, `payload` is the degrade-convention `{}` and `registrantId` is never
+   * reported.
+   */
+  payloadAccess?: RegistrationContentAccess
 }
 
 /**
@@ -495,6 +572,34 @@ export interface RegistrationRequestRead {
 export interface RegistrationRequestDecision {
   checklist: RegistrationVerificationChecklistItem[]
   rejectionReason?: string
+}
+
+/**
+ * How long a registration request's 'vrg' session may stay open before any single officer holding
+ * 'vrg' may close it as rejected: 7 days. Above a 'vrg' threshold of 1 a request whose co-signers
+ * never act would otherwise stay pending forever, and the requester would never be told.
+ */
+export const REGISTRATION_STALE_CLOSE_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * Whether one officer may close a pending request as rejected on their own (`closeStaleRegistrationRequest`).
+ * `openedAt` is when the request's session opened: the later of the requester's signed `SubmittedAt`
+ * and the authority's `ReceivedAt` (an officer cannot move it earlier than the requester signed).
+ * `availableAt` is `openedAt` plus `REGISTRATION_STALE_CLOSE_TIMEOUT_MS`. `available` is true only for a
+ * pending request above a 'vrg' threshold of 1 whose session has not reached its threshold, once
+ * `availableAt` has passed. All instants are ISO-8601 with a trailing `Z`.
+ */
+export interface RegistrationStaleCloseAvailability {
+  requestId: string
+  threshold: number
+  openedAt: string
+  availableAt: string
+  available: boolean
+}
+
+/** The officer's reason for closing a stale request as rejected (stored and published with the decision). */
+export interface RegistrationStaleCloseInput {
+  rejectionReason: string
 }
 
 /**
@@ -546,6 +651,21 @@ export interface RegistrationRequestListRow {
   lastName?: string
   firstName?: string
   hasPriorRejections: boolean
+
+  /**
+   * D-44: present only when this request is `'closed'` (a `'d'` `RegistrationDecision` row
+   * exists) or `'closing'` (another decision names it in `ClosesRequestId` but its own `'d'` row
+   * has not landed yet). Absent — never `undefined` as an assigned key — on every other row, so a
+   * caller cannot distinguish "not computed" from "not closed".
+   */
+  duplicateClosure?: RegistrationDuplicateClosureState
+
+  /**
+   * D-49: how `lastName`/`firstName` were read on THIS device. `lastName`/`firstName` are
+   * undefined unless `payloadAccess` is `'opened'`/`'unsealed'`. Optional — undefined when the
+   * reading engine does not report it (e.g. `MockRegistrationEngine`).
+   */
+  payloadAccess?: RegistrationContentAccess
 }
 
 /**
@@ -588,6 +708,14 @@ export interface RegistrationTransparencyStats {
   approved: number
   rejected: number
   medianTimeToDecisionMs?: number
+
+  /**
+   * D-44: a COUNT of requests closed as a likely duplicate of another decided request — never a
+   * rating. Present **only when greater than zero**, so the pre-existing zero-request deep-equal
+   * (`{ pending: 0, approved: 0, rejected: 0, medianTimeToDecisionMs: undefined }`) stays exact
+   * and this field never appears as an explicit `0`.
+   */
+  closedAsDuplicate?: number
 }
 
 /**
@@ -608,4 +736,130 @@ export interface RegistrationBridgeKeyInit {
   authorityId: string
   label: string
   key: string
+}
+
+/** ********* D-43/D-44: duplicate-registration detection and closure (Phase 62 Plan 19) ***********/
+
+/**
+ * D-44: which normalized identity signals two pending requests share. Values ONLY — never the
+ * underlying field contents (a date of birth, an email, a phone number). This is the entire
+ * disclosure surface `LikelyDuplicateRequest.matchedOn` and every `RegistrationDuplicateError`
+ * message are allowed to carry about WHY a pair matched.
+ */
+export type RegistrationDuplicateMatchSignal = 'requester-key' | 'name' | 'dob' | 'email' | 'phone'
+
+/**
+ * D-44: one likely-duplicate candidate of a pending request, as computed by
+ * `RegistrationEngine.getLikelyDuplicateRequests` — authority-side, in memory, over the
+ * authority's own PENDING requests, and never a SQL CHECK (T-62-01-10 does not widen: nothing
+ * derived from this comparison is ever persisted). Surface 3's `PossibleDuplicateCallout` renders
+ * `candidates[0]`.
+ */
+export interface LikelyDuplicateRequest {
+  requestId: string
+  authorityId: string
+  issuerType: RegistrationRequestIssuerType
+  /** reZulu'd, as on `RegistrationRequestListRow`. */
+  submittedAt: string
+  /** reZulu'd; the ordering key (oldest first). */
+  receivedAt: string
+  /** Public tier only — already visible on the inbox row (never a selective/private field). */
+  firstName?: string
+  lastName?: string
+  /** In `DUPLICATE_MATCH_SIGNAL_ORDER`. */
+  matchedOn: RegistrationDuplicateMatchSignal[]
+}
+
+/**
+ * D-44: a request is either `'closed'` — a `'d'` `RegistrationDecision` row exists for it — or
+ * `'closing'` — another decision of the same authority names it in `ClosesRequestId` but its own
+ * `'d'` row has not been written yet (the two-transaction close is mid-flight or was interrupted).
+ * Either state makes the request undecidable: it cannot be rejected, approved, seeded, or counted
+ * as pending.
+ */
+export type RegistrationDuplicateClosureState = 'closed' | 'closing'
+
+/** D-44: the closure state of one request, as returned by `getDuplicateClosure`. */
+export interface RegistrationDuplicateClosure {
+  requestId: string
+  state: RegistrationDuplicateClosureState
+  /** `null` only for a `'d'` row that no decision names (the schema's own `DuplicateCloseValid`
+   *  fallback case — see 62-01-SUMMARY.md). */
+  closedByRequestId: string | null
+  /** The `'d'` row's `DecidedAt`, present only when `state === 'closed'`. */
+  closedAt?: string
+}
+
+/** D-44: the three `RegistrationDecision.Status` values a publish can produce. */
+export type RegistrationDecisionPublicationStatus = 'a' | 'r' | 'd'
+
+/**
+ * D-44: what `RegistrationEngine.publishRegistrationDecision` hands to a
+ * `RegistrationDecisionPublishPort`. Structurally assignable to 62-15's
+ * `P2pRegistrationDecisionInput` (`packages/vote-engine/src/registration/transport/
+ * p2p-registration-transport.ts`) — this type is declared independently here (vote-core has no
+ * dependency on vote-engine's transport module) and the two are proven structurally compatible at
+ * the call site, not by a shared declaration.
+ */
+export interface RegistrationDecisionPublication {
+  requestId: string
+  status: RegistrationDecisionPublicationStatus
+  reason?: string
+  /** Canonical ISO-Z (`toISOString` form). */
+  decidedAt: string
+  /** Set ONLY on the surviving `'a'`/`'r'` row — never on the `'d'` row that follows it. */
+  closesRequestId?: string
+}
+
+/**
+ * D-44: the host's wrapper around 62-15's `P2pRegistrationTransport.publishDecision` (or any
+ * equivalent decision-publication channel). `authorityId` is the injected `decisionSigner`'s own
+ * authority — the transport itself does not expose it, so the host carries it explicitly. The
+ * publisher **must** write into the SAME Quereus database `RegistrationEngine` reads; a publisher
+ * wired to a different database is refused `'publisher-db-mismatch'` (the written row is probed
+ * back through the engine's own `ctx.db`, never assumed from the publisher's return value alone).
+ */
+export interface RegistrationDecisionPublishPort {
+  readonly authorityId: string
+  publishDecision(decision: RegistrationDecisionPublication): Promise<string>
+}
+
+/** D-44: the closure-target option for `publishRegistrationDecision`. */
+export interface RegistrationDecisionPublishOptions {
+  /**
+   * `undefined` (omitted): automatic — the oldest flagged pending candidate received no later
+   * than the decision closes. `null`: close nothing. A string: close exactly that request — it
+   * must be a flagged, pending, not-closed candidate of the SAME authority, or the call refuses
+   * `'not-a-likely-duplicate'` with zero rows written.
+   */
+  closesRequestId?: string | null
+}
+
+/** D-44: what a publish attempt actually did to the closure target, if any. */
+export type RegistrationDuplicateClosureOutcome =
+  | 'none' | 'closed' | 'already-closed' | 'pending-retry' | 'skipped-target-decided' | 'skipped-target-closed'
+
+/** D-44: the result of one `publishRegistrationDecision` call. */
+export interface RegistrationDecisionPublishResult {
+  requestId: string
+  outcome: 'published' | 'already-published'
+  /** The status of the row now on the strand for `requestId`. */
+  publishedStatus: RegistrationDecisionPublicationStatus
+  /** Present when `outcome === 'published'`. */
+  cursor?: string
+  closesRequestId?: string
+  closure: RegistrationDuplicateClosureOutcome
+  /** Present when `closure === 'closed'`. */
+  closureCursor?: string
+  /** Present when `closure === 'pending-retry'`: the publisher error's own string `code` property,
+   *  or `'unknown'` when the thrown error carried none. Never the error's message text. */
+  closureErrorCode?: string
+}
+
+/** D-44: the report `completeDuplicateClosures` returns after resuming every interrupted close of
+ *  one authority. */
+export interface RegistrationDuplicateClosureRepairReport {
+  /** Closed request ids whose `'d'` row THIS call wrote. */
+  completed: string[]
+  failed: Array<{ requestId: string; reason: 'target-decided' | 'publish-failed'; errorCode?: string }>
 }

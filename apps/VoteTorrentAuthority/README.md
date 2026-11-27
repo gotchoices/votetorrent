@@ -1,150 +1,96 @@
 # VoteTorrent Authority
 
-The VoteTorrent Authority app is a mobile application designed for election administrators to manage and oversee elections within the VoteTorrent ecosystem. It serves as a crucial component in the decentralized voting system, allowing authorities to create, manage, and certify elections while maintaining the security and integrity of the voting process.
+Mobile app for election administrators. It is the counterpart to the
+[Voter app](../VoteTorrentVoter/README.md), and covers the administrative side
+of the VoteTorrent protocol: standing up a network, delegating authority,
+publishing elections and ballots, and holding election keys.
 
-This is the `votetorrent-authority` workspace — a React Native app inside the [VoteTorrent monorepo](../../README.md).
+This is the `votetorrent-authority` workspace inside the
+[VoteTorrent monorepo](../../README.md).
 
 ## Features
 
-- **Election Management**
+- **Networks and authorities** — create a network, invite other authorities,
+  manage administrators and officer roles.
+- **Elections** — create and revise elections, set timeframes and rules, publish
+  and update ballot templates for a district.
+- **Keyholding** — manage election keyholders and the key-release process.
+- **Certification** — oversee the certification of each ballot's outcome.
 
-  - Create and configure new elections
-  - Set election timeframes and parameters
-  - Manage election keyholders
+Available in English and Spanish.
 
-- **Ballot Management**
+## Installing (end users)
 
-  - Create and publish ballot templates
-  - Update ballot content as needed
-  - Manage district-specific ballots
+Download the signed APK:
+[Authority APK (latest)](https://github.com/gotchoices/votetorrent/releases/download/latest-authority/votetorrent-authority-latest.apk).
+iOS is not yet available.
 
-- **Authority Administration**
+## Running from source
 
-  - Manage officer roles and permissions
-  - Oversee election certification process
-
-## Installing the app (end users)
-
-- Android device (APK available at [votetorrent.org/authority.apk](https://votetorrent.org/authority.apk))
-- iOS device (coming soon to the App Store)
-
-To install on Android:
-
-1. Download the APK from [votetorrent.org/authority.apk](https://votetorrent.org/authority.apk)
-2. Install the application on your Android device
-3. Launch the app and complete the initial setup with your administrator credentials
-
-## Running from source (developers)
-
-The Authority app is part of a Yarn 4 monorepo. Install dependencies once from the **repository root** — the workspace resolves vendored portals during a root install, so installing inside this directory alone is not enough.
-
-### Prerequisites
-
-- **Node.js** `>=20.19` (the repo pins `22.15.0` in `.nvmrc`)
-- **Yarn 4** — pinned to `yarn@4.7.0` via the root `packageManager` field; enable it with [Corepack](https://nodejs.org/api/corepack.html) (`corepack enable`)
-- A configured **Android** and/or **iOS** toolchain (JDK 17, Android SDK with `ANDROID_HOME` set; Xcode + CocoaPods for iOS)
-
-### Setup
+Install from the **repository root** — installing inside this directory alone
+will not resolve the workspace links. Prerequisites and install steps are in the
+[root README](../../README.md#prerequisites).
 
 ```bash
 # from the repository root
-yarn install
-```
-
-### Run on a device or emulator
-
-From the repository root, the convenience scripts target this app:
-
-```bash
-yarn start     # start the Metro bundler
+yarn start     # Metro bundler, leave running
 yarn android   # build & run on Android
-yarn ios       # build & run on iOS
+yarn ios       # build & run on iOS (macOS only)
 ```
 
-Equivalently, scope the workspace explicitly from anywhere in the repo:
+Or scope the workspace explicitly from anywhere in the repo:
 
 ```bash
 yarn workspace votetorrent-authority start
-yarn workspace votetorrent-authority android
-yarn workspace votetorrent-authority ios
+yarn workspace votetorrent-authority test    # Jest
+yarn workspace votetorrent-authority lint    # ESLint
 ```
 
-### Build, test, and lint
+For a signed, standalone release APK, see
+[BUILD-RELEASE.md](BUILD-RELEASE.md) and
+[doc/releases/RELEASE-ANDROID.md](../../doc/releases/RELEASE-ANDROID.md).
 
-```bash
-yarn workspace votetorrent-authority test    # run the Jest suite
-yarn workspace votetorrent-authority lint     # run ESLint
-yarn workspace votetorrent-authority build    # bin/build.sh
-```
+## Architecture
 
-For producing a signed, standalone release APK, see [BUILD-RELEASE.md](BUILD-RELEASE.md). For details on the `portal:`/vendored dependency layout, Metro configuration, and Hermes polyfills that this app relies on, see [PORTAL-SETUP.md](PORTAL-SETUP.md).
+TypeScript and React Native over libp2p, with the Sereus strand layer and the
+Optimystic distributed database. The app connects to two networks:
 
-## Technical Architecture
+1. **Directory Network** — storing and retrieving authority records.
+2. **Election Network** — election-specific data and operations.
 
-The VoteTorrent Authority app is built using:
+It supplies everything platform-specific (storage, P2P transport, device
+signing) and injects it into the shared `@votetorrent/vote-core` and
+`@votetorrent/vote-engine` workspaces, which hold the protocol types and the
+Quereus-backed engine. See
+[Codebase Architecture](../../doc/codebase-architecture.md) for the composition,
+and [Technical Architecture](../../doc/architecture.md) for the protocol.
 
-- TypeScript
-- React Native
-- libp2p for peer-to-peer networking
-- Optimystic distributed database system
-
-The app connects to two main networks:
-
-1. **Directory Network**: For storing and retrieving authority records
-2. **Election Network**: For managing election-specific data and operations
-
-It builds on the shared `@votetorrent/vote-core` and `@votetorrent/vote-engine` workspaces for protocol types and the SQL/Quereus-backed engine. For the full protocol and system design, see the monorepo [Technical Architecture](../../doc/architecture.md).
-
-## Contributing
-
-We welcome contributions to the VoteTorrent Authority app! If you're interested in helping, here are some areas where we could use assistance:
-
-### Development
-
-- TypeScript/React Native development
-- UI/UX improvements
-- Testing and quality assurance
-- Performance optimization
-- Security enhancements
-
-### Other Ways to Help
-
-- Documentation improvements
-- Translation/localization
-- Bug reporting
-- Feature suggestions
-
-### Getting Started with Development
-
-1. Fork the [VoteTorrent repository](https://github.com/gotchoices/votetorrent)
-2. Clone your fork
-3. Install dependencies from the repository root:
-   ```bash
-   yarn install
-   ```
-4. Run the app on a device or emulator (see [Running from source](#running-from-source-developers) above):
-   ```bash
-   yarn android   # or: yarn ios
-   ```
-
-### Submitting Changes
-
-1. Create a new branch for your feature/fix
-2. Make your changes
-3. Submit a pull request to the main repository
+The Metro configuration carries several load-bearing workarounds for running
+this stack on Hermes — read
+[the constraints table](../../doc/development.md#react-native--hermes-constraints)
+before changing it.
 
 ## Security
 
-The VoteTorrent Authority app handles sensitive election data and administrator credentials. All contributions must maintain the highest security standards. Note that the development connection gater is intentionally permissive for emulator/local use — see the Security Caveat in [PORTAL-SETUP.md](PORTAL-SETUP.md) before deploying. Please review our security guidelines before contributing.
+This app handles sensitive election data and administrator credentials.
 
-## License
+> **Caveat:** the libp2p connection gater is currently permissive
+> (`denyDialMultiaddr: async () => false` in `src/providers/CadreNodeProvider.tsx`)
+> to allow emulator and local-host dialing during development. This must be
+> tightened before any production deployment.
 
-This project is open source and available under the same license as the main VoteTorrent project.
+The app also pins the Voter app's package name and signing-certificate digest
+for device attestation (`src/engines/attestation-*.generated.ts`). Changing the
+Voter app's signing key or application id requires updating those pins — see
+[RELEASE-ANDROID.md](../../doc/releases/RELEASE-ANDROID.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](../../CONTRIBUTING.md). Help is especially welcome with
+UI/UX, testing, performance, security, translation, and documentation.
 
 ## Support
 
-For support, please:
-
-1. Check the [main VoteTorrent documentation](../../README.md)
-2. Review the [technical architecture](../../doc/architecture.md)
-3. Open an issue in the [GitHub repository](https://github.com/gotchoices/votetorrent) if you encounter problems
+1. [Main documentation](../../README.md)
+2. [Technical architecture](../../doc/architecture.md)
+3. [Open an issue](https://github.com/gotchoices/votetorrent/issues)

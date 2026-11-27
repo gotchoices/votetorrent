@@ -90,6 +90,15 @@ const mockElectionInitData: ElectionInit = {
 			votingStarts: getUnixTimestamp(
 				new Date(Date.now() + 17 * 24 * 60 * 60 * 1000),
 			),
+			accruingVotes: getUnixTimestamp(
+				new Date(Date.now() + 18 * 24 * 60 * 60 * 1000),
+			),
+			hashingVotes: getUnixTimestamp(
+				new Date(Date.now() + 19 * 24 * 60 * 60 * 1000),
+			),
+			releasingKeys: getUnixTimestamp(
+				new Date(Date.now() + 20 * 24 * 60 * 60 * 1000),
+			),
 			tallyingStarts: getUnixTimestamp(
 				new Date(Date.now() + 21 * 24 * 60 * 60 * 1000),
 			),

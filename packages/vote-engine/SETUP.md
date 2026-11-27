@@ -195,6 +195,163 @@ Google revocation-list change notification if one becomes available) shrinks
 the window at the cost of more frequent app releases/updates to authority
 peers.
 
+
+### 4d. Pinned Apple App Attest root (iOS, Phase 51 — PROVISIONED 2026-08-26; paid team 2026-09-01)
+
+`AppAttestVerifier` is the iOS counterpart of `PlayIntegrityVerifier` and holds the same offline
+posture: the Apple trust anchor is an INJECTED, bundled, committed snapshot, never fetched at
+verify-time.
+
+**The root is embedded** in `apps/VoteTorrentAuthority/src/engines/appattest-keys.generated.ts`.
+**`APPLE_APP_ID` is committed alongside it**, and as of **2026-09-01** it holds the **paid Apple
+Developer Program team** value `6849Q7KVP5.org.votetorrent.voter`. `APP_ATTEST_PROVISIONED` is
+`true` and the iOS branch does not fail closed on missing config:
+
+```
+Apple App Attest root material is not provisioned — see SETUP.md   (root half — satisfied 2026-08-26)
+Apple App ID (<teamId>.<bundleId>) is not provisioned — see SETUP.md   (App ID half — satisfied 2026-08-27, D-13)
+```
+
+Those reasons are returned FIRST, before any other check, so an unprovisioned deployment can never
+report a misleading downstream failure instead (the same D-09 discipline `PlayIntegrityVerifier`
+uses for Play Console keys), and they are separate so the message names which half is missing.
+
+**D-13's accepted risk is now retired.** From 2026-08-27 to 2026-09-01 this constant deliberately
+held the FREE PERSONAL TEAM value `94TY7UR2W5.org.votetorrent.voter`, so that spike 085's real
+iPhone 13 proof could run end to end; the accepted consequence was that an authority built from
+that tree would treat a personal team's builds as the legitimate App Attest producer. The mitigation
+was machine-enforced rather than documentary — `scripts/fastlane/vt_appattest_release_gate.rb`
+(D-14) failed the `build_apk`/`build_aab` lanes and the iOS `beta`/`release` lanes for as long as
+that value stood. With the paid Team ID in place, **that gate now clears**. Check it without
+building:
+
+```
+fastlane android verify_appattest_config
+```
+
+**Two cautions survive the swap.**
+
+1. **The hardware fixtures still pin the personal team, on purpose.**
+   `vote-engine/test/ios-hardware-attestation.spec.ts` replays bytes a real Secure Enclave produced
+   under `94TY7UR2W5`. That is a recording, not configuration — rewriting its `APP_ID` to match the
+   committed constant would invalidate the only end-to-end hardware proof this project has.
+2. **A mistyped Team ID clears every automated gate.** The release gate only asserts the value is
+   not the personal one, and `appattest-keys.provisioned.test.ts` only asserts the shape and the
+   bundle id (WR-03). Ten wrong-but-well-formed characters fail-closed reject every genuine iPhone
+   with an App ID mismatch, and nothing upstream reports the real cause. Verify the Team ID against
+   developer.apple.com → Membership details before editing it. A local cross-check on a machine that
+   can sign for the team: `security find-certificate -a -c "Apple Development" -p | openssl x509
+   -noout -subject` prints the Team ID in the `OU` field.
+
+> **The file moved.** Until this section was corrected it named
+> `apps/VoteTorrentVoter/src/engines/appattest-roots.generated.ts`. The voter is the attestation
+> PRODUCER and never holds a trust anchor; the AUTHORITY is what verifies, and its `EngineFactory`
+> is what injects the roots. The voter-side copy was imported by nothing and has been removed.
+
+**Two more values live in the same file, and both are now set.** An empty root pool is not the only
+way this could go back to unprovisioned:
+
+| Constant | Meaning | Current state |
+|---|---|---|
+| `APPLE_APP_ATTEST_ROOTS_BASE64` | Apple's trust anchor | provisioned 2026-08-26 |
+| `APPLE_APP_ID` | `<teamId>.<bundleId>` of the **voter** app | paid team `6849Q7KVP5`, swapped 2026-09-01 (retires D-13) |
+| `APP_ATTEST_ENVIRONMENT` | `production` (the strict, and only committed, value) | the literal `'production'` (D-15) |
+
+`APPLE_APP_ID` is reported as its own configuration error rather than being allowed to flow into the
+`rpIdHash === SHA256(appId)` check, where an empty value rejects every genuine device with
+"attestation is for a different app" — blaming the device for a deployment mistake.
+
+`APP_ATTEST_ENVIRONMENT` stays the literal `'production'` in the committed tree (D-15) and should
+never be edited there. Spike 085 measured that the **provisioning profile** decides the environment,
+not the entitlement plist: a build with no entitlements file at all still received a `development`
+attestation, while TestFlight/App Store builds get `production` regardless. Do not flip the committed
+constant to `development` to "make a test device work" — that accepts every sideloaded build. If you
+need a dev-only authority build that talks to a development-environment attestation (for example, to
+exercise the free-team proof end-to-end), build a purpose-built local variant with this one constant
+flipped, run it, and never commit that change; `scripts/fastlane/vt_appattest_release_gate.rb` (D-14)
+fails any Fastlane publish lane while it is not the literal `'production'`.
+
+**Provisioning the root.**
+
+Apple publishes a single long-lived root as a static PEM — there is no JSON endpoint and no
+rotation feed, unlike Google's:
+
+```
+curl -O https://www.apple.com/certificateauthority/Apple_App_Attestation_Root_CA.pem
+```
+
+Before embedding it, verify these properties — this step is why the file is not auto-generated:
+
+```
+# 1. genuinely self-signed: subject must equal issuer ...
+openssl x509 -in Apple_App_Attestation_Root_CA.pem -noout -subject -issuer
+
+# 2. ... and the signature actually verifies under its own key. Name equality alone proves
+#    nothing: a forged certificate can carry whatever subject it likes.
+openssl verify -CAfile Apple_App_Attestation_Root_CA.pem Apple_App_Attestation_Root_CA.pem
+
+# 3. fingerprint
+openssl x509 -in Apple_App_Attestation_Root_CA.pem -noout -fingerprint -sha256
+```
+
+> **CORRECTION, 2026-08-26.** This section used to say to check the fingerprint against "the value
+> Apple publishes on its certificate-authority page". **Apple publishes no such value** — verified
+> on the date above; https://www.apple.com/certificateauthority/private/ carries the download link
+> and nothing else. Anyone following the old instruction would find nothing to compare against and
+> would either skip the step or invent a substitute. What replaces it:
+>
+> - **Compare against the recorded value.** `1cb9823ba28ba6ad2d33a006941de2ae4f513ef1d4e831b9f7e0fa7b6242c932`
+>   — pinned in the app config, in the vote-engine test fixture, and in this file. Three
+>   independently-edited places that must agree.
+> - **Corroborate cryptographically, which needs no second network path at all.** The root must
+>   verify the certificate chain inside a REAL attestation captured from Apple hardware. Substituting
+>   the root mid-download would require also holding the key that signed Apple's real intermediate.
+>   This is pinned as a permanent test — `vote-engine/test/ios-hardware-attestation.spec.ts`, the
+>   "§2 chain" block — and it is a stronger check than comparing a published hex string.
+> - Certificate Transparency (crt.sh) is a reasonable extra channel; it was returning 502 on
+>   2026-08-26 and is not required.
+
+Then strip the PEM header/footer/newlines and paste the base64 DER body into
+`APPLE_APP_ATTEST_ROOTS_BASE64` in
+`apps/VoteTorrentAuthority/src/engines/appattest-keys.generated.ts`, and set `APPLE_APP_ID`
+alongside it.
+
+> **Do not skip the out-of-band check.** A trust anchor is the one value in this system where a
+> wrong-but-well-formed input does not fail — it silently redefines what "genuine Apple hardware"
+> means. Everything else in the attestation path fails loudly when it is wrong.
+
+**What is still unproven on iOS.**
+
+The verifier, the wire format (`ATTESTATION-CONTRACT-IOS.md`) and the Swift TurboModule are all
+implemented and covered by tests, but **every fixture is synthetic**. `DCAppAttestService` requires
+a signed build from a registered Apple Developer team and a physical iPhone —
+`isSupported` is `false` on the Simulator, always. See
+`.planning/todos/pending/2026-08-25-ios-appattest-team-id-and-entitlement.md`.
+
+Superseded in part: spike 085 (2026-08-25) proved legs 3–7 on a real iPhone 13 against a **free
+personal team**, and the real attestation verified end to end under `verifyAppAttest` with Apple's
+genuine root pinned. The fixtures behind the synthetic tests are no longer the only evidence. What
+remains is the **production** environment — a paid Team ID, tracked as ROADMAP 51-04 — and this
+authority's own root/App ID snapshot, which is what this section is about.
+
+**Wiring status.** `EngineFactory`'s `association` case injects
+`PlatformDispatchingAttestationVerifier(PlayIntegrityVerifier, AppAttestVerifier)` — so the iOS
+verifier is reached by the running app, and fails closed on the config above rather than being dead
+code. Each half gates independently: absent Play Console keys disable only the Android branch, an
+absent Apple root/App ID only the iOS one.
+
+**iOS compile gates.** `packages/attestation-native` carries two, and the difference matters:
+
+| Script | What a PASS means | Needs |
+|---|---|---|
+| `yarn typecheck:ios` | The Apple SDK APIs line up, and `import React` is present and load-bearing. Runs a NEGATIVE CONTROL on every invocation and fails if it cannot detect a stripped import. | An iOS SDK |
+| `yarn typecheck:ios:app` | **Authoritative.** The Swift compiles inside the real voter target against React Native's real headers, and its objects are verified present in `libAttestationNative.a`. | CocoaPods (`pod install`), no signing identity |
+
+Neither needs a Team ID. The standalone gate was previously unsound — it declared the RCTPromise*
+typealiases at global scope, which is exactly what a missing `import React` leaves undefined, so it
+reported PASS for the whole of Phase 51 on code that could not build in an app. It now compiles
+those stand-ins into a module NAMED `React`, so the import is required for them to resolve.
+
 ## 5. Deferred follow-ups (explicitly deferred, not dropped)
 
 ### 5a. Real-device golden capture (D-09)

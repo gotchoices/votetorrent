@@ -1,97 +1,104 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# VoteTorrent Voter
 
-# Getting Started
+Mobile app for voters. It is the counterpart to the
+[Authority app](../VoteTorrentAuthority/README.md), and covers the voter side of
+the VoteTorrent protocol: joining a network, registering, associating a device,
+and casting a vote.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+This is the `votetorrent-voter` workspace inside the
+[VoteTorrent monorepo](../../README.md).
 
-## Step 1: Start Metro
+## Features
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+- **Join a network** — by QR, NFC, deep link, or discovery through the Directory
+  Network.
+- **Register** — furnish the public and private detail an authority requires,
+  and complete its verification steps.
+- **Device association** — attest the device to the authority so votes can be
+  bound to it.
+- **Vote** — review the ballot, make selections, and submit into an anonymized
+  vote block.
+- **Verify** — confirm your own vote is present and correct once results are
+  released.
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+Available in English and Spanish.
 
-```sh
-# Using npm
-npm start
+## Installing (end users)
 
-# OR using Yarn
-yarn start
+Download the signed APK:
+[Voter APK (latest)](https://github.com/gotchoices/votetorrent/releases/download/latest-voter/votetorrent-voter-latest.apk).
+iOS is not yet available.
+
+## Running from source
+
+Install from the **repository root** — installing inside this directory alone
+will not resolve the workspace links. Prerequisites and install steps are in the
+[root README](../../README.md#prerequisites).
+
+```bash
+# from the repository root
+yarn start:voter     # Metro bundler, leave running
+yarn android:voter   # build & run on Android
+yarn ios:voter       # build & run on iOS (macOS only)
 ```
 
-## Step 2: Build and run your app
+Or scope the workspace explicitly from anywhere in the repo:
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
-
-```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
+```bash
+yarn workspace votetorrent-voter start
+yarn workspace votetorrent-voter test        # Jest
+yarn workspace votetorrent-voter lint        # ESLint
+yarn workspace votetorrent-voter typecheck   # tsc --noEmit
 ```
 
-### iOS
+Jest mocks the crypto and multiformats layers, so it cannot catch bundling or
+Hermes-runtime failures in the real register path. Use the on-device boot smoke
+for that:
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
+```bash
+./scripts/voter-boot-smoke.sh
 ```
 
-Then, and every time you update your native dependencies, run:
+For a signed, standalone release APK, see
+[doc/releases/RELEASE-ANDROID.md](../../doc/releases/RELEASE-ANDROID.md).
 
-```sh
-bundle exec pod install
-```
+## Architecture
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+TypeScript and React Native over libp2p, with the Sereus strand layer and the
+Optimystic distributed database. The app supplies everything platform-specific
+(storage, P2P transport, device signing, attestation production) and injects it
+into the shared `@votetorrent/vote-core` and `@votetorrent/vote-engine`
+workspaces, which hold the protocol types and the Quereus-backed engine.
 
-```sh
-# Using npm
-npm run ios
+See [Codebase Architecture](../../doc/codebase-architecture.md) for the
+composition, [Technical Architecture](../../doc/architecture.md) for the
+protocol, and [Election Logic](../../doc/election.md) for what happens during an
+election.
 
-# OR using Yarn
-yarn ios
-```
+The attestation values this app produces are consumed by the Authority app's
+verifier under a locked wire format — see
+[ATTESTATION-CONTRACT.md](../../packages/vote-engine/ATTESTATION-CONTRACT.md).
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+The Metro configuration carries several load-bearing workarounds for running
+this stack on Hermes — read
+[the constraints table](../../doc/development.md#react-native--hermes-constraints)
+before changing it.
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+## Security
 
-## Step 3: Modify your app
+This app handles voter registration detail and the voter's private key.
 
-Now that you have successfully run the app, let's make changes!
+> **Caveat:** the libp2p connection gater is currently permissive
+> (`denyDialMultiaddr: async () => false` in `src/providers/CadreNodeProvider.tsx`)
+> to allow emulator and local-host dialing during development. This must be
+> tightened before any production deployment.
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+## Contributing
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+## Support
 
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+1. [Main documentation](../../README.md)
+2. [End-user FAQ](../../doc/user-faq.md)
+3. [Open an issue](https://github.com/gotchoices/votetorrent/issues)

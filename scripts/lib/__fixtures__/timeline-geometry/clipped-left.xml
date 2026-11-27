@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<!-- clipped-left (WR-07 control): left edge -- text starts 10px OUTSIDE the card's left bound (x1=10 < card.x1=20).
+     leg_clipping previously compared ONLY text.x2 > card.x2, so this overflow was invisible to it
+     and the fixture returned PASS. Vertical overflow is newly relevant because 61-08's C1/C2 added
+     16px of vertical height per current row. Only the clipping leg may FAIL here; the other two
+     must PASS (leg isolation). -->
+<hierarchy rotation="0">
+  <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="true" long-clickable="false" password="false" selected="false" bounds="[0,0][720,1520]">
+    <node index="0" text="" resource-id="" class="android.view.ViewGroup" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[20,100][700,400]">
+      <node index="0" text="" resource-id="timeline-row-notch-votingStarts" class="android.view.View" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[20,140][28,156]" />
+      <node index="1" text="Voting Period" resource-id="timeline-row-title-votingStarts" class="android.widget.TextView" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[10,110][300,140]" />
+      <node index="2" text="" resource-id="timeline-row-vote-now-votingStarts" class="android.view.ViewGroup" package="org.votetorrent.voter" content-desc="Vote now" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[40,180][240,280]">
+        <node index="0" text="Vote now" resource-id="" class="android.widget.TextView" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[50,200][230,260]" />
+      </node>
+    </node>
+  </node>
+</hierarchy>

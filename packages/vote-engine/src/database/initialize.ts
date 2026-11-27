@@ -137,6 +137,17 @@ async function registerCustomFunctions(db: Database): Promise<void> {
 }
 
 /**
+ * VoteTorrent's own SQL functions (`SignatureValid`, `SignatureValidP256`, `isISODatetime`), without
+ * the crypto plugin. Pass as cadre-core's `strandDatabaseSetup` (and `StrandDatabase`'s
+ * `databaseSetup`): Quereus 5.6 refuses a CHECK that calls an unregistered function at CREATE TABLE,
+ * so these must exist on a strand's database before cadre-core applies the sApp schema. The crypto
+ * plugin is left to cadre-core (`connectToStrand`), and `registerDbPlugins` still runs afterwards.
+ */
+export async function registerVoteTorrentFunctions(db: Database): Promise<void> {
+	await registerCustomFunctions(db);
+}
+
+/**
  * Always-run plugin registration: register the crypto plugin and custom SQL
  * functions on a freshly-created Database instance. This is per-Database-instance
  * state (not persisted), so it must run on EVERY database, fresh or re-attached.

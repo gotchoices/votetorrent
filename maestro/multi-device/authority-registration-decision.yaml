@@ -1,0 +1,75 @@
+# Journey (multi-device): registration decision. On the officer's Authority device:
+#   Authorities > <AUTHORITY_NAME> > Registration Requests > first request > tick the
+#   verification checklist > APPROVE REGISTRATION > fingerprint > approved.
+# Needs a pending request from a Voter (multi-device/voter-register-and-await-decision.yaml)
+# and an approval task on THIS device. Does not clear app data.
+# Biometrics: run through scripts/run.sh.
+appId: ${APP_ID}
+name: "Authority: approve a voter's registration request"
+tags:
+  - authority
+  - multi-device
+  - registration
+  - biometric
+env:
+  APP_ID: "${typeof AUTHORITY_APP_ID == 'undefined' ? 'org.votetorrent.authority' : AUTHORITY_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+  AUTHORITY_NAME: "${typeof AUTHORITY_NAME == 'undefined' ? 'Maestro Office' : AUTHORITY_NAME}"
+  REQUEST_WAIT_MS: "${typeof REQUEST_WAIT_MS == 'undefined' ? '600000' : REQUEST_WAIT_MS}"
+---
+- runFlow:
+    file: ../subflows/authority/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- runFlow:
+    file: ../subflows/authority/open-tab.yaml
+    env:
+      TAB: authorities
+- extendedWaitUntil:
+    visible: "${AUTHORITY_NAME}.*"
+    timeout: 60000
+- tapOn: "${AUTHORITY_NAME}.*"
+- scrollUntilVisible:
+    element:
+      id: "authority-details-registration-requests-entry"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "authority-details-registration-requests-entry"
+- extendedWaitUntil:
+    visible:
+      id: "registration-request-row-.*"
+    timeout: ${REQUEST_WAIT_MS}
+- tapOn:
+    id: "registration-request-row-.*"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: "registration-request-approval-screen"
+    timeout: 30000
+- scrollUntilVisible:
+    element:
+      id: "verification-checklist-toggle-id"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "verification-checklist-toggle-id"
+- tapOn:
+    id: "verification-checklist-toggle-roll"
+- tapOn:
+    id: "verification-checklist-toggle-eligibility"
+- scrollUntilVisible:
+    element:
+      id: "registration-request-approval-approve"
+    direction: DOWN
+    timeout: 20000
+- assertNotVisible:
+    id: "registration-request-no-task-hint"
+- tapOn:
+    id: "registration-request-approval-approve"
+- extendedWaitUntil:
+    visible:
+      id: "registration-request-approval-(approved-block|error)"
+    timeout: 120000
+- assertVisible:
+    id: "registration-request-approval-approved-block"

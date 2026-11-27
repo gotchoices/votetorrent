@@ -43,9 +43,15 @@
  * The ceremony script's `recover-branch` leg asserts the SDK>=30 `BiometricPrompt` dispatch by
  * source guarantee. Below API 30 the leg is now `N/A` — there is no branch left to measure or
  * infer, since the native layer terminally rejects before any dispatch decision.
+ *
+ * iOS: `sdkInt` / the `branch` label are not meaningful there (`Platform.Version` is the iOS version
+ * string, and there is no API-30 split). The proof itself is still valid on iOS: it signs with the
+ * recovery key through `nativeSignInputBase64(PROOF_DIGEST, platformOS)` (iOS pre-hashes, Android
+ * does not) and verifies with the schema verifier. The deferred iPhone re-check (I-8-alt) uses it.
  */
 
 import { verifySigP256 } from '@votetorrent/vote-engine/rn';
+import { nativeSignInputBase64 } from '@votetorrent/attestation-native/src/native-sign-input';
 import { getDeviceProvisioningRecord } from './device-user';
 
 const TAG = '[d26a-local]';
@@ -70,6 +76,55 @@ function base64UrlFromDigestBytes(digest: Uint8Array): string {
 
 /** A fixed, non-canonical digest. Deterministic so repeat runs are comparable. */
 const PROOF_DIGEST = new Uint8Array(32).fill(0x5a);
+
+/**
+ * Error `code` values that mean "the branch was never reached" — a cancelled prompt or an
+ * invalidated recovery key — as opposed to a genuine signing/verification failure. Checked
+ * BEFORE the message regex fallback so a code-bearing error is classified on its code, never
+ * on message text (R5c — the ceremony harness's `isPrecondition` classifier had the opposite
+ * order: message-only, with `code` consulted for exactly one literal).
+ */
+const PRECONDITION_CODES = new Set([
+	'CANCELED',
+	// Phase 65 review CR-01: a system-ended prompt (app backgrounded, screen locked) never reached
+	// the branch either.
+	'SYSTEM_CANCELED',
+	'CANCELLED',
+	'USER_CANCELED',
+	'NEGATIVE_BUTTON',
+	'KEY_INVALIDATED_REASSOCIATE',
+]);
+
+/** Message-text fallback for errors that carry no usable `code` (e.g. a bare `Error`). */
+const PRECONDITION_MESSAGE_PATTERN =
+	/invalidated|re-association|CANCELED|CANCELLED|USER_CANCELED|NEGATIVE_BUTTON/i;
+
+/**
+ * Classify a thrown recovery-signing error into one of three terminal buckets. Order is
+ * load-bearing:
+ *   1. the exact `RECOVERY_UNSUPPORTED_OS` code — the branch does not exist on this OS version;
+ *   2. a precondition `code` — the branch was never reached (cancel/invalidation);
+ *   3. the message-regex fallback — covers errors with no `code` at all;
+ *   4. otherwise `'fail'` — a genuine failure. Nothing above this line can turn a real failure
+ *      green: the negative control in the unit test asserts a message with no matching code and
+ *      no matching text classifies as `'fail'`.
+ */
+export function classifyRecoveryFailure(
+	err: unknown,
+): 'unsupported-os' | 'precondition-unmet' | 'fail' {
+	const errCode = (err as { code?: unknown })?.code;
+	if (errCode === 'RECOVERY_UNSUPPORTED_OS') {
+		return 'unsupported-os';
+	}
+	if (typeof errCode === 'string' && PRECONDITION_CODES.has(errCode)) {
+		return 'precondition-unmet';
+	}
+	const message = String((err as { message?: unknown })?.message ?? err);
+	if (PRECONDITION_MESSAGE_PATTERN.test(message)) {
+		return 'precondition-unmet';
+	}
+	return 'fail';
+}
 
 export interface RecoveryBranchProofResult {
 	passed: boolean;
@@ -110,6 +165,7 @@ export async function runRecoveryBranchProof(
 	recoveryKeyAlias: string,
 	sdkInt: number,
 	prompts: { title: string; subtitle: string; negative: string },
+	platformOS: string,
 ): Promise<RecoveryBranchProofResult> {
 	const branch = sdkInt >= 30 ? 'biometric-prompt-device-credential' : 'unsupported-below-api-30';
 	console.info(`${TAG} starting`, JSON.stringify({ sdkInt, branch, recoveryKeyAlias }));
@@ -145,7 +201,7 @@ export async function runRecoveryBranchProof(
 		console.info(`${TAG} ACTION REQUIRED — satisfy the DEVICE CREDENTIAL prompt (not a fingerprint)`);
 		const signed = (await native.signWithRecoveryKey(
 			recoveryKeyAlias,
-			base64FromDigestBytes(PROOF_DIGEST),
+			nativeSignInputBase64(PROOF_DIGEST, platformOS),
 			prompts.title,
 			prompts.subtitle,
 			prompts.negative,
@@ -174,26 +230,21 @@ export async function runRecoveryBranchProof(
 		console.error(`${TAG} raw error —`, err);
 		// D-26a RESCOPED 2026-08-21: below API 30, recovery does not exist at all — 49-19 removed the
 		// sub-API-30 dispatch branch from the native layer, and `signWithRecoveryKey` now rejects with
-		// an exact `code: 'RECOVERY_UNSUPPORTED_OS'` before any key handle or UI. Classify on the
-		// exact code, never a message regex, so an unrelated error whose message happens to mention
-		// the words cannot be misclassified into this bucket. This check runs BEFORE the
-		// `isPrecondition` regex below — the run claims NOTHING about D-26a either way, and is not a
-		// defect: it is the terminal, by-design outcome of an unsupported OS version.
-		const errCode = (err as { code?: unknown })?.code;
-		if (errCode === 'RECOVERY_UNSUPPORTED_OS') {
-			console.info(`${TAG} ========== D-26A LOCAL VERDICT: UNSUPPORTED-OS ==========`);
-			return { passed: false, outcome: 'unsupported-os', sdkInt, branch };
-		}
-		// An invalidated recovery key, or a cancelled prompt, means the branch was NEVER REACHED.
-		// Measured on Device B 2026-08-19: the Keystore recovery key reported
-		// `recovery key invalidated — re-association required` while AsyncStorage still held its
-		// public value — an app-record/Keystore divergence, not a branch defect. Classifying that
-		// as FAIL would write a false negative into the D-26a record.
-		const message = String((err as { message?: unknown })?.message ?? err);
-		const isPrecondition = /invalidated|re-association|CANCELED|CANCELLED|USER_CANCELED|NEGATIVE_BUTTON/i.test(message);
-		console.info(
-			`${TAG} ========== D-26A LOCAL VERDICT: ${isPrecondition ? 'PRECONDITION-UNMET' : 'FAIL'} ==========`,
-		);
-		return { passed: false, outcome: isPrecondition ? 'precondition-unmet' : 'fail', sdkInt, branch };
+		// an exact `code: 'RECOVERY_UNSUPPORTED_OS'` before any key handle or UI. An invalidated
+		// recovery key, or a cancelled prompt, means the branch was NEVER REACHED. Measured on
+		// Device B 2026-08-19: the Keystore recovery key reported `recovery key invalidated —
+		// re-association required` while AsyncStorage still held its public value — an app-record/
+		// Keystore divergence, not a branch defect. Classifying that as FAIL would write a false
+		// negative into the D-26a record. `classifyRecoveryFailure` (R5c) is code-first, with the
+		// message regex only as a fallback for errors that carry no usable code.
+		const classification = classifyRecoveryFailure(err);
+		const verdict =
+			classification === 'unsupported-os'
+				? 'UNSUPPORTED-OS'
+				: classification === 'precondition-unmet'
+					? 'PRECONDITION-UNMET'
+					: 'FAIL';
+		console.info(`${TAG} ========== D-26A LOCAL VERDICT: ${verdict} ==========`);
+		return { passed: false, outcome: classification, sdkInt, branch };
 	}
 }

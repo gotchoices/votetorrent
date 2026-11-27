@@ -50,10 +50,16 @@ if (globalThis.crypto && typeof globalThis.crypto.randomUUID !== 'function') {
 //    otherwise crash with a bare "undefined is not a function". Every other
 //    SubtleCrypto method is installed as a throwing stub that NAMES the gap so
 //    such a failure is immediately diagnosable instead of latent.
+//
+//    Both are TAGGED so polyfills/native-crypto.js can swap in native code once
+//    react-native-quick-crypto has loaded: the digest with the sereus kit's own tag, which
+//    `@serfab/cadre-rn/native-digest` requires before it replaces anything (untagged, every
+//    block hash stayed pure JS even with native Noise loaded), and the stubs with ours, so
+//    only these placeholders are ever replaced.
 if (globalThis.crypto && !globalThis.crypto.subtle) {
   const {sha256, sha512} = require('@noble/hashes/sha2.js');
-  const notPolyfilled = name =>
-    function () {
+  const notPolyfilled = name => {
+    const stub = function () {
       return Promise.reject(
         new Error(
           `crypto.subtle.${name} is not polyfilled (digest-only shim) — ` +
@@ -63,6 +69,9 @@ if (globalThis.crypto && !globalThis.crypto.subtle) {
         ),
       );
     };
+    stub[Symbol.for('votetorrent/subtle-stub')] = true;
+    return stub;
+  };
   globalThis.crypto.subtle = {
     digest(algorithm, data) {
       const name = typeof algorithm === 'string' ? algorithm : algorithm.name;
@@ -83,79 +92,20 @@ if (globalThis.crypto && !globalThis.crypto.subtle) {
     wrapKey: notPolyfilled('wrapKey'),
     unwrapKey: notPolyfilled('unwrapKey'),
   };
+  globalThis.crypto.subtle.digest[Symbol.for('@serfab/cadre-rn/js-digest')] = true;
 }
 
 // 3. TextDecoder (UTF-8) — bare RN 0.78 Hermes lacks it (Expo provides it; that's why the
 //    reference app's bare-RN fallback exists). uint8arrays does `new TextDecoder()` at module scope.
 if (typeof globalThis.TextDecoder === 'undefined') {
-  // IN-13 (17-REVIEW): malformed/truncated UTF-8 must NOT silently decode to
-  // wrong characters. Per the WHATWG Encoding spec: invalid sequences emit
-  // U+FFFD (or throw a TypeError when constructed with { fatal: true }), a
-  // leading BOM is stripped unless { ignoreBOM: true }, and overlong/
-  // surrogate/out-of-range encodings are rejected.
-  globalThis.TextDecoder = class {
-    constructor(label = 'utf-8', options = {}) {
-      const enc = String(label).toLowerCase().replace('_', '-');
-      if (enc !== 'utf-8' && enc !== 'utf8') {
-        throw new RangeError(`TextDecoder polyfill is UTF-8 only (got "${label}")`);
-      }
-      this.encoding = 'utf-8';
-      this.fatal = !!options.fatal;
-      this.ignoreBOM = !!options.ignoreBOM;
-    }
-    decode(input) {
-      const bytes = input instanceof Uint8Array ? input : new Uint8Array(input ?? []);
-      let i = 0;
-      // Strip a leading UTF-8 BOM unless ignoreBOM was requested (spec default).
-      if (!this.ignoreBOM && bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
-        i = 3;
-      }
-      let s = '';
-      const fatal = this.fatal;
-      const fail = reason => {
-        if (fatal) throw new TypeError('TextDecoder.decode: invalid UTF-8 — ' + reason);
-        s += '�';
-      };
-      while (i < bytes.length) {
-        const b = bytes[i++];
-        if (b < 0x80) {
-          s += String.fromCharCode(b);
-          continue;
-        }
-        let needed, cp, min;
-        if (b >= 0xc2 && b < 0xe0) { needed = 1; cp = b & 0x1f; min = 0x80; }
-        else if (b >= 0xe0 && b < 0xf0) { needed = 2; cp = b & 0x0f; min = 0x800; }
-        else if (b >= 0xf0 && b < 0xf5) { needed = 3; cp = b & 0x07; min = 0x10000; }
-        else { fail('invalid leading byte 0x' + b.toString(16)); continue; }
-        let ok = true;
-        for (let k = 0; k < needed; k++) {
-          const c = bytes[i];
-          if (c === undefined || (c & 0xc0) !== 0x80) { ok = false; break; }
-          cp = (cp << 6) | (c & 0x3f);
-          i++;
-        }
-        if (!ok) { fail('truncated or invalid continuation byte'); continue; }
-        if (cp < min || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) {
-          fail('overlong, surrogate, or out-of-range sequence');
-          continue;
-        }
-        if (cp >= 0x10000) {
-          const c = cp - 0x10000;
-          s += String.fromCharCode(0xd800 + (c >> 10), 0xdc00 + (c & 0x3ff));
-        } else {
-          s += String.fromCharCode(cp);
-        }
-      }
-      return s;
-    }
-  };
+  globalThis.TextDecoder = require('./polyfills/hermes-text-decoder');
 }
 
-// 4. structuredClone (Quereus B-tree uses it; Hermes lacks it)
-if (typeof globalThis.structuredClone !== 'function') {
-  const sc = require('@ungap/structured-clone').default;
-  globalThis.structuredClone = v => sc(v);
-}
+// 4. structuredClone (Quereus B-tree and Optimystic's db-core use it; Hermes lacks it). The sereus
+//    kit's arm, adopted verbatim (cadre-rn 1.19.0, sereus#51): plain data is copied directly and
+//    anything else goes through @ungap/structured-clone, the bare ungap this used to install. It
+//    checks for a native structuredClone itself. See polyfills/hermes-structured-clone.js.
+require('./polyfills/hermes-structured-clone');
 
 // 5. Web Streams
 if (typeof globalThis.ReadableStream === 'undefined') {
@@ -199,12 +149,29 @@ if (typeof WebSocket !== 'undefined' && !('bufferedAmount' in WebSocket.prototyp
   });
 }
 
+// 6d. WebSocket send batching (ported from sereus-chat, polyfills/websocket-batching.js): the
+//     binary sends libp2p makes in one turn reach native code as ONE message, in order. Each RN
+//     binary send is a bridge crossing that base64-encodes on the JS thread first, and about half
+//     of libp2p's are 16 bytes or fewer. Measured only on NativeScript (62% fewer native sends);
+//     UNVERIFIED on React Native, so it needs a device measurement with this on and off.
+//     Set WEBSOCKET_SEND_BATCHING to false to send every chunk as before.
+const WEBSOCKET_SEND_BATCHING = true;
+if (WEBSOCKET_SEND_BATCHING && typeof WebSocket !== 'undefined') {
+  require('./polyfills/websocket-batching').batchWebSocketSends(WebSocket.prototype);
+}
+
 // 7. AbortSignal.prototype.throwIfAborted
 if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.prototype.throwIfAborted !== 'function') {
   AbortSignal.prototype.throwIfAborted = function () {
     if (this.aborted) throw this.reason ?? new DOMException('The operation was aborted.', 'AbortError');
   };
 }
+
+// 7a. AbortController `reason` + AbortSignal.any. RN's abort-controller@3.0.0 drops every abort
+//     reason, so libp2p's raceSignal rejects with `undefined` and the upgrader's
+//     `err.message` masks the real failure (spike 092, explaining spike 069). A `require`,
+//     not an `import`, so it runs HERE, after the DOMException arm, and not hoisted above it.
+require('./polyfills/hermes-abort-reason');
 
 // 7b. AbortSignal.timeout — bare RN 0.78 Hermes lacks this static (Expo's Hermes has it, so the
 //     reference app didn't need it). libp2p's dial path calls AbortSignal.timeout(ms); without it a

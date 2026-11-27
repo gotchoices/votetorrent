@@ -7,6 +7,8 @@ export interface KeyboardAvoidingScreenProps {
 	children: ReactNode;
 	/** Extra style overrides merged after the base `content` chrome. */
 	style?: StyleProp<ViewStyle>;
+	/** Optional testID forwarded to the shell View (screens keep their existing shell testID). */
+	testID?: string;
 }
 
 /**
@@ -26,9 +28,11 @@ export interface KeyboardAvoidingScreenProps {
  * has to be applied by the app because `adjustResize` no longer resizes the
  * window under Android's forced edge-to-edge; see {@link useKeyboardInset}.
  */
-export function KeyboardAvoidingScreen({ children, style }: KeyboardAvoidingScreenProps) {
+export function KeyboardAvoidingScreen({ children, style, testID }: KeyboardAvoidingScreenProps) {
 	const keyboardInset = useKeyboardInset();
 	return (
-		<View style={[globalStyles.content, { paddingBottom: keyboardInset }, style]}>{children}</View>
+		<View testID={testID} style={[globalStyles.content, { paddingBottom: keyboardInset }, style]}>
+			{children}
+		</View>
 	);
 }

@@ -15,6 +15,7 @@ import { createDeviceSigner } from "../../engines/device-signer";
 import { utf8ToBytes } from "@noble/hashes/utils.js";
 import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
 import { KeyboardAvoidingScreen } from "../../components/KeyboardAvoidingScreen";
+import { errorCopy } from "../../utils/errorCopy";
 
 export function ReviseUserScreen() {
 	const { user, userEngine } = useRoute().params as {
@@ -44,7 +45,8 @@ export function ReviseUserScreen() {
 				event: UserHistoryEvent.revise,
 				info: {
 					name: userState.name,
-					image: userState.image as ImageRef,
+					// Carry the stored image forward: a missing imageRef writes a null ImageRef over it.
+					imageRef: userState.imageRef as ImageRef,
 				},
 				timestamp: Date.now(),
 				signature: realSignature,
@@ -52,15 +54,14 @@ export function ReviseUserScreen() {
 			await userEngine.revise(reviseUserHistory);
 			navigation.popTo("UserDetails", { user: userState, userEngine });
 		} catch (error) {
-			setErrorMessage(error instanceof Error ? error.message : String(error));
+			setErrorMessage(errorCopy(error, t, "write"));
 		}
 	};
 
+	// `imageRef` is the field vote-core's User declares and the engine stores (was `image`, read by
+	// nothing: an entered URL was dropped and a stored one never showed).
 	const handleImageUrlChange = (text: string) => {
-		setUserState({ ...userState, image: { url: text } });
-		if (text.startsWith("http")) {
-			setUserState({ ...userState, image: { url: text } });
-		}
+		setUserState({ ...userState, imageRef: { url: text } });
 		setEdited(true);
 	};
 
@@ -87,7 +88,7 @@ export function ReviseUserScreen() {
 		} catch (error) {
 			const outcome = handleDeviceSigningError(error);
 			if (outcome.handled) return;
-			setErrorMessage(outcome.message ?? (error instanceof Error ? error.message : String(error)));
+			setErrorMessage(outcome.message ?? errorCopy(error, t, "write"));
 		} finally {
 			setIsSigning(false);
 		}
@@ -95,7 +96,7 @@ export function ReviseUserScreen() {
 
 	return (
 		<KeyboardAvoidingScreen>
-			<ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
+			<ScrollView keyboardShouldPersistTaps="handled" style={[styles.container, { backgroundColor: colors.background }]}>
 				<View style={[styles.section, styles.detailContainer]}>
 					<ThemedText type="defaultSemiBold">{t("id")}:</ThemedText>
 					<ThemedText>{userState.id}</ThemedText>
@@ -109,7 +110,7 @@ export function ReviseUserScreen() {
 					/>
 					<CustomTextInput
 						title={t("imageUrl")}
-						value={userState.image?.url}
+						value={userState.imageRef?.url}
 						onChangeText={handleImageUrlChange}
 						isImageUrlField={true}
 						makePermanentPressed={() => {}}
@@ -117,9 +118,9 @@ export function ReviseUserScreen() {
 						keyboardType="url"
 						autoCapitalize="none"
 					/>
-					{userState.image?.url && (
+					{userState.imageRef?.url && (
 						<Image
-							source={{ uri: userState.image.url }}
+							source={{ uri: userState.imageRef.url }}
 							style={styles.image}
 							resizeMode="contain"
 						/>

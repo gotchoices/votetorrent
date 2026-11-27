@@ -39,7 +39,7 @@ type Callbacks = Partial<{
 }>;
 
 function renderCard(
-	props: {isRegistered: boolean; draft: RegistrationDraft; registeredAt: string | null},
+	props: {isRegistered: boolean; draft: RegistrationDraft; registeredAt: string | null; networkName?: string},
 	callbacks: Callbacks = {},
 ) {
 	let tr!: renderer.ReactTestRenderer;
@@ -72,6 +72,25 @@ describe('RegistrationCard (REG-01/REG-05)', () => {
 		});
 	});
 
+	describe('network name', () => {
+		it('names the open network in both bodies, never the Utah fallback', () => {
+			const notRegistered = JSON.stringify(
+				renderCard({isRegistered: false, draft: EMPTY_DRAFT, registeredAt: null, networkName: 'Lean Network'}).toJSON(),
+			);
+			expect(notRegistered).toContain('To participate in the Lean Network you will need to register');
+			const registered = JSON.stringify(
+				renderCard({isRegistered: true, draft: REGISTERED_DRAFT, registeredAt: FIXED_REGISTERED_AT, networkName: 'Lean Network'}).toJSON(),
+			);
+			expect(registered).toContain('You have successfully registered for the Lean Network');
+			expect(notRegistered + registered).not.toContain('Utah');
+		});
+
+		it('falls back to the common network name when none is open', () => {
+			const text = JSON.stringify(renderCard({isRegistered: false, draft: EMPTY_DRAFT, registeredAt: null}).toJSON());
+			expect(text).toContain('To participate in the voting network you will need to register');
+		});
+	});
+
 	describe('registered', () => {
 		it('renders the heading, draft-derived identity line, valid-through badge, and Update CTA firing onUpdateRegistration', () => {
 			const onUpdateRegistration = jest.fn();
@@ -98,6 +117,15 @@ describe('RegistrationCard (REG-01/REG-05)', () => {
 				cta.props.onPress();
 			});
 			expect(onUpdateRegistration).toHaveBeenCalledTimes(1);
+		});
+
+		// todo 2026-11-23-voter-valid-through-blank-for-device-approved: an approved registration with no date
+		// (the engine-read path passes registeredAt null) must not show "Valid through" with an empty value.
+		it.each([[null], ['not-a-date']])('leaves the valid-through badge out when registeredAt is %p', registeredAt => {
+			const tr = renderCard({isRegistered: true, draft: REGISTERED_DRAFT, registeredAt});
+			expect(tr.root.findAllByProps({testID: 'registration-card-valid-through'})).toHaveLength(0);
+			expect(JSON.stringify(tr.toJSON())).not.toMatch(/Valid through|NaN/);
+			expect(tr.root.findAllByProps({testID: 'registration-card-update'}).length).toBeGreaterThan(0);
 		});
 
 		// Manual-QA gap-closure (Phase 41 re-verification): party is a stable KEY resolved via

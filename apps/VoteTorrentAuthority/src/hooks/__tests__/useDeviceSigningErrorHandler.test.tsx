@@ -161,27 +161,23 @@ describe('useDeviceSigningErrorHandler — 49-11 outcome contract', () => {
 		});
 	});
 
-	describe('49-14 follow-up — the SignatureValid desync rescue path', () => {
-		it('a raw, unwrapped ConstraintError-shaped SignatureValid rejection navigates to ProvisionSigningKey with reason: invalidated', () => {
-			const err = Object.assign(new Error('CHECK constraint failed: SignatureValid'), {
-				name: 'ConstraintError',
-			});
-			const outcome = run(err);
-
-			expect(mockNavigate).toHaveBeenCalledTimes(1);
-			expect(mockNavigate).toHaveBeenCalledWith('ProvisionSigningKey', { reason: 'invalidated' });
-			expect(outcome).toEqual({ handled: true });
-		});
-
-		it('the ElectionsEngine.rethrow-wrapped shape also navigates', () => {
+	describe('SignatureValid CHECK failures are not key-replacement routes (desync detection lives in device-signer self-verify)', () => {
+		it('H1: a bare SignatureValid CHECK failure (any table, e.g. the requester signature) does not navigate and is not handled', () => {
 			const outcome = run(new Error('Quereus error (code 19): CHECK constraint failed: SignatureValid'));
 
+			expect(mockNavigate).not.toHaveBeenCalled();
+			expect(outcome).toEqual({ handled: false, message: undefined });
+		});
+
+		it('H2: a KEY_INVALIDATED_REASSOCIATE-coded error still navigates to ProvisionSigningKey with reason: invalidated', () => {
+			const outcome = run({ code: 'KEY_INVALIDATED_REASSOCIATE' });
+
 			expect(mockNavigate).toHaveBeenCalledTimes(1);
 			expect(mockNavigate).toHaveBeenCalledWith('ProvisionSigningKey', { reason: 'invalidated' });
 			expect(outcome).toEqual({ handled: true });
 		});
 
-		it('an unrelated CHECK failure is NOT routed into recovery — falls through to pass-through', () => {
+		it('an unrelated CHECK failure falls through to pass-through', () => {
 			const outcome = run(new Error('CHECK constraint failed: RevisionDeadlineValid'));
 
 			expect(mockNavigate).not.toHaveBeenCalled();
@@ -217,5 +213,66 @@ describe('useDeviceSigningErrorHandler — 49-11 outcome contract', () => {
 			expect(mockNavigate).not.toHaveBeenCalled();
 			expect(outcome).toEqual({ handled: false, message: undefined });
 		});
+	});
+});
+
+describe('useDeviceSigningErrorHandler — peer-unavailable write classification (62-96)', () => {
+	const MSG =
+		'Block default/app/TidHighWater is unavailable (cohort-unreachable): the repo could not determine whether it exists';
+	const expected = { handled: false, message: 'peerWriteUnavailable' };
+
+	it('H-1a: the bare test-19 message maps to the translated write copy, no navigation', () => {
+		expect(run(new Error(MSG))).toEqual(expected);
+		expect(mockNavigate).not.toHaveBeenCalled();
+	});
+
+	it('H-1b: an Error wrapping the message as cause maps to the write copy', () => {
+		expect(run(new Error('write failed', { cause: new Error(MSG) }))).toEqual(expected);
+	});
+
+	it('H-1c: the engine-wrapped "Unknown error ...: QuereusError: ..." string form maps to the write copy', () => {
+		const wrapped = new Error(`Unknown error during INSERT: QuereusError: ${MSG}`);
+		expect(run(wrapped)).toEqual(expected);
+	});
+
+	it('H-2: a recognised device-signing code wins over peer classification', () => {
+		const outcome = run({ code: 'LOCKOUT', message: MSG });
+		expect(outcome).toEqual({ handled: false, message: 'deviceSigningErrorLockout' });
+		const nav = run({ code: 'KEY_INVALIDATED_REASSOCIATE', message: MSG });
+		expect(nav).toEqual({ handled: true });
+	});
+
+	it('H-3: a plain constraint failure still passes through', () => {
+		expect(run(new Error('constraint failed'))).toEqual({ handled: false, message: undefined });
+	});
+
+	it('H-4: a caller using the documented shape renders the translated copy and no raw text', () => {
+		function Caller() {
+			const handle = useDeviceSigningErrorHandler();
+			const [msg, setMsg] = React.useState('');
+			return (
+				<TouchableOpacity
+					testID="save"
+					onPress={() => {
+						const err = new Error(`Unknown error during INSERT: QuereusError: ${MSG}`);
+						const outcome = handle(err);
+						if (outcome.handled) return;
+						setMsg(outcome.message ?? (err instanceof Error ? err.message : String(err)));
+					}}
+				>
+					<Text testID="shown">{msg}</Text>
+				</TouchableOpacity>
+			);
+		}
+		let tr!: renderer.ReactTestRenderer;
+		renderer.act(() => {
+			tr = renderer.create(<Caller />);
+		});
+		renderer.act(() => {
+			tr.root.findByProps({ testID: 'save' }).props.onPress();
+		});
+		const shown = tr.root.findByProps({ testID: 'shown' }).props.children;
+		expect(shown).toBe('peerWriteUnavailable');
+		expect(JSON.stringify(tr.toJSON())).not.toContain('TidHighWater');
 	});
 });

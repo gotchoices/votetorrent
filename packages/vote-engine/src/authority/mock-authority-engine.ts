@@ -1,10 +1,12 @@
 import {
   MOCK_SHARED_ADMINISTRATION_DETAILS
 } from '../mock-data.js'
+import { ADMIN_CHANGE_ERROR_CODES, AdminPromotionError } from '@votetorrent/vote-core'
 import type {
   Admin,
   AdminDetails,
   AdminInit,
+  AdminPromotionResult,
   Authority,
   AuthorityDetails,
   AuthorityInit,
@@ -19,6 +21,7 @@ import type {
   OfficerInit,
   OfficerInvite,
   OfficerInviteShare,
+  PendingAdminChange,
   Proposal,
   Scope,
   SentAuthorityInvite,
@@ -30,13 +33,19 @@ import {
   AuthorityProposeAdminBuilder,
   AuthoritySaveInviteWithSigningBuilder
 } from './builders/index.js'
+import { nowCanonicalDatetime, toCanonicalDatetime } from '../utils.js'
 
 // Local mock data definitions (MOCK_ADMINISTRATORS, MOCK_THRESHOLD_POLICIES, etc.) are removed.
 
 export class MockAuthorityEngine implements IAuthorityEngine {
-  private readonly admin: Admin
+  private admin: Admin
   private proposedAdmin?: Proposal<AdminInit> // Can be undefined if not SLCO or no proposal made
   private readonly proposedAuthority?: Proposal<AuthorityInit> // Unused by current mock methods but part of interface/state
+  // 66.1 (C2/C3 mirror): the change still waiting for its effective time, the effective times that
+  // were cancelled, and a record of every accepted cancel (for specs and preview mode).
+  private pendingChange?: PendingAdminChange
+  private readonly cancelledEffectiveAts = new Set<string>()
+  public readonly cancelCalls: Array<{ effectiveAt: string; userId: string }> = []
   // private isSlcoAuthority: boolean = false; // No longer needed
 
   // Authorities whose mock keeps a proposed administration. All other seeded
@@ -90,6 +99,10 @@ export class MockAuthorityEngine implements IAuthorityEngine {
     console.log(`MockAuthorityEngine: cancelInvite(${slotCid}) for ${this.authority.name}.`)
   }
 
+  async getPendingInviteCids (): Promise<string[]> {
+    return []
+  }
+
   async resendInvite (slotCid: string): Promise<string> {
     console.log(`MockAuthorityEngine: resendInvite(${slotCid}) for ${this.authority.name}.`)
     return `mock-resent-${slotCid}`
@@ -99,7 +112,33 @@ export class MockAuthorityEngine implements IAuthorityEngine {
     // Return the instance-specific administration details
     return {
       admin: this.admin,
-      proposed: this.proposedAdmin
+      proposed: this.proposedAdmin,
+      pending: this.livePendingChange()
+    }
+  }
+
+  // A pending change is live while its effective time is still ahead and it was not cancelled.
+  // Both sides are canonical 19-char UTC strings, so text comparison orders them by time.
+  private livePendingChange (): PendingAdminChange | undefined {
+    const pending = this.pendingChange
+    if (pending === undefined) return undefined
+    if (this.cancelledEffectiveAts.has(pending.effectiveAt)) return undefined
+    if (pending.effectiveAt <= nowCanonicalDatetime()) return undefined
+    return pending
+  }
+
+  // 66.1 (D-05 contract shape): the mock never calls `sign`, as the mock proposeAdmin ignores its callback.
+  async cancelAdminChange (target: { effectiveAt: string; userId: string }, _sign: (digest: Uint8Array) => Promise<Signature>): Promise<void> {
+    if (this.cancelledEffectiveAts.has(target.effectiveAt)) return
+    const pending = this.livePendingChange()
+    if (pending === undefined || pending.effectiveAt !== target.effectiveAt) {
+      throw Object.assign(new Error('No pending administration change to cancel'), { code: ADMIN_CHANGE_ERROR_CODES.cancelNotPending })
+    }
+    this.cancelCalls.push({ effectiveAt: target.effectiveAt, userId: target.userId })
+    this.cancelledEffectiveAts.add(target.effectiveAt)
+    this.pendingChange = undefined
+    if (this.proposedAdmin !== undefined && toCanonicalDatetime(this.proposedAdmin.proposed.effectiveAt) === target.effectiveAt) {
+      this.proposedAdmin = undefined
     }
   }
 
@@ -111,11 +150,58 @@ export class MockAuthorityEngine implements IAuthorityEngine {
   }
 
   async proposeAdmin (adminProposal: Proposal<AdminInit>, _signatureOrCallback: Signature | ((digest: Uint8Array) => Promise<Signature>)): Promise<void> {
+    // 66.1 (D-08 mirror): one pending change at a time.
+    if (this.livePendingChange() !== undefined) {
+      throw Object.assign(new Error('Another administration change is still pending'), { code: ADMIN_CHANGE_ERROR_CODES.pending })
+    }
     // Update the instance's proposed administration directly
     this.proposedAdmin = JSON.parse(JSON.stringify(adminProposal))
     console.log(
 			`MockAuthorityEngine: Admin proposed for ${this.authority.name}.`
     )
+    const effectiveAt = toCanonicalDatetime(adminProposal.proposed.effectiveAt)
+    if (effectiveAt > nowCanonicalDatetime()) {
+      this.pendingChange = {
+        effectiveAt,
+        officers: JSON.parse(JSON.stringify(adminProposal.proposed.officers)),
+        thresholdPolicies: JSON.parse(JSON.stringify(adminProposal.proposed.thresholdPolicies)),
+        promoted: false
+      }
+    }
+  }
+
+  // 57-07 (D-01 promotion half): the mock exists to satisfy the interface
+  // and preview mode, not to simulate the schema — promote the in-memory
+  // proposedAdmin into the mock's current administration and clear it.
+  async applyAdminProposal (
+    _nonce: string,
+    _sign: (digest: Uint8Array) => Promise<Signature>
+  ): Promise<AdminPromotionResult> {
+    if (!this.proposedAdmin) {
+      throw new AdminPromotionError('roster-mismatch', _nonce)
+    }
+    const proposed = this.proposedAdmin
+    this.admin = {
+      ...this.admin,
+      effectiveAt: typeof proposed.proposed.effectiveAt === 'string'
+        ? Date.parse(proposed.proposed.effectiveAt)
+        : proposed.proposed.effectiveAt,
+      thresholdPolicies: proposed.proposed.thresholdPolicies,
+      officers: proposed.proposed.officers.map((selection) => ({
+        userId: selection.existing?.userId ?? 'mock-new-officer',
+        authorityId: this.authority.id,
+        title: selection.init?.title ?? selection.existing?.title ?? '',
+        scopes: (selection.init?.scopes ?? selection.existing?.scopes ?? []) as Scope[]
+      }))
+    }
+    const officersPromoted = proposed.proposed.officers.length
+    this.proposedAdmin = undefined
+    return {
+      authorityId: this.authority.id,
+      effectiveAt: this.admin.effectiveAt,
+      officersPromoted,
+      alreadyApplied: false
+    }
   }
 
   // ---- builder factories (BUILD-AUTH-01 / FACT-04) ----

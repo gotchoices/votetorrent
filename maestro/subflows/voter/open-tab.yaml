@@ -1,0 +1,10 @@
+# Open one of the Voter's five bottom tabs by its testID (tab-vote, tab-timeline,
+# tab-registration, tab-scan, tab-settings). The testIDs are set with tabBarButtonTestID in
+# apps/VoteTorrentVoter/src/navigation/index.tsx, so this works in English and Spanish.
+#
+# env: APP_ID, TAB (vote | timeline | registration | scan | settings)
+appId: ${APP_ID}
+---
+- runFlow: ../common/dismiss-logbox.yaml
+- tapOn:
+    id: "tab-${TAB}"

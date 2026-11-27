@@ -91,14 +91,16 @@ import type {
 	Signature,
 	User,
 } from '@votetorrent/vote-core'
-import type { EngineContext } from '@votetorrent/vote-engine/rn'
+import type { EngineContext, IKeyVault } from '@votetorrent/vote-engine/rn'
 import {
 	AssociationEngine,
+	IntakeEngine,
 	NetworksEngine,
 	RegistrationEngine,
 } from '@votetorrent/vote-engine/rn'
 // Static import ONLY — dynamic require() breaks Metro (Phase 16-07 lesson).
 import { REGISTRANT_SEED_ENABLED } from './proof-flags.generated'
+import { resolveAuthorityKeyVault } from './key-vault'
 
 /** App-layer sign callback shape — mirrors `device-signer.ts`'s `SignCallback`. */
 type SignCallback = (digest: Uint8Array) => Promise<Signature>
@@ -241,6 +243,7 @@ export async function seedRegistrantFixtures(
 	networkRef: NetworkReference,
 	user: User,
 	sign: SignCallback,
+	options?: { intakeVault?: IKeyVault },
 ): Promise<SeedRegistrantFixturesResult> {
 	if (!(globalThis as { __DEV__?: boolean }).__DEV__) {
 		throw new Error('seedRegistrantFixtures: must never run outside __DEV__ — this is a dev-only fixture (47-23)')
@@ -317,6 +320,20 @@ export async function seedRegistrantFixtures(
 	// started" OR "started and crashed partway" (the exact scenario the
 	// original marker design masked), so every write below is guarded by an
 	// existence check rather than assumed to be a first run.
+
+	// D-49 (62-31): register() below is now D-49-sealed (RegistrationRequest is not written here,
+	// but RegistrantPrivate is, and register() always seals it). Before the first register() call,
+	// ensure the seeding officer is an intake recipient — the default vault is the SAME one 62-21's
+	// `officer-intake-key.ts` resolves (`resolveAuthorityKeyVault()`), so a key this seed registers
+	// is the SAME one a real "enable encrypted intake" tap would have produced; a caller-supplied
+	// `options.intakeVault` (the test's Map-backed vault) overrides it. Never writes or logs a raw
+	// key — `registerOfficerEncryptionKey` owns that custody discipline internally.
+	const intakeVault = options?.intakeVault ?? resolveAuthorityKeyVault()
+	const intakeEngine = new IntakeEngine(ctx)
+	const existingRecipients = await intakeEngine.listIntakeRecipients(authorityId)
+	if (existingRecipients.recipients.length === 0) {
+		await intakeEngine.registerOfficerEncryptionKey(authorityId, intakeVault, sign)
+	}
 
 	// (3) 12 registrants, all three tiers. Guarded per-registrant: a prior
 	// partial run may have already written some of these.
@@ -423,7 +440,6 @@ export async function seedRegistrantFixtures(
 	// Guarded: reuse an existing outstanding challenge for the same
 	// (registrant, deviceKey) pair rather than issuing a duplicate on a
 	// resumed run.
-	const challengeExpiration = new Date(Date.now() + 7 * 86_400_000).toISOString().replace(/\.\d{3}Z$/, 'Z')
 	const firstChallengeDeviceKey = `${SEED_ID_PREFIX}-device-0`
 	const secondChallengeDeviceKey = `${SEED_ID_PREFIX}-device-1`
 	async function ensureChallenge(forRegistrantId: string, deviceKey: string): Promise<{ nonce: string }> {
@@ -436,7 +452,6 @@ export async function seedRegistrantFixtures(
 		const issued = await associationEngine.issueAttestationChallenge(
 			forRegistrantId,
 			deviceKey,
-			challengeExpiration,
 			sign,
 			electionId,
 		)

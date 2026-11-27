@@ -1,0 +1,4 @@
+{
+	"extends": "../../packages/ui-web/tsconfig.base.json",
+	"include": ["src", "test", "scripts", "vite.config.ts", "vite.mutant.config.ts"]
+}

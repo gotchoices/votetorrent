@@ -1,0 +1,31 @@
+# Journey: invite minting. Found a network (clean state), then Networks > "Invite voters" on its
+# row: confirm owner setup if asked, wait for the join code, check the QR and fingerprint, COPY
+# the code (it lands on THIS device's clipboard) and open the full-screen QR.
+# Biometrics: run through scripts/run.sh.
+#
+# For the single-emulator two-app journey, run this, then multi-device/voter-join-network.yaml
+# with JOIN_VIA=paste on the same device: the Voter's Paste button reads the copied code.
+appId: ${APP_ID}
+name: "Authority: mint a voter join code"
+tags:
+  - authority
+  - invite
+  - biometric
+env:
+  APP_ID: "${typeof AUTHORITY_APP_ID == 'undefined' ? 'org.votetorrent.authority' : AUTHORITY_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+  NETWORK_NAME: "${typeof NETWORK_NAME == 'undefined' ? 'Maestro Net' : NETWORK_NAME}"
+  AUTHORITY_NAME: "${typeof AUTHORITY_NAME == 'undefined' ? 'Maestro Office' : AUTHORITY_NAME}"
+  RELAY_MULTIADDR: "${typeof RELAY_MULTIADDR == 'undefined' ? '/dns4/relay.example.invalid/tcp/443/wss' : RELAY_MULTIADDR}"
+  ADMIN_NAME: "${typeof ADMIN_NAME == 'undefined' ? 'Sam Lee' : ADMIN_NAME}"
+  ADMIN_TITLE: "${typeof ADMIN_TITLE == 'undefined' ? 'Clerk' : ADMIN_TITLE}"
+  CREATE_TIMEOUT_MS: "${typeof CREATE_TIMEOUT_MS == 'undefined' ? '180000' : CREATE_TIMEOUT_MS}"
+  INVITE_TIMEOUT_MS: "${typeof INVITE_TIMEOUT_MS == 'undefined' ? '120000' : INVITE_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/authority/launch.yaml
+    env:
+      CLEAR_STATE: "true"
+- runFlow: ../subflows/authority/create-network.yaml
+- runFlow:
+    file: ../subflows/authority/mint-voter-join-code.yaml

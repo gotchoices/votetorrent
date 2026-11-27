@@ -22,6 +22,8 @@ export interface RegistrationCardProps {
 	isRegistered: boolean;
 	draft: RegistrationDraft;
 	registeredAt: string | null;
+	/** The open network's name (`useNetworkName`); the `common:networkName` copy when omitted. */
+	networkName?: string;
 	onRegisterNow?: () => void;
 	onUpdateRegistration?: () => void;
 	onHelp?: () => void;
@@ -33,6 +35,9 @@ export function computeValidThrough(registeredAt: string | null): string {
 		return '';
 	}
 	const validThrough = new Date(registeredAt);
+	if (Number.isNaN(validThrough.getTime())) {
+		return '';
+	}
 	validThrough.setFullYear(validThrough.getFullYear() + 1);
 	const mm = String(validThrough.getMonth() + 1).padStart(2, '0');
 	const dd = String(validThrough.getDate()).padStart(2, '0');
@@ -44,12 +49,14 @@ export function RegistrationCard({
 	isRegistered,
 	draft,
 	registeredAt,
+	networkName,
 	onRegisterNow,
 	onUpdateRegistration,
 	onHelp,
 }: RegistrationCardProps) {
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('registration');
+	const network = networkName ?? t('networkName', {ns: 'common'});
 
 	if (!isRegistered) {
 		return (
@@ -78,7 +85,7 @@ export function RegistrationCard({
 							lineHeight: typeScale.body.lineHeight,
 						},
 					]}>
-					{t('notRegistered.body')}{' '}
+					{t('notRegistered.body', {network})}{' '}
 					<Text testID="registration-card-help" onPress={onHelp}>
 						<FontAwesome6 name="circle-question" size={15} color={colors.light} />
 					</Text>
@@ -134,7 +141,7 @@ export function RegistrationCard({
 							lineHeight: typeScale.body.lineHeight,
 						},
 					]}>
-					{t('registered.body')}
+					{t('registered.body', {network})}
 				</Text>
 				{hasIdentity ? (
 					<Text
@@ -152,26 +159,30 @@ export function RegistrationCard({
 						{t('registered.identityLine', {fullName, party: partyLabel, dob: draft.dob})}
 					</Text>
 				) : null}
-				<View
-					style={[
-						styles.validThroughBadge,
-						{backgroundColor: colors.validBadge, borderRadius: radii.pill},
-					]}>
-					<Text
-						testID="registration-card-valid-through"
+				{/* A registration approved on the device has no registeredAt here, so there is no date to show:
+				    the badge is left out rather than reading "Valid through" with nothing after it. */}
+				{validThrough ? (
+					<View
 						style={[
-							styles.validThroughText,
-							{
-								color: colors.light,
-								fontFamily: fonts.medium.fontFamily,
-								fontWeight: fonts.medium.fontWeight,
-								fontSize: typeScale.caption.fontSize,
-								lineHeight: typeScale.caption.lineHeight,
-							},
+							styles.validThroughBadge,
+							{backgroundColor: colors.validBadge, borderRadius: radii.pill},
 						]}>
-						{t('registered.validThrough', {validThrough})}
-					</Text>
-				</View>
+						<Text
+							testID="registration-card-valid-through"
+							style={[
+								styles.validThroughText,
+								{
+									color: colors.light,
+									fontFamily: fonts.medium.fontFamily,
+									fontWeight: fonts.medium.fontWeight,
+									fontSize: typeScale.caption.fontSize,
+									lineHeight: typeScale.caption.lineHeight,
+								},
+							]}>
+							{t('registered.validThrough', {validThrough})}
+						</Text>
+					</View>
+				) : null}
 			</View>
 
 			<View style={[globalStyles.cardSurface, styles.updateBlock, {backgroundColor: colors.secondaryButtonSurface}]}>

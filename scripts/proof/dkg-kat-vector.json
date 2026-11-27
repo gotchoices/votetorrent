@@ -1,0 +1,238 @@
+{
+  "v": 1,
+  "kind": "vt64-dkg-kat",
+  "vectorId": "823124f2249c0650",
+  "safety": "Throwaway 2-of-2 DKG transcript for the Hermes known-answer test (PD-14). Its keys were drawn at random for the reserved election id vt64-kat-election, protect nothing, and are never used by any network, strand or ElectionKey row.",
+  "provenance": {
+    "generator": "scripts/proof/make-dkg-kat-vector.ts",
+    "generatedAt": "2026-10-14T14:19:09.942Z",
+    "node": "v22.15.0",
+    "outerCommit": "7c931c805a8f57c38824b4f3d487f395e5cb7432",
+    "noble": {
+      "curves": "2.2.0",
+      "hashes": "2.2.0",
+      "ciphers": "2.2.0"
+    },
+    "distDkgSha256": "79b8d2a36e4a11b54b14aa536608ced82096fc7f182f3fafe1386f59a9f9501a",
+    "srcDkgSha256": "73d1cfa54193b6d8e9ac6e929a2c2dd49062b5ce729c7a89301f9fedc7d2b318",
+    "nodeTimingMs": {
+      "kat": 97,
+      "live": 81
+    }
+  },
+  "params": {
+    "threshold": 2,
+    "participants": 2,
+    "ctx": {
+      "electionId": "vt64-kat-election",
+      "revision": 1,
+      "attempt": 1
+    },
+    "users": [
+      "vt64-kat-keyholder-a",
+      "vt64-kat-keyholder-b"
+    ]
+  },
+  "inputs": {
+    "identifiers": [
+      "23f712d2a73fb792413aad0c0ab409a6605b1411564c2aa6d2a1039aeab9c30c",
+      "50541169d013317da051eb9ee85a6ec367d951b012b568a841a1caf9119b1549"
+    ],
+    "secretsStep1": [
+      "{\"v\":1,\"identifier\":\"23f712d2a73fb792413aad0c0ab409a6605b1411564c2aa6d2a1039aeab9c30c\",\"coefficients\":[\"2b1a55f2e1aa8802bcde291978ffe9c5314ccc9af20f14aafde5ded233b0daef\",\"5094bf0401469aa9ea5fae9f00ea21510e01f249f86626387798d10f486e56f2\"],\"commitment\":[\"022a7274f58b7bb26fb56614bf55d7e23b7e178b77ae36f8b919ac679adb679518\",\"02838cd24cc84284ec34c0af59d312301e4f8e2094e66b1834d6601a4dcae2e9e6\"],\"signers\":{\"min\":2,\"max\":2},\"step\":1}",
+      "{\"v\":1,\"identifier\":\"50541169d013317da051eb9ee85a6ec367d951b012b568a841a1caf9119b1549\",\"coefficients\":[\"ea97080ee02b87cacb22de5c8216a0e2ffc5982a34a9b7971a204ab4e242f2e9\",\"8cd479d03ae7bb0d6ade48eab5b86414d49dc75daac2a298710534bb7e2e8ab3\"],\"commitment\":[\"03547c40022da24648c793dbc6b2795f4a4ddca6858ba144a8b5f4a3ba6171e9cf\",\"03cb7d1d61338a0ab3c555aea83f58fffa2e312163ec13ecefe051c51e75954af3\"],\"signers\":{\"min\":2,\"max\":2},\"step\":1}"
+    ],
+    "secretsStep2": [
+      "{\"v\":1,\"identifier\":\"23f712d2a73fb792413aad0c0ab409a6605b1411564c2aa6d2a1039aeab9c30c\",\"coefficients\":[\"2b1a55f2e1aa8802bcde291978ffe9c5314ccc9af20f14aafde5ded233b0daef\",\"5094bf0401469aa9ea5fae9f00ea21510e01f249f86626387798d10f486e56f2\"],\"commitment\":[\"022a7274f58b7bb26fb56614bf55d7e23b7e178b77ae36f8b919ac679adb679518\",\"02838cd24cc84284ec34c0af59d312301e4f8e2094e66b1834d6601a4dcae2e9e6\"],\"signers\":{\"min\":2,\"max\":2},\"step\":2}",
+      "{\"v\":1,\"identifier\":\"50541169d013317da051eb9ee85a6ec367d951b012b568a841a1caf9119b1549\",\"coefficients\":[\"ea97080ee02b87cacb22de5c8216a0e2ffc5982a34a9b7971a204ab4e242f2e9\",\"8cd479d03ae7bb0d6ade48eab5b86414d49dc75daac2a298710534bb7e2e8ab3\"],\"commitment\":[\"03547c40022da24648c793dbc6b2795f4a4ddca6858ba144a8b5f4a3ba6171e9cf\",\"03cb7d1d61338a0ab3c555aea83f58fffa2e312163ec13ecefe051c51e75954af3\"],\"signers\":{\"min\":2,\"max\":2},\"step\":2}"
+    ],
+    "round1": [
+      {
+        "identifier": "23f712d2a73fb792413aad0c0ab409a6605b1411564c2aa6d2a1039aeab9c30c",
+        "commitment": [
+          "022a7274f58b7bb26fb56614bf55d7e23b7e178b77ae36f8b919ac679adb679518",
+          "02838cd24cc84284ec34c0af59d312301e4f8e2094e66b1834d6601a4dcae2e9e6"
+        ],
+        "proofOfKnowledge": "02191c6eec6e1355488fb6cd66eec1baa943242f5cabe05e653af89e205eb5978b1c47fd76c09a0d758cd2edcb999dce3f2f7bece1b6dc4a8377f2ad663220c5d5"
+      },
+      {
+        "identifier": "50541169d013317da051eb9ee85a6ec367d951b012b568a841a1caf9119b1549",
+        "commitment": [
+          "03547c40022da24648c793dbc6b2795f4a4ddca6858ba144a8b5f4a3ba6171e9cf",
+          "03cb7d1d61338a0ab3c555aea83f58fffa2e312163ec13ecefe051c51e75954af3"
+        ],
+        "proofOfKnowledge": "021a193bf3de32267612004963c1a0f39b9b4e29f8e9e0a302d9569d7425fc0b5d6067d240b272ef5efdd9abade3310ddb0758573b2a2921a0acc64f085f8de4e6"
+      }
+    ],
+    "commits": [
+      "3b6629c4d344c83e708eb35460a0b477829abba262c4ed5487c83d6a33efb18d",
+      "d8830ed3190757a6810210fb8690c3029e1f3d1f4aad1d596977e7b02a7a4092"
+    ],
+    "receivingKeys": [
+      {
+        "privateKey": "a16554945d72b48f8f50607ebe90b9091c74667a6e8e1cb781e8a5dc3d3bba2b",
+        "publicKey": "0219c69d139f04f0ac2ddc09f361dec58e7fbcb3423599bbeb2c27b8467f9147e9"
+      },
+      {
+        "privateKey": "63f73c409c936ecdcded2ba9f9acd5dc9d296fe050122b7e215ba88e0e79866c",
+        "publicKey": "03c5f7b5c813d031d7c2cf408988f5f10b1c41af612581de3403b8804703819771"
+      }
+    ],
+    "round2": {
+      "aToB": "680ba4cee724d0a0a67617a4c7126f491d247a11eca719b43ba27ef3698aaecf",
+      "bToA": "4574e0e1763270f66d8e940bac166dd738fc9f5026f8093ed476225f22dc43b2"
+    },
+    "encryptedShares": {
+      "aToB": {
+        "v": 1,
+        "dealer": "23f712d2a73fb792413aad0c0ab409a6605b1411564c2aa6d2a1039aeab9c30c",
+        "recipient": "50541169d013317da051eb9ee85a6ec367d951b012b568a841a1caf9119b1549",
+        "ephemeralPublicKey": "03621305bc98c78f8f0d151b6b99193c0cdd6a5c42b1a40188e49ae577c74edb39",
+        "nonce": "ee5d22b143ec7e1b63d1540d",
+        "ciphertext": "8861fd82d68780607b9fe26ebfbe3e8d29dfe22022ad87e6c0dbd4eea9e65b03842de1229f25fb5d4ecdb562898ab0f4",
+        "keyCommitment": "9dc3652ff52553f635d3d7e74f8b019a96ea61f23ba5a7192a977571fcbd06e0"
+      },
+      "bToA": {
+        "v": 1,
+        "dealer": "50541169d013317da051eb9ee85a6ec367d951b012b568a841a1caf9119b1549",
+        "recipient": "23f712d2a73fb792413aad0c0ab409a6605b1411564c2aa6d2a1039aeab9c30c",
+        "ephemeralPublicKey": "03569632f45008b3e40e4cee3bba2dfcbb28c862be16f6e2529a18997b8c00ea1b",
+        "nonce": "b99e9997a0c1e9d0e3d67f69",
+        "ciphertext": "383a340275b1b4fd000f437bfb3289e789858caaee605e7f9df1e8318d231d49ae3309bfe63b5f972e6398d63389d24a",
+        "keyCommitment": "536221a21d37a9a61303d45e64fd23a677ad42d541e670795315c841bcfd6722"
+      }
+    },
+    "round3": {
+      "a": {
+        "signingShare": "de1401bee52d785dde8e80997cc2c46f2b9a8e33bf353ad77b4c2e4011419604",
+        "groupPublicKey": "032117adfa347bb4757f199998786da9c3940855a3298e0c8ce2578d03b67d43ac",
+        "groupCommitments": [
+          "032117adfa347bb4757f199998786da9c3940855a3298e0c8ce2578d03b67d43ac",
+          "02b52a02b7a24fbec4384ae501924e4361c5f2530319d550c6f922d129dcd24a9a"
+        ]
+      },
+      "b": {
+        "signingShare": "f7be2610a162cb1027bffd1155706376f8e5788fd794e86653c78e37326c8ccb",
+        "groupPublicKey": "032117adfa347bb4757f199998786da9c3940855a3298e0c8ce2578d03b67d43ac",
+        "groupCommitments": [
+          "032117adfa347bb4757f199998786da9c3940855a3298e0c8ce2578d03b67d43ac",
+          "02b52a02b7a24fbec4384ae501924e4361c5f2530319d550c6f922d129dcd24a9a"
+        ]
+      }
+    }
+  },
+  "checks": [
+    {
+      "name": "identifier:a",
+      "expect": "23f712d2a73fb792413aad0c0ab409a6605b1411564c2aa6d2a1039aeab9c30c"
+    },
+    {
+      "name": "identifier:b",
+      "expect": "50541169d013317da051eb9ee85a6ec367d951b012b568a841a1caf9119b1549"
+    },
+    {
+      "name": "commit:a",
+      "expect": "3b6629c4d344c83e708eb35460a0b477829abba262c4ed5487c83d6a33efb18d"
+    },
+    {
+      "name": "commit:b",
+      "expect": "d8830ed3190757a6810210fb8690c3029e1f3d1f4aad1d596977e7b02a7a4092"
+    },
+    {
+      "name": "verify-commit:a",
+      "expect": "true"
+    },
+    {
+      "name": "verify-commit:b",
+      "expect": "true"
+    },
+    {
+      "name": "verify-commit:wrong-attempt",
+      "expect": "false"
+    },
+    {
+      "name": "verify-package:a-checks-b",
+      "expect": "true"
+    },
+    {
+      "name": "verify-package:b-checks-a",
+      "expect": "true"
+    },
+    {
+      "name": "verify-package:tampered-pok",
+      "expect": "false"
+    },
+    {
+      "name": "round2:a-to-b",
+      "expect": "680ba4cee724d0a0a67617a4c7126f491d247a11eca719b43ba27ef3698aaecf"
+    },
+    {
+      "name": "round2:b-to-a",
+      "expect": "4574e0e1763270f66d8e940bac166dd738fc9f5026f8093ed476225f22dc43b2"
+    },
+    {
+      "name": "dealer-share:a-to-b",
+      "expect": "true"
+    },
+    {
+      "name": "dealer-share:b-to-a",
+      "expect": "true"
+    },
+    {
+      "name": "dealer-share:wrong-recipient",
+      "expect": "false"
+    },
+    {
+      "name": "decrypt-share:a-to-b",
+      "expect": "680ba4cee724d0a0a67617a4c7126f491d247a11eca719b43ba27ef3698aaecf"
+    },
+    {
+      "name": "decrypt-share:b-to-a",
+      "expect": "4574e0e1763270f66d8e940bac166dd738fc9f5026f8093ed476225f22dc43b2"
+    },
+    {
+      "name": "round3:a",
+      "expect": "[\"de1401bee52d785dde8e80997cc2c46f2b9a8e33bf353ad77b4c2e4011419604\",\"032117adfa347bb4757f199998786da9c3940855a3298e0c8ce2578d03b67d43ac\",[\"032117adfa347bb4757f199998786da9c3940855a3298e0c8ce2578d03b67d43ac\",\"02b52a02b7a24fbec4384ae501924e4361c5f2530319d550c6f922d129dcd24a9a\"],[[\"23f712d2a73fb792413aad0c0ab409a6605b1411564c2aa6d2a1039aeab9c30c\",\"03c086d2558cd199347e8967ba559a5665e526c538c01a70ead02da059c4f8715e\"],[\"50541169d013317da051eb9ee85a6ec367d951b012b568a841a1caf9119b1549\",\"0297d8c1243498db61c93da822f2b619f110ea238624ad2cfcc18aa582ead992ad\"]],\"23f712d2a73fb792413aad0c0ab409a6605b1411564c2aa6d2a1039aeab9c30c\"]"
+    },
+    {
+      "name": "round3:b",
+      "expect": "[\"f7be2610a162cb1027bffd1155706376f8e5788fd794e86653c78e37326c8ccb\",\"032117adfa347bb4757f199998786da9c3940855a3298e0c8ce2578d03b67d43ac\",[\"032117adfa347bb4757f199998786da9c3940855a3298e0c8ce2578d03b67d43ac\",\"02b52a02b7a24fbec4384ae501924e4361c5f2530319d550c6f922d129dcd24a9a\"],[[\"23f712d2a73fb792413aad0c0ab409a6605b1411564c2aa6d2a1039aeab9c30c\",\"03c086d2558cd199347e8967ba559a5665e526c538c01a70ead02da059c4f8715e\"],[\"50541169d013317da051eb9ee85a6ec367d951b012b568a841a1caf9119b1549\",\"0297d8c1243498db61c93da822f2b619f110ea238624ad2cfcc18aa582ead992ad\"]],\"50541169d013317da051eb9ee85a6ec367d951b012b568a841a1caf9119b1549\"]"
+    },
+    {
+      "name": "derive-group-commitments",
+      "expect": "[\"032117adfa347bb4757f199998786da9c3940855a3298e0c8ce2578d03b67d43ac\",\"02b52a02b7a24fbec4384ae501924e4361c5f2530319d550c6f922d129dcd24a9a\"]"
+    },
+    {
+      "name": "validate-released:a",
+      "expect": "true"
+    },
+    {
+      "name": "validate-released:b",
+      "expect": "true"
+    },
+    {
+      "name": "validate-released:flipped",
+      "expect": "false"
+    },
+    {
+      "name": "reconstruct",
+      "expect": "[\"15b15e01c1d60fcd88010775fb168aa9766387de77702c065833cafa45bd8c97\",[\"23f712d2a73fb792413aad0c0ab409a6605b1411564c2aa6d2a1039aeab9c30c\",\"50541169d013317da051eb9ee85a6ec367d951b012b568a841a1caf9119b1549\"],[]]"
+    },
+    {
+      "name": "secret-roundtrip:a-step1",
+      "expect": "{\"v\":1,\"identifier\":\"23f712d2a73fb792413aad0c0ab409a6605b1411564c2aa6d2a1039aeab9c30c\",\"coefficients\":[\"2b1a55f2e1aa8802bcde291978ffe9c5314ccc9af20f14aafde5ded233b0daef\",\"5094bf0401469aa9ea5fae9f00ea21510e01f249f86626387798d10f486e56f2\"],\"commitment\":[\"022a7274f58b7bb26fb56614bf55d7e23b7e178b77ae36f8b919ac679adb679518\",\"02838cd24cc84284ec34c0af59d312301e4f8e2094e66b1834d6601a4dcae2e9e6\"],\"signers\":{\"min\":2,\"max\":2},\"step\":1}"
+    },
+    {
+      "name": "secret-roundtrip:b-step1",
+      "expect": "{\"v\":1,\"identifier\":\"50541169d013317da051eb9ee85a6ec367d951b012b568a841a1caf9119b1549\",\"coefficients\":[\"ea97080ee02b87cacb22de5c8216a0e2ffc5982a34a9b7971a204ab4e242f2e9\",\"8cd479d03ae7bb0d6ade48eab5b86414d49dc75daac2a298710534bb7e2e8ab3\"],\"commitment\":[\"03547c40022da24648c793dbc6b2795f4a4ddca6858ba144a8b5f4a3ba6171e9cf\",\"03cb7d1d61338a0ab3c555aea83f58fffa2e312163ec13ecefe051c51e75954af3\"],\"signers\":{\"min\":2,\"max\":2},\"step\":1}"
+    },
+    {
+      "name": "secret-roundtrip:a-step2",
+      "expect": "{\"v\":1,\"identifier\":\"23f712d2a73fb792413aad0c0ab409a6605b1411564c2aa6d2a1039aeab9c30c\",\"coefficients\":[\"2b1a55f2e1aa8802bcde291978ffe9c5314ccc9af20f14aafde5ded233b0daef\",\"5094bf0401469aa9ea5fae9f00ea21510e01f249f86626387798d10f486e56f2\"],\"commitment\":[\"022a7274f58b7bb26fb56614bf55d7e23b7e178b77ae36f8b919ac679adb679518\",\"02838cd24cc84284ec34c0af59d312301e4f8e2094e66b1834d6601a4dcae2e9e6\"],\"signers\":{\"min\":2,\"max\":2},\"step\":2}"
+    },
+    {
+      "name": "secret-roundtrip:b-step2",
+      "expect": "{\"v\":1,\"identifier\":\"50541169d013317da051eb9ee85a6ec367d951b012b568a841a1caf9119b1549\",\"coefficients\":[\"ea97080ee02b87cacb22de5c8216a0e2ffc5982a34a9b7971a204ab4e242f2e9\",\"8cd479d03ae7bb0d6ade48eab5b86414d49dc75daac2a298710534bb7e2e8ab3\"],\"commitment\":[\"03547c40022da24648c793dbc6b2795f4a4ddca6858ba144a8b5f4a3ba6171e9cf\",\"03cb7d1d61338a0ab3c555aea83f58fffa2e312163ec13ecefe051c51e75954af3\"],\"signers\":{\"min\":2,\"max\":2},\"step\":2}"
+    }
+  ]
+}

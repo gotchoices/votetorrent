@@ -2,12 +2,22 @@ import React, { createContext, useContext, useState, useCallback } from 'react';
 import type { PropsWithChildren } from 'react';
 
 /**
- * RegistrationDraftProvider — the in-memory multi-step draft Context for the registration
- * form (REG-03). Mirrors the Authority app's `BallotDraftProvider` structurally
- * (createContext + useContext + hook-with-throw + Provider) but holds a FLAT
- * `RegistrationDraft` object with a single generic `updateField(field, value)` setter,
- * instead of BallotDraftProvider's per-entity add/update/remove set — the registration
+ * RegistrationDraftProvider — the APP-SCOPED (Phase 59, D-22), in-memory multi-step draft
+ * Context for the registration form (REG-03). Mirrors the Authority app's
+ * `BallotDraftProvider` structurally (createContext + useContext + hook-with-throw + Provider)
+ * but holds a FLAT `RegistrationDraft` object with a single generic `updateField(field, value)`
+ * setter, instead of BallotDraftProvider's per-entity add/update/remove set — the registration
  * draft is flat, not a nested array (see 41-RESEARCH.md Pattern 2).
+ *
+ * D-22 correction: an earlier decision draft claimed this provider was `AsyncStorage`-backed —
+ * false. It is, and always was, pure in-memory `useState`/`useCallback` with ZERO persistence
+ * (see below) — which is exactly why lifting it above `Tab.Navigator` (mounted once via
+ * `AppStateProviders` in `navigation/index.tsx`, not per-stack) was necessary: with no
+ * persistence layer, two mounted instances have no mechanism to ever reconverge, so a draft
+ * begun from the Vote tab's `HomeScreen` and one reached via 59-10's duplicate `RegistrationHome`
+ * Timeline route would silently diverge forever, not just temporarily. See
+ * `__tests__/provider-scope.test.tsx` for the committed gate enforcing exactly one instance
+ * app-wide.
  *
  * Held in-memory React state ONLY — never persisted to AsyncStorage/SecureStore/disk, and
  * never logged. The draft is cleared on an app restart (no resume-across-restart) and on an

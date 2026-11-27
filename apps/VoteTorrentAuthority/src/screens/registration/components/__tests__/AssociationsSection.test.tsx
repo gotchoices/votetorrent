@@ -170,8 +170,6 @@ const DISPLAY_NAME = "Jane Voter";
 const DEVICE_KEY_ALPHA = "devicekey-alpha-0000000000";
 const DEVICE_KEY_BRAVO = "devicekey-bravo-1111111111";
 
-const FUTURE_EXPIRATION = new Date(Date.now() + 3_600_000).toISOString();
-
 // ---------------------------------------------------------------------------
 // T-47-12 fixture: 47-08 made the mock's associate() record a 'pass' verdict,
 // so the mock alone cannot reproduce the real engine's AttestationRequired=0
@@ -213,7 +211,6 @@ async function seedEngine(
 		const challenge = await engine.issueAttestationChallenge(
 			registrantId,
 			pair.deviceKey,
-			FUTURE_EXPIRATION,
 			sig,
 		);
 		await engine.associate(
@@ -438,15 +435,17 @@ describe("AssociationsSection — D-03/D-10/D-13", () => {
 		expect(text).not.toContain("attestationVerdictNone");
 		expect(text).not.toContain("attestationVerdictPass");
 		expect(text).not.toContain("attestationVerdictFail");
-		expect(text).toContain("verdict store unavailable");
+		expect(text).toContain("errorLoadFailedGeneric");
+		expect(text).not.toContain("verdict store unavailable");
 	});
 
-	test("10: an association-read failure blanks the rows and surfaces the error", async () => {
+	test("10: an association-read failure blanks the rows and surfaces the error (translated, no engine text)", async () => {
 		mockAssociationEngine = new ThrowingAssociationsEngine();
 		const tr = await renderSection();
 
 		expect(() => tr.root.findByProps({ testID: "association-row-0" })).toThrow();
-		expect(treeText(tr)).toContain("association store unavailable");
+		expect(treeText(tr)).toContain("errorLoadFailedGeneric");
+		expect(treeText(tr)).not.toContain("association store unavailable");
 	});
 
 	// -------------------------------------------------------------------------
@@ -534,7 +533,8 @@ describe("AssociationsSection — D-03/D-10/D-13", () => {
 
 		expect(() => tr.root.findByProps({ testID: "association-remove-0-card" })).not.toThrow();
 		expect(isDisabled(tr, "association-remove-0-confirm")).toBe(false);
-		expect(treeText(tr)).toContain("signed delete rejected");
+		expect(treeText(tr)).toContain("errorActionFailedGeneric");
+		expect(treeText(tr)).not.toContain("signed delete rejected");
 	});
 
 	test("17: the dismiss label is not a bare acknowledgement (D-10) — shipped EN/ES strings", () => {
@@ -682,7 +682,8 @@ describe("AssociationsSection — D-03/D-10/D-13", () => {
 			// have been reported by now.
 			await new Promise((resolve) => setImmediate(resolve));
 
-			expect(treeText(tr)).toContain("Network not established");
+			expect(treeText(tr)).toContain("errorLoadFailedGeneric");
+			expect(treeText(tr)).not.toContain("Network not established");
 			expect(() => tr.root.findByProps({ testID: "associations-loading" })).toThrow();
 			expect(() => tr.root.findByProps({ testID: "association-row-0" })).toThrow();
 			expect(unhandled).toEqual([]);

@@ -2,6 +2,7 @@ import { ExtendedTheme, useTheme, useNavigation, useRoute } from "@react-navigat
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { errorCopy } from "../../utils/errorCopy";
 import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
@@ -13,10 +14,13 @@ import type { RootStackParamList } from "../../navigation/types";
 import { ElectionRevisionForm, ElectionRevisionFormValue } from "./components/ElectionRevisionForm";
 import { useApp } from "../../providers/AppProvider";
 import { ElectionType } from "@votetorrent/vote-core";
-import type { IElectionEngine, IElectionsEngine, ElectionInit, ElectionDetails } from "@votetorrent/vote-core";
-import { getLocalKeyholders, saveLocalKeyholders } from "../../engines/local-keyholders";
+import type { IElectionEngine, IElectionsEngine, ElectionDetails } from "@votetorrent/vote-core";
+import { checkElectionKeyholders, proposeElectionRevision } from "@votetorrent/workflows/authority";
+import type { ElectionSetupRefusal } from "@votetorrent/workflows/authority";
 import { mapElectionError } from "./election-error-messages";
 import { InlineError } from "../../components/InlineError";
+import { KEYHOLDER_POLICY_ERROR_KEY } from "./keyholder-policy";
+import { resolveElectionTimeline, EDIT_FALLBACK_DAYS } from "./resolve-election-timeline";
 
 // Phase 9 plan 09-13 (ELECUI-04) — Election Revision form (Screen C, Figma #16/#17).
 // Phase 20 plan 20-06 (EUI-01, EUI-02) — wire real adjustElection from single cached load.
@@ -52,8 +56,10 @@ export default function EditElectionScreen() {
 	const [revision, setRevision] = useState<ElectionRevisionFormValue>({
 		registrationEnds: "",
 		ballotsFinal: "",
-		releasingKeys: "",
 		votingStarts: "",
+		accruingVotes: "",
+		hashingVotes: "",
+		releasingKeys: "",
 		tallyingStarts: "",
 		validation: "",
 		certificationStarts: "",
@@ -83,46 +89,58 @@ export default function EditElectionScreen() {
 				setRevision({
 					registrationEnds: toISO(cur.timeline.registrationEnds),
 					ballotsFinal: toISO(cur.timeline.ballotsFinal),
-					// releasingKeys has no ElectionEvent counterpart — leave blank (same as create)
-					releasingKeys: "",
 					votingStarts: toISO(cur.timeline.votingStarts),
+					accruingVotes: toISO(cur.timeline.accruingVotes),
+					hashingVotes: toISO(cur.timeline.hashingVotes),
+					releasingKeys: toISO(cur.timeline.releasingKeys),
 					tallyingStarts: toISO(cur.timeline.tallyingStarts),
 					validation: toISO(cur.timeline.validation),
 					certificationStarts: toISO(cur.timeline.certificationStarts),
 					closed: toISO(cur.timeline.closed),
-					// TEMP scaffold: engine returns []; fall back to locally-stored names.
-					keyholders: cur.keyholders.length
-						? cur.keyholders.map((kh) => kh.invite.name)
-						: await getLocalKeyholders(loaded.election.id),
+					// D-27: keyholders come from the engine only.
+					keyholders: cur.keyholders.map((kh) => kh.invite.name),
 					threshold: cur.keyholderThreshold,
 					tags: cur.tags ?? [],
 					instructions: cur.instructions ?? "",
 				});
 			} catch (error) {
 				console.warn("Error loading election for edit:", error);
-				setErrorMessage(error instanceof Error ? error.message : String(error));
+				setErrorMessage(errorCopy(error, t, "read"));
 			}
 		}
 		loadElection();
 	}, [electionEngine]);
 
-	// handlePropose builds a REAL ElectionInit from cached `details` + live form state.
+	// Presentation only: map a shared proposeElectionRevision refusal code to its message.
+	const applyRevisionRefusal = (refusal: ElectionSetupRefusal) => {
+		if (refusal.code === "no-keyholders") {
+			setErrorMessage(t("atLeastOneKeyholderRequired"));
+		} else if (refusal.code === "timeline-order") {
+			setErrorMessage(t("errTimelineOrder"));
+		} else if (refusal.code in KEYHOLDER_POLICY_ERROR_KEY) {
+			setErrorMessage(t(KEYHOLDER_POLICY_ERROR_KEY[refusal.code as keyof typeof KEYHOLDER_POLICY_ERROR_KEY]));
+		} else {
+			setErrorMessage(t("errTimelineOrder"));
+		}
+	};
+
+	// handlePropose hands cached `details` + live form state to the shared proposeElectionRevision,
+	// which builds the REAL ElectionInit (IN-24: revision.electionId equals election.id, both from
+	// details.election.id) and calls the non-signing adjustElection.
 	// Reads from cached `details` state — does NOT re-fetch (no double-fetch race with form edits).
-	// IN-24 guard: revision.electionId MUST equal election.id — both sourced from details.election.id.
+	// Phase 67 plan 10 — the workflow body lives in @votetorrent/workflows; this screen keeps state,
+	// messages and navigation.
 	const handlePropose = async () => {
 		setErrorMessage("");
 		if (!details) {
 			return;
 		}
 
-		// WR-02 + WR-03: enforce the "at least one keyholder" model invariant
-		// (ElectionRevisionInit.keyholders) and strip blank rows so empty names
-		// never inflate keyholders.length / keyholderThreshold.
-		const cleanKeyholders = revision.keyholders
-			.map((name) => name.trim())
-			.filter(Boolean);
-		if (cleanKeyholders.length === 0) {
-			setErrorMessage(t("atLeastOneKeyholderRequired"));
+		// WR-02 + WR-03: the shared keyholder check strips blank rows, refuses an empty list and
+		// applies the 2-of-N policy, all before any engine call.
+		const keyholderCheck = checkElectionKeyholders(revision.keyholders, revision.threshold);
+		if (!keyholderCheck.ok) {
+			applyRevisionRefusal(keyholderCheck.refusal);
 			return;
 		}
 
@@ -135,74 +153,36 @@ export default function EditElectionScreen() {
 				return;
 			}
 			const now = Date.now();
-			const day = 24 * 60 * 60 * 1000;
-			const parseDateOrFallback = (s: string, fallbackMs: number): number =>
-				s.trim() ? new Date(s).getTime() || fallbackMs : fallbackMs;
 
-			// Back-half timeline events (tallying → closed) come from the form when set,
-			// otherwise default RELATIVE TO votingStarts — not `now` — so the
-			// votingStarts < tallyingStarts < certificationStarts ordering holds for any
-			// reasonable voting date (mirrors CreateElectionScreen).
-			const resolvedVotingStarts = parseDateOrFallback(revision.votingStarts, now + 11 * day);
-			const resolvedTimeline = {
-				registrationEnds: parseDateOrFallback(revision.registrationEnds, now + 3 * day),
-				ballotsFinal: parseDateOrFallback(revision.ballotsFinal, now + 6 * day),
-				votingStarts: resolvedVotingStarts,
-				tallyingStarts: parseDateOrFallback(revision.tallyingStarts, resolvedVotingStarts + 4 * day),
-				validation: parseDateOrFallback(revision.validation, resolvedVotingStarts + 5 * day),
-				certificationStarts: parseDateOrFallback(revision.certificationStarts, resolvedVotingStarts + 6 * day),
-				closed: parseDateOrFallback(revision.closed, resolvedVotingStarts + 7 * day),
-			};
+			// resolveElectionTimeline is the single shared construction site both this
+			// screen and CreateElectionScreen build through (D-16) — see
+			// resolve-election-timeline.ts for the "relative to votingStarts, not now"
+			// rationale.
+			const resolvedTimeline = resolveElectionTimeline(revision, now, EDIT_FALLBACK_DAYS);
 
-			// Friendly timeline guard BEFORE adjustElection — voting must precede tallying,
-			// and tallying must precede certification (avoids a raw engine ordering error).
-			if (
-				resolvedTimeline.votingStarts >= resolvedTimeline.tallyingStarts ||
-				resolvedTimeline.tallyingStarts >= resolvedTimeline.certificationStarts
-			) {
-				setErrorMessage(t("errTimelineOrder"));
+			// The shared body applies the eight-event strict-chain guard BEFORE adjustElection and
+			// returns a refusal instead of writing (CR-02: one guard, no hand-typed copies).
+			const result = await proposeElectionRevision({
+				electionsEngine,
+				current: details,
+				input: {
+					// EUI-02 (D-05): from radio state (seeded from loaded election.type)
+					type: electionType,
+					keyholders: revision.keyholders,
+					threshold: revision.threshold,
+					tags: revision.tags,
+					instructions: revision.instructions,
+					timeline: resolvedTimeline,
+				},
+				now,
+			});
+			if (!result.ok) {
+				applyRevisionRefusal(result.refusal);
 				setProposing(false);
 				return;
 			}
-
-			const init: ElectionInit = {
-				election: {
-					// EUI-01 (D-01): real ids from cached details — no hardcoded fixture strings
-					id: details.election.id,
-					authorityId: details.election.authorityId,
-					title: details.election.title,
-					date: details.election.date,
-					revisionDeadline: details.election.revisionDeadline,
-					ballotDeadline: details.election.ballotDeadline,
-					// EUI-02 (D-05): from radio state (seeded from loaded election.type)
-					type: electionType,
-				},
-				revision: {
-					// IN-24: revision.electionId MUST equal election.id — use the SAME expression
-					electionId: details.election.id,
-					revision: (details.current.revision ?? 0) + 1,
-					// revisionTimestamp must be in the past
-					revisionTimestamp: now - 1000,
-					tags: revision.tags,
-					instructions: revision.instructions,
-					keyholders: cleanKeyholders.map((name) => ({
-						name,
-						type: "k",
-						expiration: "0",
-						inviteKey: "",
-						invitePrivate: "",
-						inviteSignature: "",
-						digest: "",
-					})),
-					timeline: resolvedTimeline,
-					keyholderThreshold: Math.max(0, Math.trunc(revision.threshold)),
-				},
-			};
-			// No seedElectionSigning — adjustElection is non-signing (D-01, RESEARCH Pattern 1)
-			await electionsEngine.adjustElection(init);
-			// TEMP scaffold (delete with cadre P2P invite flow): persist the latest
-			// keyholder names locally so the detail / revise screens display them.
-			await saveLocalKeyholders(details.election.id, cleanKeyholders);
+			// D-27: no local scaffold persistence — adjustElection already persists
+			// ProposedElectionRevision.Keyholders, and the engine is the single source.
 			// goBack only on success (D-19 — NOT after the catch)
 			navigation.goBack();
 		} catch (err) {

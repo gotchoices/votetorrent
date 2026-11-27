@@ -124,7 +124,10 @@ describe('CandidateSelector (VOTE-01/02)', () => {
 
 	it('renders each candidate row as a Pressable', () => {
 		const tr = renderSelector([], 1);
-		const pressables = tr.root.findAllByType(Pressable, {deep: false});
+		// RN 0.81 exports Pressable as memo(function) (0.78: memo(forwardRef)), and the test
+		// renderer reports a simple-memo instance's type as the INNER function — so match both.
+		const inner = (Pressable as unknown as {type?: unknown}).type;
+		const pressables = tr.root.findAll(n => n.type === Pressable || n.type === inner, {deep: false});
 		expect(pressables.length).toBe(CANDIDATES.length);
 	});
 });

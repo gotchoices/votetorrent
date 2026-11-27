@@ -1,0 +1,41 @@
+# Journey (multi-device): a keyholder releases their key share. Tasks > RELEASE > RELEASE MY
+# SHARE > fingerprint > "Your share has been released". Needs a keyholder seat on this device and
+# an election in its Releasing Keys stage. Biometrics: run through scripts/run.sh.
+appId: ${APP_ID}
+name: "Authority: release a key share"
+tags:
+  - authority
+  - multi-device
+  - keyholder
+  - biometric
+env:
+  APP_ID: "${typeof AUTHORITY_APP_ID == 'undefined' ? 'org.votetorrent.authority' : AUTHORITY_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+  RELEASE_WAIT_MS: "${typeof RELEASE_WAIT_MS == 'undefined' ? '600000' : RELEASE_WAIT_MS}"
+---
+- runFlow:
+    file: ../subflows/authority/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- runFlow:
+    file: ../subflows/authority/open-tab.yaml
+    env:
+      TAB: tasks
+- extendedWaitUntil:
+    visible: "RELEASE"
+    timeout: ${RELEASE_WAIT_MS}
+- tapOn:
+    text: "RELEASE"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: "key-release-button"
+    timeout: 30000
+- assertVisible:
+    id: "key-release-election-title"
+- tapOn:
+    id: "key-release-button"
+- extendedWaitUntil:
+    visible:
+      id: "key-release-success"
+    timeout: 120000

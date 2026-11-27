@@ -10,6 +10,7 @@ import { globalStyles } from "../../theme/styles";
 import type { DefaultUser } from "@votetorrent/vote-core";
 import { IDefaultUserEngine } from "@votetorrent/vote-core";
 import { KeyboardAvoidingScreen } from "../../components/KeyboardAvoidingScreen";
+import { errorCopy } from "../../utils/errorCopy";
 
 export function DefaultUserScreen() {
 	const { defaultUser, defaultUserEngine } = useRoute().params as {
@@ -31,15 +32,14 @@ export function DefaultUserScreen() {
 			navigation.goBack();
 		} catch (error) {
 			console.warn("Error saving default user:", error);
-			setErrorMessage(error instanceof Error ? error.message : String(error));
+			setErrorMessage(errorCopy(error, t, "write"));
 		}
 	};
 
+	// `imageRef` is the field vote-core's DefaultUser declares and the engine stores; the screen used
+	// `image`, which nothing reads, so an entered URL was dropped and a stored one never showed.
 	const handleImageUrlChange = (text: string) => {
-		setDefaultUserState({ ...defaultUserState, image: { url: text } });
-		if (text.startsWith("http")) {
-			setDefaultUserState({ ...defaultUserState, image: { url: text } });
-		}
+		setDefaultUserState({ ...defaultUserState, imageRef: { url: text } });
 		setEdited(true);
 	};
 
@@ -50,7 +50,7 @@ export function DefaultUserScreen() {
 
 	return (
 		<KeyboardAvoidingScreen>
-			<ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
+			<ScrollView keyboardShouldPersistTaps="handled" style={[styles.container, { backgroundColor: colors.background }]}>
 				<CustomTextInput
 					title={t("name")}
 					value={defaultUserState.name}
@@ -59,7 +59,7 @@ export function DefaultUserScreen() {
 				/>
 				<CustomTextInput
 					title={t("imageUrl")}
-					value={defaultUserState.image?.url}
+					value={defaultUserState.imageRef?.url}
 					onChangeText={handleImageUrlChange}
 					isImageUrlField={true}
 					makePermanentPressed={() => {}}
@@ -68,9 +68,9 @@ export function DefaultUserScreen() {
 					autoCapitalize="none"
 				/>
 
-				{defaultUserState.image?.url && (
+				{defaultUserState.imageRef?.url && (
 					<Image
-						source={{ uri: defaultUserState.image.url }}
+						source={{ uri: defaultUserState.imageRef.url }}
 						style={styles.image}
 						resizeMode="contain"
 					/>

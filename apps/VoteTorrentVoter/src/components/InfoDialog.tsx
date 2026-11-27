@@ -3,10 +3,13 @@
  * (candidate / office / election), matching the Figma Candidate Info frame: a close X (top-right),
  * a bold title, a subtitle, and a quoted body line. Presentational — `visible`/`title`/`subtitle`/
  * `body`/`onClose` props in, no provider/navigation reads; the caller owns the open/closed state
- * and resolves all copy (i18n) before passing it down.
+ * and resolves all copy (i18n) before passing it down. `children` (the authority-published detail,
+ * see InfoDetails) render between the subtitle and the attribution line, in a bounded scroll area
+ * so long instructions never push the close affordance off-screen.
  */
 import React from 'react';
-import {Modal, Pressable, StyleSheet, Text, View} from 'react-native';
+import type {ReactNode} from 'react';
+import {Modal, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useTheme} from '@react-navigation/native';
 import type {ExtendedTheme} from '@react-navigation/native';
 import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
@@ -19,9 +22,10 @@ export interface InfoDialogProps {
 	/** Accessibility label for the close affordance (caller-resolved i18n). */
 	closeLabel?: string;
 	onClose: () => void;
+	children?: ReactNode;
 }
 
-export function InfoDialog({visible, title, subtitle, body, closeLabel, onClose}: InfoDialogProps) {
+export function InfoDialog({visible, title, subtitle, body, closeLabel, onClose, children}: InfoDialogProps) {
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 
 	if (!visible) {
@@ -71,6 +75,11 @@ export function InfoDialog({visible, title, subtitle, body, closeLabel, onClose}
 						]}>
 						{subtitle}
 					</Text>
+					{children ? (
+						<ScrollView testID="info-dialog-content" style={styles.content} contentContainerStyle={styles.contentInner}>
+							{children}
+						</ScrollView>
+					) : null}
 					<Text
 						style={[
 							styles.body,
@@ -120,6 +129,14 @@ const styles = StyleSheet.create({
 	subtitle: {
 		textAlign: 'center',
 		marginBottom: 32,
+	},
+	content: {
+		alignSelf: 'stretch',
+		maxHeight: 320,
+		marginBottom: 24,
+	},
+	contentInner: {
+		paddingBottom: 4,
 	},
 	body: {
 		textAlign: 'center',

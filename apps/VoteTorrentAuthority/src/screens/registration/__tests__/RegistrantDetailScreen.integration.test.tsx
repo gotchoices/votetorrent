@@ -496,7 +496,6 @@ describe("RegistrantDetailScreen.integration — the Phase 47 E2E gate (D-10/D-1
 		const challenge = await mockAssociationEngine.issueAttestationChallenge(
 			REGISTRANT_ID,
 			"device-key-2",
-			FUTURE_ISO,
 			SEED_SIGN,
 		);
 

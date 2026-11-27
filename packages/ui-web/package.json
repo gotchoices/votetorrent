@@ -1,0 +1,48 @@
+{
+	"name": "@votetorrent/ui-web",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"description": "Shared web UI package for the authority dashboard and the public no-login election view",
+	"exports": {
+		".": "./src/index.js",
+		"./components": "./src/components.js",
+		"./lifecycle": "./src/lifecycle/election-phase.js",
+		"./lifecycle-core": "./src/lifecycle/timeline-core.js",
+		"./facts": "./src/lifecycle/facts.js",
+		"./tokens.css": "./src/tokens.css",
+		"./components.css": "./src/components.css",
+		"./mutations": "./scripts/mutations.mjs"
+	},
+	"sideEffects": [
+		"*.css"
+	],
+	"scripts": {
+		"test": "node --test --test-concurrency=1 test/*.test.mjs",
+		"typecheck": "tsc --noEmit",
+		"clean": "rm -rf node_modules"
+	},
+	"dependencies": {
+		"@votetorrent/vote-engine": "workspace:*",
+		"react-is": "19.2.6",
+		"recharts": "3.10.1"
+	},
+	"peerDependencies": {
+		"react": "19.0.0",
+		"react-dom": "19.0.0"
+	},
+	"devDependencies": {
+		"@types/node": "^22.10.2",
+		"@types/react": "19.2.17",
+		"@types/react-dom": "^19.0.0",
+		"@types/react-is": "^19",
+		"playwright": "^1.62.1",
+		"react": "19.0.0",
+		"react-dom": "19.0.0",
+		"typescript": "^5.6.3",
+		"vite": "^7.0.0"
+	},
+	"engines": {
+		"node": ">=20.19"
+	}
+}

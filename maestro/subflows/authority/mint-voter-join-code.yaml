@@ -1,0 +1,66 @@
+# From the Networks screen: open "Invite voters" on the first network row, confirm owner setup if
+# asked, wait for the join code, then COPY it (to THIS device's clipboard) and check the
+# full-screen QR. Ends back on the invite card's ready state with the code copied.
+# env: APP_ID, INVITE_TIMEOUT_MS
+appId: ${APP_ID}
+---
+- extendedWaitUntil:
+    visible:
+      id: "voter-invite-entry-.*"
+    timeout: 30000
+- tapOn:
+    id: "voter-invite-entry-.*"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: "voter-invite-body-(generating|confirm-owner|ready|error|not-owner)"
+    timeout: 30000
+- runFlow:
+    when:
+      visible:
+        id: "voter-invite-body-confirm-owner"
+    commands:
+      - tapOn:
+          id: "voter-invite-owner-confirm"
+- extendedWaitUntil:
+    visible:
+      id: "voter-invite-body-(ready|error|not-owner)"
+    timeout: ${INVITE_TIMEOUT_MS}
+- assertVisible:
+    id: "voter-invite-body-ready"
+- assertVisible:
+    id: "voter-invite-qr"
+- assertVisible:
+    id: "voter-invite-fingerprint"
+- assertVisible:
+    id: "voter-invite-expiry"
+- scrollUntilVisible:
+    element:
+      id: "voter-invite-copy"
+    direction: DOWN
+    timeout: 15000
+- tapOn:
+    id: "voter-invite-copy"
+- extendedWaitUntil:
+    visible:
+      id: "voter-invite-copy-notice"
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      id: "voter-invite-qr-open"
+    direction: UP
+    timeout: 15000
+- tapOn:
+    id: "voter-invite-qr-open"
+- extendedWaitUntil:
+    visible:
+      id: "voter-invite-qr-full"
+    timeout: 15000
+- assertVisible:
+    id: "voter-invite-qr-fingerprint"
+- tapOn:
+    id: "voter-invite-qr-close"
+- extendedWaitUntil:
+    visible:
+      id: "voter-invite-body-ready"
+    timeout: 15000

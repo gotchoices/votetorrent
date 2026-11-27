@@ -20,7 +20,7 @@ import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createTestNetwork, addTestAuthority, seedSignedMutation, seedAuthorityInvite } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, seedSignedMutation, seedAuthorityInvite, testKeyPairFor } from './fixtures/test-context.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import { digestToBytes } from '../src/utils.js'
 import { toIsoZDatetime } from '../src/signing/ceremony-helpers.js'
@@ -64,12 +64,11 @@ async function computeTestVerificationCid (auth: TestAuthority, items: readonly 
 /**
  * A real 'vrg'-ceremony-shaped signer for `RegistrationEngine.register()` —
  * mirrors `field-policy.spec.ts`'s own `makeRegistrantSigner`. `AdminSigning
- * .SignerKeyValid` is a hardcoded stub CHECK (T-48-08-09) — any genuine
- * secp256k1 signature over the row's own digest satisfies the ceremony
- * regardless of which key produced it.
+ * .SignerKeyValid` requires the signer key to be the user's registered,
+ * unexpired UserKey, so this signs with the fixture user's registered key.
  */
 function makeOfficerSigner (userId: string): (digest: Uint8Array) => Promise<Signature> {
-  const { privateHex, publicHex } = randomTestKeyPair()
+  const { privateHex, publicHex } = testKeyPairFor(userId)
   const privBytes = hexToBytes(privateHex)
   return async (digest: Uint8Array): Promise<Signature> => {
     const sig = secp256k1.sign(digest, privBytes)

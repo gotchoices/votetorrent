@@ -1,0 +1,21 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<!-- no-measurement (WR-06 control): the card ANCHORS still resolve -- both notch nodes are
+     present and well-formed, so no ORPHAN and no degenerate bounds -- but every text and
+     clickable node inside them is gone. This is the shape a real parser regression takes: a
+     uiautomator dump-shape change, a renamed testID, or a locale that alters the text, after
+     which the walker still finds the cards and measures NOTHING inside them.
+     Every leg must FAIL for reason `no-measurement`. Before the WR-06 fix all three returned
+     PASS ("0 text node(s) measured", "0 touch target(s) measured") and the script exited 0 --
+     a gate reporting success on zero evidence. -->
+<hierarchy rotation="0">
+  <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="true" long-clickable="false" password="false" selected="false" bounds="[0,0][720,1520]">
+    <node index="0" text="" resource-id="" class="android.view.ViewGroup" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[20,100][700,400]">
+      <node index="0" text="" resource-id="timeline-row-notch-registrationEnds" class="android.view.View" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[20,140][28,156]" />
+      <node index="1" text="" resource-id="" class="android.view.ViewGroup" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[40,110][300,140]" />
+    </node>
+    <node index="1" text="" resource-id="" class="android.view.ViewGroup" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[20,420][700,720]">
+      <node index="0" text="" resource-id="timeline-row-notch-votingStarts" class="android.view.View" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[20,460][28,476]" />
+      <node index="1" text="" resource-id="" class="android.view.ViewGroup" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[40,430][260,460]" />
+    </node>
+  </node>
+</hierarchy>

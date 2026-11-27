@@ -30,7 +30,7 @@ import 'reflect-metadata'
 import { expect } from 'chai'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
-import { createTestNetwork, addTestAuthority, seedSignedMutation, makeTestSignature, makeTestSignCallback } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, seedSignedMutation, makeTestSignature, makeTestSignCallback, provisionTestIntakeRecipient } from './fixtures/test-context.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import type { TestKeyPair } from './fixtures/keys.js'
 import { digestToBytes, nowCanonicalDatetime } from '../src/utils.js'
@@ -831,6 +831,7 @@ describe('registration-request engine: intake and bridge-key registry', () => {
 
   it('submits a registrant-issued request signed by a key that belongs to no User row, creating zero AdminSigning rows', async () => {
     const auth = await addTestAuthority(await createTestNetwork())
+    await provisionTestIntakeRecipient(auth.ctx, auth.authority.id)
     const engine = new RegistrationEngine(auth.ctx)
     const requester = randomTestKeyPair()
     const init = makeRequestInit(auth.authority.id)
@@ -860,6 +861,7 @@ describe('registration-request engine: intake and bridge-key registry', () => {
 
   it('submits a bridge-issued request under a registered bridge key, and the persisted IssuerType and BridgeId keep it machine-distinguishable from a self-submission', async () => {
     const auth = await addTestAuthority(await createTestNetwork())
+    await provisionTestIntakeRecipient(auth.ctx, auth.authority.id)
     const engine = new RegistrationEngine(auth.ctx)
     const bridgeKeyPair = randomTestKeyPair()
     const bridgeInit: RegistrationBridgeKeyInit = {
@@ -892,6 +894,7 @@ describe('registration-request engine: intake and bridge-key registry', () => {
 
   it('refuses a bridge-issued request whose BridgeId is not a registered bridge key', async () => {
     const auth = await addTestAuthority(await createTestNetwork())
+    await provisionTestIntakeRecipient(auth.ctx, auth.authority.id)
     const engine = new RegistrationEngine(auth.ctx)
     const bridgeKeyPair = randomTestKeyPair()
     const unregisteredBridgeId = crypto.randomUUID()
@@ -906,6 +909,9 @@ describe('registration-request engine: intake and bridge-key registry', () => {
       caught = err
     }
     expect(caught, 'submitRegistrationRequest must throw: BridgeId does not resolve to a registered RegistrationBridgeKey').to.be.instanceOf(Error)
+    // D-49 (62-31): a recipient is provisioned above, so this must be the ORIGINAL BridgeIdValid
+    // refusal, never IntakeError('no-recipients') firing first for the wrong reason.
+    expect((caught as { name?: string }).name).to.not.equal('IntakeError')
 
     const row = await auth.ctx.db.prepare('select count(*) as n from RegistrationRequest where Id = :id').get({ id: init.id })
     expect(Number(row?.n)).to.equal(0)
@@ -913,6 +919,7 @@ describe('registration-request engine: intake and bridge-key registry', () => {
 
   it('refuses a registrant-issued request carrying a BridgeId', async () => {
     const auth = await addTestAuthority(await createTestNetwork())
+    await provisionTestIntakeRecipient(auth.ctx, auth.authority.id)
     const engine = new RegistrationEngine(auth.ctx)
     const requester = randomTestKeyPair()
     const bogusBridgeId = crypto.randomUUID()
@@ -928,6 +935,9 @@ describe('registration-request engine: intake and bridge-key registry', () => {
       caught = err
     }
     expect(caught, 'submitRegistrationRequest must throw: a registrant-issued row cannot carry a BridgeId').to.be.instanceOf(Error)
+    // D-49 (62-31): a recipient is provisioned above, so this must be the ORIGINAL pre-flight
+    // refusal, never IntakeError('no-recipients') firing first for the wrong reason.
+    expect((caught as { name?: string }).name).to.not.equal('IntakeError')
 
     const row = await auth.ctx.db.prepare('select count(*) as n from RegistrationRequest where Id = :id').get({ id: init.id })
     expect(Number(row?.n)).to.equal(0)
@@ -971,6 +981,7 @@ describe('registration-request engine: intake and bridge-key registry', () => {
     // is the test that fails — in the plan that caused it, not a phase later inside a filesystem
     // binding.
     const auth = await addTestAuthority(await createTestNetwork())
+    await provisionTestIntakeRecipient(auth.ctx, auth.authority.id)
     const engine = new RegistrationEngine(auth.ctx)
     const requester = randomTestKeyPair()
     const init = makeRequestInit(auth.authority.id)
@@ -1008,6 +1019,7 @@ describe('registration-request engine: intake and bridge-key registry', () => {
 
   it('refuses a submittedAt outside the accepted skew window in either direction', async () => {
     const auth = await addTestAuthority(await createTestNetwork())
+    await provisionTestIntakeRecipient(auth.ctx, auth.authority.id)
     const engine = new RegistrationEngine(auth.ctx)
 
     // Threat: submittedAt is attacker-controlled, and an unbounded value poisons D-09's median
@@ -1027,6 +1039,7 @@ describe('registration-request engine: intake and bridge-key registry', () => {
       futureCaught = err
     }
     expect(futureCaught, 'submitRegistrationRequest must throw: submittedAt 10 minutes in the future exceeds the +5-minute skew ceiling').to.be.instanceOf(Error)
+    expect((futureCaught as { name?: string }).name).to.not.equal('IntakeError')
     const futureRow = await auth.ctx.db.prepare('select count(*) as n from RegistrationRequest where Id = :id').get({ id: futureInit.id })
     expect(Number(futureRow?.n)).to.equal(0)
 
@@ -1045,6 +1058,7 @@ describe('registration-request engine: intake and bridge-key registry', () => {
       pastCaught = err
     }
     expect(pastCaught, 'submitRegistrationRequest must throw: submittedAt 60 days in the past exceeds the 30-day skew floor').to.be.instanceOf(Error)
+    expect((pastCaught as { name?: string }).name).to.not.equal('IntakeError')
     const pastRow = await auth.ctx.db.prepare('select count(*) as n from RegistrationRequest where Id = :id').get({ id: pastInit.id })
     expect(Number(pastRow?.n)).to.equal(0)
   })
@@ -1056,6 +1070,7 @@ describe('registration-request engine: intake and bridge-key registry', () => {
     // submissions on real hardware. A later "tighten the window" change has to argue with THIS
     // failing test, not with prose.
     const auth = await addTestAuthority(await createTestNetwork())
+    await provisionTestIntakeRecipient(auth.ctx, auth.authority.id)
     const engine = new RegistrationEngine(auth.ctx)
     const requester = randomTestKeyPair()
     const init = makeRequestInit(auth.authority.id, { submittedAt: toIsoZDatetime(Date.now() + 60 * 1000) })

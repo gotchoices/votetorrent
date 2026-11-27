@@ -1,0 +1,37 @@
+# Journey: first launch of a fresh DEBUG Voter, through the __DEV__ dev seed, to Home.
+#
+# Clears app data, so the dev seed founds "VoteTorrent Dev Network" and its
+# "Dev Voter Registration Election" on this device. That boot is the slowest step in the suite
+# (minutes on a loaded host); see README "Known emulator limits".
+appId: ${APP_ID}
+name: "Voter: fresh launch to Home"
+tags:
+  - voter
+  - smoke
+  - launch
+env:
+  APP_ID: "${typeof VOTER_APP_ID == 'undefined' ? 'org.votetorrent.voter' : VOTER_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+  SEEDED_ELECTION_TITLE: "${typeof SEEDED_ELECTION_TITLE == 'undefined' ? 'Dev Voter Registration Election' : SEEDED_ELECTION_TITLE}"
+---
+- runFlow:
+    file: ../subflows/voter/launch.yaml
+    env:
+      CLEAR_STATE: "true"
+- extendedWaitUntil:
+    visible:
+      text: ${SEEDED_ELECTION_TITLE}
+    timeout: 120000
+- assertVisible:
+    id: "tab-vote"
+- assertVisible:
+    id: "tab-timeline"
+- assertVisible:
+    id: "tab-registration"
+- assertVisible:
+    id: "tab-scan"
+- assertVisible:
+    id: "tab-settings"
+# __DEV__-only: proves this is a debug build fed by Metro, not a release APK.
+- assertVisible:
+    id: "home-dev-lifecycle-cycler"

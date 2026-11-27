@@ -23,14 +23,13 @@ import {
   BuilderAlreadyCommittedError,
   BuilderValidationError
 } from '@votetorrent/vote-core'
-import type { AttestationChallenge, AttestationVerification, DeviceAttestation, IAttestationVerifier, Signature, Scope } from '@votetorrent/vote-core'
+import type { AssociationRequestInit, AttestationChallenge, AttestationVerification, DeviceAttestation, IAttestationVerifier, Signature, Scope } from '@votetorrent/vote-core'
 import { AssociationEngine } from '../src/association/association-engine.js'
 import { MockAssociationEngine } from '../src/association/mock-association-engine.js'
 import { StubAttestationVerifier } from '../src/association/stub-attestation-verifier.js'
 import { AssociationAssociateBuilder } from '../src/association/builders/association-associate-builder.js'
 import { RegistrationEngine } from '../src/registration/registration-engine.js'
-import { createTestNetwork, addTestAuthority, addTestElection, seedAuthorityInvite, seedSignedMutation as seedSignedMutationFixture } from './fixtures/test-context.js'
-import { randomTestKeyPair } from './fixtures/keys.js'
+import { createTestNetwork, addTestAuthority, addTestElection, seedAuthorityInvite, seedSignedMutation as seedSignedMutationFixture, testKeyPairFor } from './fixtures/test-context.js'
 import { digestToBytes, nowCanonicalDatetime } from '../src/utils.js'
 import { toIsoZDatetime, toDeferredCheckDatetime } from '../src/signing/ceremony-helpers.js'
 import type { TestAuthorityContext } from './fixtures/test-context.js'
@@ -51,7 +50,7 @@ async function resolveElectionId (ctx: EngineContext, authorityId: string): Prom
 
 /** Build a real secp256k1 sign callback (@noble/curves v2 defaults — prehash:true). */
 function makeRealSigner (userId: string): { sign: (digest: Uint8Array) => Promise<Signature>; publicHex: string; privateHex: string } {
-  const { privateHex, publicHex } = randomTestKeyPair()
+  const { privateHex, publicHex } = testKeyPairFor(userId)
   const privBytes = hexToBytes(privateHex)
   const sign = async (digest: Uint8Array): Promise<Signature> => {
     const sig = secp256k1.sign(digest, privBytes) // v2 default: prehash:true
@@ -78,7 +77,6 @@ function nextDeviceKey (): string {
 }
 
 const FUTURE_REGISTRANT_EXPIRATION = Date.now() + 365 * 86_400_000
-const FUTURE_CHALLENGE_EXPIRATION = new Date(Date.now() + 10 * 60_000).toISOString()
 
 function makeDeviceAttestation (overrides?: Partial<DeviceAttestation>): DeviceAttestation {
   deviceSeq += 1
@@ -137,7 +135,7 @@ describe('AssociationEngine', () => {
       const { auth, registrantId, engine, sign } = await setupAssociationTest()
       const deviceKey = nextDeviceKey()
 
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
       expect(challenge.registrantId).to.equal(registrantId)
       expect(challenge.deviceKey).to.equal(deviceKey)
       expect(challenge.authorityId).to.equal(auth.authority.id)
@@ -152,7 +150,7 @@ describe('AssociationEngine', () => {
     it('authorizes the challenge insert via a vrg-scoped AdminSigning row', async () => {
       const { auth, registrantId, engine, sign } = await setupAssociationTest()
       const deviceKey = nextDeviceKey()
-      await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+      await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
       const row = await auth.ctx.db
         .prepare(`select count(*) as n from AdminSigning where AuthorityId = :id and Scope = 'vrg'`)
         .get({ id: auth.authority.id })
@@ -162,7 +160,7 @@ describe('AssociationEngine', () => {
     it('removeAttestationChallenge deletes the row via its own vrg-signed delete', async () => {
       const { auth, registrantId, engine, sign } = await setupAssociationTest()
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
 
       await engine.removeAttestationChallenge(challenge.nonce, sign)
 
@@ -182,7 +180,7 @@ describe('AssociationEngine', () => {
       const electionId = await resolveElectionId(elec.ctx, elec.authority.id)
       const deviceKey = nextDeviceKey()
 
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign, electionId)
       expect(challenge.electionId).to.equal(electionId)
 
       const row = await auth.ctx.db
@@ -196,7 +194,7 @@ describe('AssociationEngine', () => {
     it('verifies the seam, writes AssociationPrivate then the public Association (AttestationCid), Association=1/AssociationPrivate=1', async () => {
       const { auth, registrantId, engine, sign } = await setupAssociationTest()
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
       const attestation = makeDeviceAttestation()
 
       await engine.associate({ registrantId, deviceKey, nonce: challenge.nonce, attestation }, sign)
@@ -222,7 +220,7 @@ describe('AssociationEngine', () => {
     it('carries deviceHash through to the public Association row when supplied', async () => {
       const { registrantId, engine, sign } = await setupAssociationTest()
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
       const attestation = makeDeviceAttestation()
       const deviceHash = sha256Hex(attestation.deviceId)
 
@@ -230,6 +228,44 @@ describe('AssociationEngine', () => {
 
       const association = await engine.getAssociation(registrantId, deviceKey)
       expect(association!.deviceHash).to.equal(deviceHash)
+    })
+
+    it('WR-01: refuses a submitted deviceHash that is not sha256(attestation.deviceId), and writes no row', async () => {
+      // `Association.DeviceHash` feeds the public `AssociationDeviceHash` transparency index —
+      // the mechanism for spotting one physical device across registrants. It arrives here off
+      // the wire (`doc.answer.deviceHash`), and no schema CHECK binds it to
+      // `AssociationPrivate.DeviceId`, so a fabricated value could manufacture a collision or
+      // hide a real one. The engine derives the value itself and refuses a disagreeing one.
+      const { auth, registrantId, engine, sign } = await setupAssociationTest()
+      const deviceKey = nextDeviceKey()
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
+      const attestation = makeDeviceAttestation()
+      const fabricated = sha256Hex('some-other-device-id')
+      expect(fabricated).to.not.equal(sha256Hex(attestation.deviceId))
+
+      let thrown: unknown
+      try {
+        await engine.associate({ registrantId, deviceKey, deviceHash: fabricated, nonce: challenge.nonce, attestation }, sign)
+      } catch (err) { thrown = err }
+
+      expect(thrown, 'a fabricated deviceHash must be refused').to.be.instanceOf(Error)
+      expect((thrown as Error).message).to.contain('authority-derived')
+      const written = await auth.ctx.db
+        .prepare('select count(*) as n from Association where RegistrantId = :registrantId and DeviceKey = :deviceKey')
+        .get({ registrantId, deviceKey })
+      expect(written?.n, 'no Association row may be written').to.equal(0)
+    })
+
+    it('WR-01: the published deviceHash is the authority-derived one, and omitting it publishes null', async () => {
+      const { registrantId, engine, sign } = await setupAssociationTest()
+      const deviceKey = nextDeviceKey()
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
+      const attestation = makeDeviceAttestation()
+
+      // Omitted — the transparency toggle is OFF, so nothing is published.
+      await engine.associate({ registrantId, deviceKey, nonce: challenge.nonce, attestation }, sign)
+      const association = await engine.getAssociation(registrantId, deviceKey)
+      expect(association!.deviceHash, 'an omitted deviceHash must publish nothing').to.equal(undefined)
     })
   })
 
@@ -243,7 +279,7 @@ describe('AssociationEngine', () => {
       }
       const engine = new AssociationEngine(auth.ctx, rejectingVerifier)
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
       const attestation = makeDeviceAttestation()
 
       let threw = false
@@ -269,12 +305,12 @@ describe('AssociationEngine', () => {
     it('rejects a second associate for the same (RegistrantId, DeviceKey) — Association PK collision, no 2nd row', async () => {
       const { auth, registrantId, engine, sign } = await setupAssociationTest()
       const deviceKey = nextDeviceKey()
-      const challenge1 = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challenge1 = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
       await engine.associate({ registrantId, deviceKey, nonce: challenge1.nonce, attestation: makeDeviceAttestation() }, sign)
 
       // A second challenge for the SAME (registrantId, deviceKey) — the challenge layer
       // permits re-issuance, but the Association PK still structurally blocks a 2nd row.
-      const challenge2 = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challenge2 = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
       let threw = false
       try {
         await engine.associate({ registrantId, deviceKey, nonce: challenge2.nonce, attestation: makeDeviceAttestation() }, sign)
@@ -302,11 +338,11 @@ describe('AssociationEngine', () => {
 
       const sharedDeviceId = `shared-device-${Date.now()}`
       const deviceKeyA = nextDeviceKey()
-      const challengeA = await engine.issueAttestationChallenge(registrantA, deviceKeyA, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challengeA = await engine.issueAttestationChallenge(registrantA, deviceKeyA, sign)
       await engine.associate({ registrantId: registrantA, deviceKey: deviceKeyA, nonce: challengeA.nonce, attestation: makeDeviceAttestation({ deviceId: sharedDeviceId }) }, sign)
 
       const deviceKeyB = nextDeviceKey()
-      const challengeB = await engine.issueAttestationChallenge(registrantB, deviceKeyB, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challengeB = await engine.issueAttestationChallenge(registrantB, deviceKeyB, sign)
       let threw = false
       try {
         await engine.associate({ registrantId: registrantB, deviceKey: deviceKeyB, nonce: challengeB.nonce, attestation: makeDeviceAttestation({ deviceId: sharedDeviceId }) }, sign)
@@ -332,14 +368,14 @@ describe('AssociationEngine', () => {
 
       const sharedDeviceId = `shared-device-waived-${Date.now()}`
       const deviceKeyA = nextDeviceKey()
-      const challengeA = await engine.issueAttestationChallenge(registrantA, deviceKeyA, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challengeA = await engine.issueAttestationChallenge(registrantA, deviceKeyA, sign)
       await engine.associate({ registrantId: registrantA, deviceKey: deviceKeyA, nonce: challengeA.nonce, attestation: makeDeviceAttestation({ deviceId: sharedDeviceId }) }, sign)
 
       // Seed the PollingDevice whitelist entry for sha256(sharedDeviceId).
       await seedPollingDevice(auth, sha256Hex(sharedDeviceId), 'Precinct 7 shared tablet')
 
       const deviceKeyB = nextDeviceKey()
-      const challengeB = await engine.issueAttestationChallenge(registrantB, deviceKeyB, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challengeB = await engine.issueAttestationChallenge(registrantB, deviceKeyB, sign)
       await engine.associate({ registrantId: registrantB, deviceKey: deviceKeyB, nonce: challengeB.nonce, attestation: makeDeviceAttestation({ deviceId: sharedDeviceId }) }, sign)
 
       const row = await auth.ctx.db
@@ -366,7 +402,7 @@ describe('AssociationEngine', () => {
 
       const engine = new AssociationEngine(auth.ctx, rejectingVerifier)
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign, electionId)
       const attestation = makeDeviceAttestation()
 
       await engine.associate({ registrantId, deviceKey, nonce: challenge.nonce, attestation }, sign)
@@ -391,7 +427,7 @@ describe('AssociationEngine', () => {
 
       const engine = new AssociationEngine(auth.ctx, rejectingVerifier)
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign, electionId)
       const attestation = makeDeviceAttestation()
 
       let threw = false
@@ -411,7 +447,7 @@ describe('AssociationEngine', () => {
 
       const engine = new AssociationEngine(auth.ctx, rejectingVerifier)
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign, electionId)
       const attestation = makeDeviceAttestation()
 
       let threw = false
@@ -429,7 +465,7 @@ describe('AssociationEngine', () => {
       const engine = new AssociationEngine(auth.ctx, rejectingVerifier)
       const deviceKey = nextDeviceKey()
       // No electionId arg — challenge.electionId will be undefined.
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
       const attestation = makeDeviceAttestation()
 
       let threw = false
@@ -449,7 +485,7 @@ describe('AssociationEngine', () => {
       const deviceKey = nextDeviceKey()
       const dummySig: Signature = { signature: 'a'.repeat(128), signerKey: 'b'.repeat(66), signerUserId: 'user-1' }
 
-      const challenge = await mock.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, dummySig)
+      const challenge = await mock.issueAttestationChallenge(registrantId, deviceKey, dummySig)
       expect(challenge.nonce).to.be.a('string').with.length.greaterThan(0)
 
       await mock.associate({ registrantId, deviceKey, nonce: challenge.nonce, attestation: makeDeviceAttestation() }, dummySig)
@@ -465,6 +501,38 @@ describe('AssociationEngine', () => {
       }
       expect(threw, 'expected a second associate() for the same key to throw (mock replay parity)').to.be.true
     })
+
+    it("WR-04: the 'c' row's challengeNonce is the nonce of an ACTUALLY ISSUED challenge", async () => {
+      // The real engine enforces `answer.nonce !== challengeNonce -> throw`. The mock used to
+      // publish a second, unrelated UUID and discard the challenge it had just minted, so a
+      // screen that paired a 'c' row's nonce with getAttestationChallenges() validated an
+      // inconsistent state under the mock and would have failed against the real engine.
+      const mock = new MockAssociationEngine()
+      const dummySig: Signature = { signature: 'a'.repeat(128), signerKey: 'b'.repeat(66), signerUserId: 'user-1' }
+      const authorityId = 'mock-authority-wr04'
+      const registrantId = nextRegistrantId()
+      const deviceKey = nextDeviceKey()
+
+      const requestId = await mock.submitAssociationRequest(
+        {
+          id: 'mock-request-wr04',
+          authorityId,
+          registrantId,
+          deviceKey,
+          submittedAt: new Date().toISOString()
+        } as AssociationRequestInit,
+        deviceKey,
+        dummySig
+      )
+
+      const result = await mock.processPendingAssociationRequests(authorityId, dummySig)
+      expect(result.challengesIssued).to.equal(1)
+
+      const row = await mock.getAssociationRequest(requestId)
+      expect(row?.status).to.equal('c')
+      const issued = await mock.getAttestationChallenges(registrantId)
+      expect(issued.map((c) => c.nonce), "the published challengeNonce must be one getAttestationChallenges() returns").to.include(row!.challengeNonce)
+    })
   })
 })
 
@@ -475,27 +543,22 @@ describe('AssociationEngine', () => {
 describe('StubAttestationVerifier', () => {
   const verifier = new StubAttestationVerifier()
 
+  // D-10 (51-05): AttestationChallenge carries no `expiration` — the stub verifier's
+  // challenge-not-expired check was removed along with the column. Single-use is now D-11's
+  // consumption in associate(), not a TTL this seam checks.
   function makeChallenge (overrides?: Partial<AttestationChallenge>): AttestationChallenge {
     return {
       nonce: 'challenge-nonce-1',
       authorityId: 'authority-1',
       registrantId: 'registrant-1',
       deviceKey: 'device-key-1',
-      expiration: new Date(Date.now() + 60_000).toISOString(),
       ...overrides
     }
   }
 
-  it('returns ok:true for a non-expired challenge with no platform-level nonce to check (iOS shape)', async () => {
+  it('returns ok:true with no platform-level nonce to check (iOS shape)', async () => {
     const result = await verifier.verify(makeChallenge(), makeDeviceAttestation())
     expect(result.ok).to.equal(true)
-  })
-
-  it('returns ok:false for an expired challenge', async () => {
-    const expired = makeChallenge({ expiration: new Date(Date.now() - 60_000).toISOString() })
-    const result = await verifier.verify(expired, makeDeviceAttestation())
-    expect(result.ok).to.equal(false)
-    expect(result.reason).to.match(/expired/)
   })
 
   it('returns ok:true when the Android platform nonce matches the challenge nonce', async () => {
@@ -531,7 +594,7 @@ describe('AssociationAssociateBuilder', () => {
   it('commit() validates, delegates 1:1 to engine.associate, and lands both rows', async () => {
     const { auth, registrantId, engine, sign } = await setupAssociationTest()
     const deviceKey = nextDeviceKey()
-    const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+    const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
 
     const builder = engine
       .buildAssociate()
@@ -581,7 +644,7 @@ describe('AssociationAssociateBuilder', () => {
   it('throws BuilderAlreadyCommittedError on a second commit()', async () => {
     const { registrantId, engine, sign } = await setupAssociationTest()
     const deviceKey = nextDeviceKey()
-    const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+    const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
     const builder = engine
       .buildAssociate()
       .setRegistrantId(registrantId)
@@ -690,7 +753,7 @@ describe('Association trust boundaries', () => {
     const { registrantId, engine, sign } = await setupAssociationTest()
     const deviceKeyA = nextDeviceKey()
     const deviceKeyB = nextDeviceKey()
-    const challenge = await engine.issueAttestationChallenge(registrantId, deviceKeyA, FUTURE_CHALLENGE_EXPIRATION, sign)
+    const challenge = await engine.issueAttestationChallenge(registrantId, deviceKeyA, sign)
 
     let threw = false
     try {
@@ -706,7 +769,7 @@ describe('Association trust boundaries', () => {
   it('T-42-03: the public Association read surface exposes at most DeviceHash — never AssociationPrivate.DeviceId', async () => {
     const { registrantId, engine, sign } = await setupAssociationTest()
     const deviceKey = nextDeviceKey()
-    const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+    const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
     const attestation = makeDeviceAttestation()
     const deviceHash = sha256Hex(attestation.deviceId)
 
@@ -732,11 +795,11 @@ describe('Association trust boundaries', () => {
     )
     const sharedDeviceId = `shared-device-t42-04-${Date.now()}`
     const deviceKeyA = nextDeviceKey()
-    const challengeA = await engine.issueAttestationChallenge(registrantA, deviceKeyA, FUTURE_CHALLENGE_EXPIRATION, sign)
+    const challengeA = await engine.issueAttestationChallenge(registrantA, deviceKeyA, sign)
     await engine.associate({ registrantId: registrantA, deviceKey: deviceKeyA, nonce: challengeA.nonce, attestation: makeDeviceAttestation({ deviceId: sharedDeviceId }) }, sign)
 
     const deviceKeyB = nextDeviceKey()
-    const challengeB = await engine.issueAttestationChallenge(registrantB, deviceKeyB, FUTURE_CHALLENGE_EXPIRATION, sign)
+    const challengeB = await engine.issueAttestationChallenge(registrantB, deviceKeyB, sign)
     let threw = false
     try {
       await engine.associate({ registrantId: registrantB, deviceKey: deviceKeyB, nonce: challengeB.nonce, attestation: makeDeviceAttestation({ deviceId: sharedDeviceId }) }, sign)
@@ -772,7 +835,7 @@ describe('Association trust boundaries', () => {
     })
 
     // Legit challenge under the owning authority A.
-    const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+    const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
 
     // AssociationPrivate.Cid = cid(Digest(RegistrantId, DeviceKey, DeviceId, AttestationTime, Nonce, AttestationDetails, Expiration)).
     const cidRow = await ctx.db

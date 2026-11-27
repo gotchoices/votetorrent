@@ -17,6 +17,7 @@
 const path = require("path");
 const fs = require("fs");
 const { getDefaultConfig, mergeConfig } = require("@react-native/metro-config");
+const { createNobleSha256Redirect } = require("./metro.noble-sha256");
 
 const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, "../..");
@@ -175,8 +176,12 @@ const multiaddrConvertV12 = path.resolve(
 // helper trips first. Do NOT delete this branch; removing it reopens the on-device red-box.
 const tslibUmdPath = require.resolve("tslib/tslib.js", { paths: nodeModulesPaths });
 
+// Direct `@noble/hashes/sha2.js` importers (Optimystic's certified-claims memo key above all) get a
+// sha256 whose one-shot call is native. See metro.noble-sha256.js and polyfills/noble-sha2-native.js.
+const nobleSha256Redirect = createNobleSha256Redirect(projectRoot);
+
 // Wrap resolveRequest to apply the @multiformats/multiaddr/convert redirect, the tslib
-// CJS UMD redirect, and the @libp2p/crypto browser rewrite.
+// CJS UMD redirect, the noble sha256 redirect, and the @libp2p/crypto browser rewrite.
 const upstreamResolveRequest = merged.resolver.resolveRequest;
 merged.resolver.resolveRequest = (context, moduleName, platform) => {
 	if (moduleName === "@multiformats/multiaddr/convert") {
@@ -185,9 +190,12 @@ merged.resolver.resolveRequest = (context, moduleName, platform) => {
 	if (moduleName === "tslib") {
 		return { type: "sourceFile", filePath: tslibUmdPath };
 	}
-	const resolved = upstreamResolveRequest
-		? upstreamResolveRequest(context, moduleName, platform)
-		: context.resolveRequest(context, moduleName, platform);
+	const resolved = nobleSha256Redirect(
+		context.originModulePath,
+		upstreamResolveRequest
+			? upstreamResolveRequest(context, moduleName, platform)
+			: context.resolveRequest(context, moduleName, platform)
+	);
 	if (
 		libp2pCryptoBrowserMap &&
 		resolved &&

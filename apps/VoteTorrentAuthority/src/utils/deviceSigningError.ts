@@ -43,6 +43,7 @@ export type DeviceSigningErrorClass =
 	| 'no-device-credential' // D-18 terminal — no recovery possible
 	| 'recovery-key-invalidated' // 49-14 follow-up — the D-16 FAIL signal, inline-rendered
 	| 'recovery-key-not-registered' // 49-14 follow-up — DeleteValid precondition unmet, inline-rendered
+	| 'signing-identity-unrecoverable' // terminal — neither the recovery key nor the signing key can sign
 	| 'recovery-unsupported-os'; // 49-19, D-26a rescope terminal state — recovery is supported on
 	// API 30+ and explicitly unsupported below it; sibling in shape to 'no-device-credential'
 	// (both terminal, both absent from the copy map), distinct in cause (OS version, not device
@@ -57,6 +58,10 @@ export type DeviceSigningErrorClass =
  */
 export const CODE_TO_CLASS: Record<string, DeviceSigningErrorClass> = {
 	CANCELED: 'cancellation',
+	// Phase 65 review CR-01: the native sign now tells a system cancel (Android ERROR_CANCELED/5,
+	// iOS LAError.systemCancel/.appCancel: app backgrounded, screen locked, incoming call) from the
+	// officer's own dismissal. Same silent cancellation class: no new copy.
+	SYSTEM_CANCELED: 'cancellation',
 	NO_BIOMETRICS_ENROLLED: 'no-biometrics-enrolled',
 	LOCKOUT: 'lockout',
 	LOCKOUT_PERMANENT: 'lockout-permanent',
@@ -83,6 +88,12 @@ export const CODE_TO_CLASS: Record<string, DeviceSigningErrorClass> = {
 	// an auth-per-use key (measured n=2 on a Redmi 8 / API 29 — see
 	// .planning/todos/pending/2026-08-19-d26-keyguard-fallback-cannot-authorize-per-use-key.md).
 	RECOVERY_UNSUPPORTED_OS: 'recovery-unsupported-os',
+	// JS-thrown by ProvisionSigningKeyScreen.tsx's handleRecovery, never a native code: the recovery
+	// key was never registered on the network AND this device's signing key cannot sign for the user
+	// either (invalidated, absent, or no longer the registered key). Nothing on the device can sign,
+	// so neither recovery nor Secure Signing setup can succeed. A terminal state like
+	// recovery-unsupported-os: absent from the copy map, not a navigation class.
+	SIGNING_IDENTITY_UNRECOVERABLE: 'signing-identity-unrecoverable',
 };
 
 /**
@@ -94,7 +105,7 @@ export const CODE_TO_CLASS: Record<string, DeviceSigningErrorClass> = {
  */
 export function mapDeviceSigningError(err: unknown): DeviceSigningErrorClass {
 	const code = (err as { code?: string } | null | undefined)?.code;
-	if (code !== undefined && code in CODE_TO_CLASS) {
+	if (typeof code === 'string' && Object.prototype.hasOwnProperty.call(CODE_TO_CLASS, code)) {
 		return CODE_TO_CLASS[code]!;
 	}
 	return 'biometric-error';
@@ -166,44 +177,13 @@ export function isNavigationClass(c: DeviceSigningErrorClass): boolean {
  * counts as a device-signing rejection. Anything else — a plain `Error`,
  * `undefined`, `{}`, or an object with an unrecognized `code` — is "not
  * mine" and must fall through to the call site's own raw-message handling.
+ * Own keys only — a prototype name such as 'constructor' is not a code.
  */
 export function isDeviceSigningError(err: unknown): boolean {
 	const code = (err as { code?: unknown } | null | undefined)?.code;
-	return typeof code === 'string' && code in CODE_TO_CLASS;
+	return typeof code === 'string' && Object.prototype.hasOwnProperty.call(CODE_TO_CLASS, code);
 }
 
-/**
- * 49-14 follow-up (interrupted-handleRecovery Keystore/metadata desync, filed as
- * `.planning/todos/pending/2026-08-18-interrupted-handlerecovery-keystore-metadata-desync.md`):
- * recognizes a Quereus CHECK-constraint rejection naming `SignatureValid` — the schema's own gate
- * correctly rejecting a signature whose `signerKey` (bound from stale local `deviceUser`
- * metadata) no longer matches the private key that actually produced it. This is the SHAPE an
- * interrupted `handleRecovery` leaves behind: `provisionDeviceKey` (step 1, unprompted) already
- * regenerated the Keystore-resident `SIGNING_KEY_ALIAS`, but the paired
- * `persistProvisionedDeviceUser` write (the final step) never ran, so `device-signer.ts` signs
- * with the NEW key while reporting the OLD one.
- *
- * Deliberately NOT folded into `DeviceSigningErrorClass`/`CODE_TO_CLASS` above: this failure never
- * touches `signWithDeviceKey`'s native reject path at all — it fires from the routine per-use call
- * sites' own engine writes (`ElectionsEngine`/`UserEngine`-style `rethrow` wrapping, or the raw
- * `ConstraintError` unwrapped when the CHECK is evaluated as a deferred constraint — both shapes
- * are handled, since this reads the error's MESSAGE, not a `code` field).
- *
- * `\bSignatureValid\b` (word-boundary-anchored) deliberately excludes `InviteSignatureValid` (a
- * different table's, different-signing-path CHECK with the same substring) so this predicate
- * stays scoped to the device signing key, not every signature-shaped CHECK in the schema.
- *
- * This is the RESCUE half of the fix — it works even for a device whose desync PREDATES this
- * predicate's existence (no `deviceSigningRecoveryInProgress` marker was ever written for it,
- * e.g. an interruption that happened before this code shipped): the officer's next routine sign
- * attempt fails this exact way regardless of marker state, and `useDeviceSigningErrorHandler.ts`
- * routes that failure back into `handleRecovery` (`reason: 'invalidated'`), which self-heals
- * unconditionally — see `device-user.ts`'s `DEVICE_RECOVERY_IN_PROGRESS_KEY` doc comment for the
- * PREVENTION half (`device-signer.ts`'s `isRecoveryInProgress()` fail-closed check for FUTURE
- * interruptions).
- */
-export function isSignatureDesyncError(err: unknown): boolean {
-	const message = err instanceof Error ? err.message : typeof err === 'string' ? err : undefined;
-	if (message === undefined) return false;
-	return /\bSignatureValid\b/.test(message) && /constraint/i.test(message);
-}
+// Keystore/metadata desync detection (49-14) lives in device-signer.ts's self-verify, which throws
+// KEY_INVALIDATED_REASSOCIATE (a code in CODE_TO_CLASS). It is NOT message-based here: Quereus CHECK
+// messages carry no table name, so a SignatureValid failure could be any party's signature.

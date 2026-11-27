@@ -35,7 +35,7 @@ export function RegisterFormHeader({title, subtitle, step, onBack, onClose}: Reg
 					testID="register-back"
 					onPress={onBack}
 					hitSlop={8}
-					style={styles.iconButton}
+					style={[styles.iconButton, styles.iconButtonStart]}
 					accessibilityRole="button"
 					accessibilityLabel={t('form.backCta')}>
 					<FontAwesome6 name="arrow-left" size={22} color={colors.text} />
@@ -44,7 +44,7 @@ export function RegisterFormHeader({title, subtitle, step, onBack, onClose}: Reg
 					testID="register-close"
 					onPress={onClose}
 					hitSlop={8}
-					style={styles.iconButton}
+					style={[styles.iconButton, styles.iconButtonEnd]}
 					accessibilityRole="button"
 					accessibilityLabel={tCommon('close')}>
 					<FontAwesome6 name="xmark" size={22} color={colors.text} />
@@ -94,9 +94,19 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		minHeight: 44,
 	},
+	// A 44x44dp box (touch-target floor). The glyph is pinned to the box's outer edge so it still
+	// sits flush with the screen edge padding. The old padding:8 + marginHorizontal:-8 put part of
+	// the button outside the clipping ScrollView, leaving a ~35dp effective target on Android.
 	iconButton: {
-		padding: 8,
-		marginHorizontal: -8, // optically align the glyph to the screen edge padding
+		minWidth: 44,
+		minHeight: 44,
+		justifyContent: 'center',
+	},
+	iconButtonStart: {
+		alignItems: 'flex-start',
+	},
+	iconButtonEnd: {
+		alignItems: 'flex-end',
 	},
 	title: {
 		textAlign: 'center',

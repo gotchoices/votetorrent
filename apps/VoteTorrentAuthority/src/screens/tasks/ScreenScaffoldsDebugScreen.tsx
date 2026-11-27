@@ -12,10 +12,19 @@ import type { NavigationProp } from "../../navigation/types";
 // Temporary by design — remove once callers are wired upstream.
 //
 // Phase 8 gap-closure 08-07 Task 3: three additional entries for accept/send
-// invitation modes (closes UAT tests 7 + 8 accept-mode reachability). The
-// invitationId values are placeholders; MockInvitationEngine returns the seeded
-// invite for any id (VERIFICATION.md truth #10). A real Tasks/Inbox surface is
-// deferred to a future milestone per scope_constraints.
+// invitation modes (closes UAT tests 7 + 8 accept-mode reachability). A real
+// Tasks/Inbox surface is deferred to a future milestone per scope_constraints.
+//
+// Phase 57 (T-57-16-05) — CORRECTION. The earlier note here claimed
+// MockInvitationEngine returns a seeded invite for any id. That is STALE:
+// engine-factory.ts `case 'invitations'` returns a real InvitationEngine with
+// no dev branch, so the send modes reach real signing (createDeviceSigner →
+// saveInviteWithSigning). The accept entries below are paste-first since UAT 62
+// test 10 (no route id is passed), and accept is also reachable in production via
+// Settings -> Accept an Invitation. This screen and its route are
+// now dev-only: the Settings entry sits inside `__DEV__` and the route is
+// registered through a `__DEV__`-guarded require, so this module is absent
+// from release bundles (verified by bundle grep + negative control).
 type FrameRoute = {
 	key: string;
 	route: string;
@@ -30,12 +39,12 @@ const FRAME_ROUTES: ReadonlyArray<FrameRoute> = [
 	{ key: "editRevisionForm",        route: "EditRevisionForm",        titleKey: "editRevisionFormTitle" },
 	{ key: "proposedElection",        route: "ProposedElection",        titleKey: "proposedElectionTitle" },
 	{ key: "proposedRevision",        route: "ProposedRevision",        titleKey: "proposedRevisionTitle" },
-	{ key: "administratorInvitationAccept", route: "AdministratorInvitation", titleKey: "debugAdministratorInvitationAccept", params: { mode: "accept", invitationId: "mock-officer-invite-1" } },
+	{ key: "administratorInvitationAccept", route: "AdministratorInvitation", titleKey: "debugAdministratorInvitationAccept", params: { mode: "accept" } },
 	{ key: "authorityInvitationSend",       route: "AuthorityInvitation",     titleKey: "debugAuthorityInvitationSend",       params: { mode: "send" } },
-	{ key: "authorityInvitationAccept",     route: "AuthorityInvitation",     titleKey: "debugAuthorityInvitationAccept",     params: { mode: "accept", invitationId: "mock-authority-invite-1" } },
+	{ key: "authorityInvitationAccept",     route: "AuthorityInvitation",     titleKey: "debugAuthorityInvitationAccept",     params: { mode: "accept" } },
 	// Phase 10 plan 10-02 — Keyholder invitation dev entries (D-07 accept reachability, D-10 keep wrench)
 	{ key: "keyholderInvitationSend",   route: "KeyholderInvitation", titleKey: "debugKeyholderInvitationSend",   params: { mode: "send" } },
-	{ key: "keyholderInvitationAccept", route: "KeyholderInvitation", titleKey: "debugKeyholderInvitationAccept", params: { mode: "accept", invitationId: "mock-keyholder-invite-1" } },
+	{ key: "keyholderInvitationAccept", route: "KeyholderInvitation", titleKey: "debugKeyholderInvitationAccept", params: { mode: "accept" } },
 ];
 
 export default function ScreenScaffoldsDebugScreen() {

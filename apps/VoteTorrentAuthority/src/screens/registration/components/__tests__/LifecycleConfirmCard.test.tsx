@@ -17,6 +17,7 @@
  */
 
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import renderer from 'react-test-renderer';
 
 jest.mock('react-native-vector-icons/FontAwesome6', () => 'FontAwesome6');
@@ -109,6 +110,19 @@ function styleValue(tr: renderer.ReactTestRenderer, testID: string, key: string)
     (s: unknown) => s !== null && typeof s === 'object' && key in (s as Record<string, unknown>),
   ) as Record<string, unknown> | undefined;
   return withKey?.[key];
+}
+
+/**
+ * The CLICKABLE element's margin: read from CustomButton's real styles (via the rendered
+ * touchable inside the slot), so changing CustomButton.marginVertical breaks the pin below.
+ */
+function buttonVerticalMargin(tr: renderer.ReactTestRenderer, slotTestID: string): number {
+  const slot = tr.root.findByProps({ testID: slotTestID });
+  const touchable = slot.findAll(
+    (n) => n.props.accessibilityRole === 'button' && n.props.style !== undefined,
+  )[0];
+  const flat = StyleSheet.flatten(touchable.props.style) as { marginVertical?: number };
+  return flat.marginVertical ?? 0;
 }
 
 function buttonBackground(tr: renderer.ReactTestRenderer, wrapperTestID: string): unknown {
@@ -533,5 +547,23 @@ describe('LifecycleConfirmCard — D-10', () => {
 
     expect(tr.root.findByProps({ testID: 'confirm-revoke-typed-input' }).props.value).toBe('');
     expect(isDisabled(tr, 'confirm-revoke-confirm')).toBe(true);
+  });
+
+  // STRUCTURAL pin only: react-test-renderer runs no Yoga pass, so this is NOT a
+  // geometry proof. CustomButton's `flex` (flex:1 + alignSelf:stretch) assumes a ROW
+  // parent. In a column slot it zeroed the vertical flex-basis (32px on Pixel_8), and
+  // dropping it left a one-line thin button at 36dp. So each slot must be a ROW. The
+  // real proof is scripts/assert-card-button-geometry.mjs against a device dump.
+  it('23. structural: both button slots are row-direction so CustomButton flex stretches (not a geometry proof)', () => {
+    const { tr } = renderCard();
+    for (const id of ['lifecycle-confirm-dismiss', 'lifecycle-confirm-confirm']) {
+      expect(styleValue(tr, id, 'flexDirection')).toBe('row');
+      // The clickable button is the slot minus its own vertical margins (flex stretch), so the
+      // slot floor must be 48dp of button PLUS 2 x marginVertical. A bare 48 floor never bound:
+      // the 36dp thin button plus 16dp of margin is already 52dp.
+      expect(
+        (styleValue(tr, id, 'minHeight') as number) - 2 * buttonVerticalMargin(tr, id),
+      ).toBeGreaterThanOrEqual(48);
+    }
   });
 });

@@ -27,7 +27,14 @@ import path from "path";
 // RED-then-GREEN under full-suite load and fixed it by raising the timeout
 // rather than shortening the render, because the render breadth *is* the
 // proof. Do not rediscover this.
-jest.setTimeout(30_000);
+//
+// 2026-08-29 re-measurement (Phase 51 Nyquist audit): 30_000 was still
+// insufficient — a `yarn jest --clearCache && yarn jest` full run clocked
+// this file at 35.506s (cold), while solo cold (no other worker contention)
+// it took 23.267s. Root cause is parallel-worker CPU contention across ~98
+// suites cold-transforming Babel simultaneously, not a hang — isolated cold
+// time is stable. Raised again, with headroom above the observed worst case.
+jest.setTimeout(60_000);
 
 jest.mock("react-native-vector-icons/FontAwesome6", () => "FontAwesome6");
 

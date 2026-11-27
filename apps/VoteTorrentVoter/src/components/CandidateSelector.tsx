@@ -27,7 +27,8 @@ import {globalStyles} from '../theme/styles';
 export interface Candidate {
 	id: string;
 	name: string;
-	party: string;
+	/** Secondary line (the authority's `Option.details`, e.g. a party). Omitted when absent. */
+	party?: string;
 }
 
 export interface CandidateSelectorProps {
@@ -76,16 +77,18 @@ export function CandidateSelector({candidates, selectedIds, voteFor, onToggle, l
 								}}>
 								{candidate.name}
 							</Text>
-							<Text
-								style={{
-									color: colors.textSecondary,
-									fontFamily: fonts.regular.fontFamily,
-									fontWeight: fonts.regular.fontWeight,
-									fontSize: typeScale.caption.fontSize,
-									lineHeight: typeScale.caption.lineHeight,
-								}}>
-								{candidate.party}
-							</Text>
+							{candidate.party ? (
+								<Text
+									style={{
+										color: colors.textSecondary,
+										fontFamily: fonts.regular.fontFamily,
+										fontWeight: fonts.regular.fontWeight,
+										fontSize: typeScale.caption.fontSize,
+										lineHeight: typeScale.caption.lineHeight,
+									}}>
+									{candidate.party}
+								</Text>
+							) : null}
 							{/* Figma: "Learn about this candidate" lives inside the candidate card. Nested
 								Pressable so tapping it opens the info dialog without toggling selection. */}
 							{learnLabel && onLearnAboutCandidate ? (

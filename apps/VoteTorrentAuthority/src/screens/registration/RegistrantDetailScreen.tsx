@@ -4,7 +4,7 @@ import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigat
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
-import { scopeDescriptions } from "@votetorrent/vote-core";
+import { scopeLabel } from "../../utils/scopeLabel";
 import type {
 	DisclosedSelective,
 	DisclosureAudience,
@@ -19,6 +19,7 @@ import { ThemedText } from "../../components/ThemedText";
 import { CustomButton } from "../../components/CustomButton";
 import { DateField } from "../../components/DateField";
 import { InlineError } from "../../components/InlineError";
+import { KeyboardAvoidingScreen } from "../../components/KeyboardAvoidingScreen";
 import { globalStyles } from "../../theme/styles";
 import { useApp } from "../../providers/AppProvider";
 import { createDeviceSigner } from "../../engines/device-signer";
@@ -39,6 +40,12 @@ import {
 	toPublicTierRows,
 } from "./registrant-detail-model";
 import type { LifecycleActionId } from "./registrant-detail-model";
+import {
+	privateTierReadState,
+	PRIVATE_TIER_READ_STATE_COPY,
+	selectiveTierReadState,
+	SELECTIVE_TIER_READ_STATE_COPY,
+} from "./registrant-detail-model";
 import { useAccessTrailVisit } from "./useAccessTrailVisit";
 import type { AccessTrailRecorder } from "./access-trail-visit";
 import { pillStyles, tintPill } from "./components/pill";
@@ -50,6 +57,7 @@ import { AttestationChallengesSection } from "./components/AttestationChallenges
 import { AccessHistorySection } from "./components/AccessHistorySection";
 import type { RootStackParamList } from "../../navigation/types";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { errorCopy } from "../../utils/errorCopy";
 
 /**
  * RegistrantDetailScreen — the phase's integration seam, and the only
@@ -136,6 +144,9 @@ export default function RegistrantDetailScreen() {
 		undefined
 	);
 	const [disclosure, setDisclosure] = useState<DisclosedSelective | null | undefined>(undefined);
+	const selectiveReadState = selectiveTierReadState(selectiveTier?.detailsAccess);
+	const selectiveReadStateRef = useRef(selectiveReadState);
+	selectiveReadStateRef.current = selectiveReadState;
 
 	// CR-02 guard against a stale setState after unmount, copied from
 	// RegistrationPolicyScreen.tsx:102-111. Reset on entry so a cleanup that
@@ -172,7 +183,7 @@ export default function RegistrantDetailScreen() {
 			// The caught message is engine-authored (a `rethrow`d
 			// "RegistrationEngine.<method>: ..." string) — no field name, no
 			// field value and no viewer id is ever interpolated into it.
-			if (!unmountedRef.current) setErrorMessage(err instanceof Error ? err.message : String(err));
+			if (!unmountedRef.current) setErrorMessage(errorCopy(err, t, "read", { log: false }));
 		} finally {
 			if (!unmountedRef.current) setLoading(false);
 		}
@@ -207,7 +218,7 @@ export default function RegistrantDetailScreen() {
 			}
 		} catch (err) {
 			// Set from the engine message only — never from the tier data itself.
-			if (!unmountedRef.current) setErrorMessage(err instanceof Error ? err.message : String(err));
+			if (!unmountedRef.current) setErrorMessage(errorCopy(err, t, "read", { log: false }));
 		}
 	}, [canViewPrivate, getEngine, registrantId]);
 
@@ -305,6 +316,9 @@ export default function RegistrantDetailScreen() {
 
 	const handleSelectAudience = useCallback(
 		async (audience: DisclosureAudience) => {
+			// D-52: defence in depth. The audience selector is not rendered for an unread
+			// selective tier, and no disclosure is ever requested for one.
+			if (selectiveReadStateRef.current !== "readable") return;
 			setSelectedAudience(audience);
 			// The in-flight state (47-12): raw rows, no annotations, while a
 			// fetch (or the election-context resolution ahead of it) is pending.
@@ -323,7 +337,11 @@ export default function RegistrantDetailScreen() {
 					} else {
 						const engine = await getEngine<IRegistrationEngine>("registration");
 						const result = await engine.getDisclosedSelective(electionId, registrantId, audience);
-						if (!unmountedRef.current) setDisclosure(result ?? null);
+						// D-52: a disclosure this device could not open carries no leaves; show no
+						// annotation rather than a false "not disclosed" on every row, and never
+						// render its arrays.
+						const unread = result != null && selectiveTierReadState(result.access) !== "readable";
+						if (!unmountedRef.current) setDisclosure(unread ? undefined : (result ?? null));
 					}
 				}
 			} catch (err) {
@@ -331,7 +349,7 @@ export default function RegistrantDetailScreen() {
 				// fetch, since annotating every row Not-disclosed after a failure
 				// would be a false claim about the disclosure policy.
 				if (!unmountedRef.current)
-					setErrorMessage(err instanceof Error ? err.message : String(err));
+					setErrorMessage(errorCopy(err, t, "read", { log: false }));
 			}
 		},
 		[getEngine, registrantId]
@@ -362,7 +380,7 @@ export default function RegistrantDetailScreen() {
 		} catch (err) {
 			const outcome = handleDeviceSigningError(err);
 			if (!unmountedRef.current && !outcome.handled) {
-				setErrorMessage(outcome.message ?? (err instanceof Error ? err.message : String(err)));
+				setErrorMessage(outcome.message ?? errorCopy(err, t, "write", { log: false }));
 			}
 			// Re-thrown so 47-10's LifecycleConfirmCard sees a REJECTED
 			// onConfirm and returns to idle (its latch contract) — this is what
@@ -482,9 +500,18 @@ export default function RegistrantDetailScreen() {
 	}
 
 	const publicRows = toPublicTierRows(publicTier);
-	const privateRows = flattenPrivateDetails(privateTier?.privateDetails);
+	const privateReadState = privateTierReadState(privateTier?.detailsAccess);
+	// Defence in depth: an unread record never yields a row, whatever the engine returned.
+	const privateRows = flattenPrivateDetails(
+		privateReadState === "readable" ? privateTier?.privateDetails : undefined
+	);
 
+	// The typed LifecycleConfirmCard holds a text input inside the ScrollView. Under forced
+	// edge-to-edge (targetSdk 35) adjustResize is inert, so the shell pads by the IME height and
+	// the ScrollView viewport ends at the top of the keyboard (same cause as the approval
+	// screen's reject card, UAT 62 gap 3).
 	return (
+		<KeyboardAvoidingScreen testID="registrant-detail-screen">
 		<ScrollView
 			style={styles.container}
 			contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
@@ -511,7 +538,7 @@ export default function RegistrantDetailScreen() {
 					<View testID="registrant-detail-scope-banner" style={localStyles.banner}>
 						<FontAwesome6 name="lock" size={14} color={colors.textSecondary} />
 						<ThemedText type="small" style={{ color: colors.textSecondary }}>
-							{t("registrantScopeReadOnlyBanner", { scope: scopeDescriptions.vrg })}
+							{t("registrantScopeReadOnlyBanner", { scope: scopeLabel("vrg", t) })}
 						</ThemedText>
 					</View>
 				))}
@@ -631,12 +658,35 @@ export default function RegistrantDetailScreen() {
 			{/* Selective tier + D-12 audience preview. */}
 			<View style={styles.section} testID="registrant-detail-selective-tier">
 				<ThemedText type="title">{t("registrantDetailSelectiveTierTitle")}</ThemedText>
-				<SelectiveAudiencePreview
-					leaves={selectiveTier?.selectiveDetails ?? []}
-					selectedAudience={selectedAudience}
-					disclosure={disclosure}
-					onSelectAudience={handleSelectAudience}
-				/>
+				{selectiveReadState !== "readable" ? (
+					// D-52: sealed selective details this device cannot open are shown as unread,
+					// never as an empty preview (which would read as "no selective details"). No
+					// audience selector is offered. Nothing from the record is rendered.
+					<>
+						<View testID="registrant-detail-selective-unread" style={localStyles.sealedNotice}>
+							<FontAwesome6 name="lock" size={14} color={colors.textSecondary} />
+							<ThemedText
+								type="small"
+								testID="registrant-detail-selective-unread-text"
+								style={[{ color: colors.textSecondary }, localStyles.sealedNoticeText]}
+							>
+								{t(SELECTIVE_TIER_READ_STATE_COPY[selectiveReadState])}
+							</ThemedText>
+						</View>
+						{selectiveReadState === "not-a-recipient" ? (
+							<ThemedText type="small" testID="registrant-detail-selective-late-officer" style={{ color: colors.textSecondary }}>
+								{t("sealedBeforeOfficerExplanation")}
+							</ThemedText>
+						) : null}
+					</>
+				) : (
+					<SelectiveAudiencePreview
+						leaves={selectiveTier?.selectiveDetails ?? []}
+						selectedAudience={selectedAudience}
+						disclosure={disclosure}
+						onSelectAudience={handleSelectAudience}
+					/>
+				)}
 			</View>
 
 			{/* Private tier — the D-13 divergence. */}
@@ -653,9 +703,35 @@ export default function RegistrantDetailScreen() {
 					// enforcement boundary.
 					<View testID="registrant-detail-private-gate">
 						<ThemedText type="small" style={{ color: colors.textSecondary }}>
-							{t("registrantDetailPrivateGateHeading", { scope: scopeDescriptions.vrg })}
+							{t("registrantDetailPrivateGateHeading", { scope: scopeLabel("vrg", t) })}
 						</ThemedText>
 					</View>
+				) : privateReadState !== "readable" ? (
+					// D-49: a sealed tier this device cannot open is shown as unreadable, never as
+					// "No private details recorded", which would be a false claim.
+					// D-51: officers added after a registrant was written are not recipients, and no
+					// re-wrap exists.
+					// Not hidden: the section, its title, the lifecycle controls and Access History
+					// all stay. Nothing from the record (values, ciphertext, failure detail) is
+					// rendered or put in `errorMessage`.
+					<>
+						<View testID="registrant-detail-private-sealed" style={localStyles.sealedNotice}>
+							<FontAwesome6 name="lock" size={14} color={colors.textSecondary} />
+							<View testID={"registrant-detail-private-sealed-" + privateReadState} />
+							<ThemedText
+								type="small"
+								testID="registrant-detail-private-sealed-text"
+								style={[{ color: colors.textSecondary }, localStyles.sealedNoticeText]}
+							>
+								{t(PRIVATE_TIER_READ_STATE_COPY[privateReadState])}
+							</ThemedText>
+						</View>
+						{privateReadState === "not-a-recipient" ? (
+							<ThemedText type="small" testID="registrant-detail-private-late-officer" style={{ color: colors.textSecondary }}>
+								{t("sealedBeforeOfficerExplanation")}
+							</ThemedText>
+						) : null}
+					</>
 				) : privateRows.length === 0 ? (
 					<View testID="registrant-detail-private-empty">
 						<ThemedText type="small" style={{ color: colors.textSecondary }}>
@@ -693,6 +769,7 @@ export default function RegistrantDetailScreen() {
 			    because the trail's rows are private field NAMES. */}
 			<AccessHistorySection registrantId={registrantId} canView={canViewPrivate} />
 		</ScrollView>
+		</KeyboardAvoidingScreen>
 	);
 }
 
@@ -713,6 +790,14 @@ const localStyles = StyleSheet.create({
 		alignItems: "center",
 		gap: 8,
 		marginBottom: 12,
+	},
+	sealedNotice: {
+		flexDirection: "row",
+		alignItems: "flex-start",
+		gap: 8,
+	},
+	sealedNoticeText: {
+		flexShrink: 1,
 	},
 	lifecycleButtonRow: {
 		flexDirection: "row",

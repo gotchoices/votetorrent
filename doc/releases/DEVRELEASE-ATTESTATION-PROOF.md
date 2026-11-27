@@ -149,6 +149,19 @@ voter build on device and drive `verifyKeyAttestation` directly. That proves the
 against genuine TEE-produced material while leaving the Play Integrity half for
 later.
 
+A **debug** authority build can also run this narrower leg end to end: set
+`SKIP_PLAY_INTEGRITY_HALF = true` in
+`apps/VoteTorrentAuthority/src/engines/proof-flags.generated.ts` (never commit it).
+The factory computes `__DEV__ && SKIP_PLAY_INTEGRITY_HALF`, so a release build ignores
+the flag. With it on, `PlayIntegrityVerifier` skips the Play Integrity half and the
+`keysProvisioned` requirement, still applies the Android-only gate and the key
+attestation half with its certificate pin, logs a loud `DEBUG SWITCH ON` warning when
+the association engine is built, and a pass carries the reason
+`Play Integrity half SKIPPED ...`, never a bare `{ ok: true }`. Caveat: a debug
+authority build also accepts the public debug digests (the CR-02 guard strips them
+only when `__DEV__` is false), so for the mismatch half of the proof the voter APK
+must be signed with a certificate that is in neither list.
+
 ---
 
 ## Cleanup

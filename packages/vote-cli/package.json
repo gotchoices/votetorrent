@@ -1,0 +1,52 @@
+{
+	"name": "@votetorrent/vote-cli",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"description": "vt: headless officer, keyholder and voter daemons over the shipped vote-engine and @votetorrent/workflows, for protocol testing, profiling and parallel runs. A test tool; never a dependency of an app.",
+	"bin": {
+		"vt": "./dist/bin/vt.js"
+	},
+	"engines": {
+		"node": ">=22"
+	},
+	"files": [
+		"dist",
+		"!dist/test",
+		"!**/*.tsbuildinfo"
+	],
+	"scripts": {
+		"clean": "rm -rf dist",
+		"build": "tsc -p tsconfig.build.json",
+		"test": "TS_NODE_PROJECT=./tsconfig.test.json mocha --node-option=import=./register-ts-node.mjs --node-option=experimental-specifier-resolution=node \"test/**/*.spec.ts\"",
+		"vt": "node dist/bin/vt.js"
+	},
+	"dependencies": {
+		"@libp2p/circuit-relay-v2": "^4",
+		"@libp2p/crypto": "^5.1.13",
+		"@libp2p/interface": "^3.1.0",
+		"@libp2p/peer-id": "^6.0.0",
+		"@libp2p/websockets": "^10",
+		"@multiformats/multiaddr": "^13.0.1",
+		"@noble/ciphers": "2.2.0",
+		"@noble/curves": "2.2.0",
+		"@noble/hashes": "2.2.0",
+		"@optimystic/db-core": "^1.30.0",
+		"@optimystic/db-p2p": "patch:@optimystic/db-p2p@npm%3A1.30.0#~/.yarn/patches/@optimystic-db-p2p-npm-1.30.0-votetorrent.patch",
+		"@optimystic/db-p2p-storage-fs": "^1.30.0",
+		"@quereus/quereus": "patch:@quereus/quereus@npm%3A5.7.1#~/.yarn/patches/@quereus-quereus-npm-5.7.1-votetorrent.patch",
+		"@serfab/cadre-core": "patch:@serfab/cadre-core@npm%3A1.25.0#~/.yarn/patches/@serfab-cadre-core-npm-1.25.0-votetorrent.patch",
+		"@votetorrent/ui-web": "workspace:*",
+		"@votetorrent/vote-core": "workspace:*",
+		"@votetorrent/vote-engine": "workspace:*",
+		"@votetorrent/workflows": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/mocha": "^10.0.10",
+		"@types/node": "^22.13.10",
+		"chai": "^5.2.0",
+		"mocha": "^11.5.0",
+		"ts-node": "^10.8.1",
+		"typescript": "^5.6.3"
+	}
+}

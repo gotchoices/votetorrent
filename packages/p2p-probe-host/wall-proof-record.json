@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "timestamp": "2026-09-04T13:44:23.514Z",
+  "cadreCoreVersion": "0.12.0",
+  "cadreCorePath": "/Users/arashrestha/ILAB/VOTETORRENT/votetorrent/packages/p2p-probe-host/node_modules/@serfab/cadre-core/package.json",
+  "dbP2pVersion": "0.27.0",
+  "dbP2pPath": "/Users/arashrestha/ILAB/VOTETORRENT/votetorrent/packages/p2p-probe-host/node_modules/@optimystic/db-p2p/package.json",
+  "probePeerId": "12D3KooWNapPyQ18VWrtYU5J8iyHfuRp8Ch9iBwo7qF2oD6nC5dq",
+  "complete": true,
+  "rungs": {
+    "P": {
+      "verdict": "PASS",
+      "checks": [
+        {
+          "id": "unconditional",
+          "branch": "branches 1-3 (not-running/no-DB, empty trust anchor, bootstrap/relay peer)",
+          "pass": true,
+          "observed": false
+        },
+        {
+          "id": "enrollmentWindow",
+          "branch": "branch 4 (enrollment window)",
+          "pass": true,
+          "observed": 0
+        },
+        {
+          "id": "delegateAdmission",
+          "branch": "branch 5 (delegate admission)",
+          "pass": true,
+          "observed": false
+        },
+        {
+          "id": "membership",
+          "branch": "branch 6 (authorized.length===0 cold-start carve-out) + probe is not a member",
+          "pass": true,
+          "observed": {
+            "memberCount": 1,
+            "probeIsMember": false
+          }
+        },
+        {
+          "id": "outstandingInvitation",
+          "branch": "branch 7 (outstanding invitation)",
+          "pass": true,
+          "observed": false
+        },
+        {
+          "id": "relayServerEnabled",
+          "branch": "branch 8 (relayServerEnabled posture)",
+          "pass": true,
+          "observed": false
+        },
+        {
+          "id": "strandHosted",
+          "branch": "validity (strand actually running locally)",
+          "pass": true,
+          "observed": 1
+        },
+        {
+          "id": "decision",
+          "branch": "aggregate decision (admitInboundControlConnection)",
+          "pass": true,
+          "observed": "deny"
+        }
+      ],
+      "decision": "deny"
+    },
+    "L1": {
+      "verdict": "DENIED:closed-after-7ms(receiver-side-abort-raced-dialer-upgrade)",
+      "elapsedMs": 59.239374999999654,
+      "decisionLevel": "deny",
+      "agreesWithDecisionLevel": true
+    },
+    "L3": {
+      "verdict": "UNREACHABLE:L1=DENIED:closed-after-7ms(receiver-side-abort-raced-dialer-upgrade)",
+      "raw": null,
+      "collected": null
+    },
+    "L2": {
+      "verdict": "behavioural:UNREACHABLE:L1=DENIED:closed-after-7ms(receiver-side-abort-raced-dialer-upgrade);sourceScan:PASS",
+      "behavioural": "UNREACHABLE:L1=DENIED:closed-after-7ms(receiver-side-abort-raced-dialer-upgrade)",
+      "sourceScanPass": true,
+      "sourceScanPositive": {
+        "repo/service.js": 2,
+        "cluster/service.js": 2,
+        "sync/service.js": 2,
+        "cluster/block-transfer-service.js": 2
+      },
+      "sourceScanNegative": {
+        "strand-addr-protocol.js": 0,
+        "strand-wake-protocol.js": 0,
+        "strand-formation-protocol.js": 0,
+        "seed-bootstrap.js": 0,
+        "cadre-node.js": 0
+      }
+    },
+    "POS": {
+      "verdict": "PASS",
+      "l1": "ADMITTED",
+      "l2": "STREAM_OPENED",
+      "l3": "SERVED"
+    },
+    "RELAY": {
+      "verdict": "[\"ADMITTED\",\"ADMITTED\",\"ADMITTED\"]",
+      "verdicts": [
+        "ADMITTED",
+        "ADMITTED",
+        "ADMITTED"
+      ],
+      "posture": "on",
+      "stable": true
+    },
+    "F4": {
+      "verdict": "SERVED",
+      "elapsedMs": 20.920375000001513,
+      "strandPeerId": "12D3KooWKAYEA2fmKTrBbvmU3Nafb8z86FzE5FJdbN19cS9U8jSi",
+      "strandAddr": "/ip4/127.0.0.1/tcp/63572/ws/p2p/12D3KooWKAYEA2fmKTrBbvmU3Nafb8z86FzE5FJdbN19cS9U8jSi",
+      "result": {
+        "wall-proof-f4-probe-block": {
+          "state": {}
+        }
+      }
+    }
+  },
+  "relayPosture": {
+    "posture": "off",
+    "rationale": "enableRelay=true admitted the unauthorized outsider past the documented 5000ms admit-for-relay expiry (verdicts=[\"ADMITTED\",\"ADMITTED\",\"ADMITTED\"], stable=true) — PendingReserveDeadlines.expire() should have aborted this connection and measurably did not in this run. FINDING, not assumption: keep relay OFF until this is independently reverified against the installed dist."
+  }
+}

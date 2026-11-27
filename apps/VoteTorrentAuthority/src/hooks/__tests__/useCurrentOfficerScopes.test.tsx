@@ -221,6 +221,34 @@ describe('useCurrentOfficerScopes — D-10 / T-46-03', () => {
     expect(readScopes(tr)).toBe('vrg');
   });
 
+  describe('S1: officer standing survives key replacement (UAT 62 gap 5)', () => {
+    async function scopesForPersistedDevice(options?: { userId?: string }) {
+      const actual = jest.requireActual('../../engines/device-user') as {
+        persistProvisionedDeviceUser: (n: string, k: string, o?: { userId?: string }) => Promise<{ id: string; name: string }>;
+      };
+      const persisted = await actual.persistProvisionedDeviceUser('Una', 'ab'.repeat(33), options);
+      mockGetOrCreateDeviceUser.mockResolvedValue(persisted);
+      mockGetAdminDetails.mockResolvedValue({
+        admin: { officers: [{ userId: 'net-user-1', authorityId: 'auth-1', title: 'Registrar', scopes: ['vrg'] }] },
+      });
+      let tr!: renderer.ReactTestRenderer;
+      await renderer.act(async () => {
+        tr = renderer.create(<ScopesDisplay authorityId="auth-1" />);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      return readScopes(tr);
+    }
+
+    it('a device user persisted with the kept network id finds the officer', async () => {
+      expect(await scopesForPersistedDevice({ userId: 'net-user-1' })).toBe('vrg');
+    });
+
+    it('a device user persisted with a minted id does not (documents the old failure)', async () => {
+      expect(await scopesForPersistedDevice()).toBe('UNDEFINED');
+    });
+  });
+
   it('a failing walk resolves to undefined with loading false', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     mockGetAdminDetails.mockRejectedValue(new Error('network not established'));
@@ -273,5 +301,21 @@ describe('useCurrentOfficerScopes — D-10 / T-46-03', () => {
     expect(unmountedWarning).toBe(false);
 
     errorSpy.mockRestore();
+  });
+
+  it('H1: refresh() re-runs the officer lookup', async () => {
+    let refresh!: () => void;
+    function Host() {
+      refresh = useCurrentOfficerScopes('auth-1').refresh;
+      return null;
+    }
+    await renderer.act(async () => {
+      renderer.create(<Host />);
+    });
+    expect(mockGetAdminDetails).toHaveBeenCalledTimes(1);
+    await renderer.act(async () => {
+      refresh();
+    });
+    expect(mockGetAdminDetails).toHaveBeenCalledTimes(2);
   });
 });

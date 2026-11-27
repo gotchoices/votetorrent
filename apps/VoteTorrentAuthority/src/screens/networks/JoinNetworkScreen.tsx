@@ -1,0 +1,647 @@
+/**
+ * JoinNetworkScreen.tsx - the Authority's "Join a network" screen (D-26).
+ *
+ * D-26: the officer scans, pastes or types the join code the election office gave them, sees the
+ * network's name and fingerprint, compares the fingerprint with the one the office published, and
+ * taps Join. A scan, a paste or a typed text only decodes; only the Join tap starts a join.
+ *
+ * Scan: D-26 first shipped this screen paste-only, with no camera. The user ruled on 2026-11-23 to
+ * add the camera, so an officer or keyholder can join by scanning the office's join-code QR. The Scan
+ * entry opens `JoinCodeScanner` (a Modal that owns the camera permission and device). An accepted
+ * scan fills the field exactly as a paste would, so the network name and fingerprint show with Join
+ * ready; the Join tap is still required. Each camera state the scanner reports shows a plain sentence
+ * that points to paste. The Networks screen's Scan button opens the `JoinNetworkByScan` route, which
+ * is this screen with the scanner open on arrival (`openScannerOnMount`).
+ *
+ * Choose image: the scanner has its own Choose image button. When the camera cannot be used (no
+ * camera, access off, refused or failed), the camera notice is followed by the same Choose image
+ * button, because reading a picture needs no camera. Its read goes through the scanner's own check
+ * (`useScanImage`) and fills the field through `onScanAccept`, as a scan does.
+ *
+ * UI-SPEC A1: root-stack routes with no params. The code lives only in this screen's state; it is
+ * never passed to `navigate`, `setParams` or `setOptions`, and navigation state is not persisted.
+ *
+ * D-09: the needs-reinvite notice's action lands here. A join runs the glue (`runAuthorityNetworkJoin`),
+ * then `completeAuthorityJoin` with the context's `refreshOwnerTrust`, so the joined state follows the
+ * owner-trust refresh; when the refresh could not save trust the screen says so.
+ *
+ * D-30 (the joining window that keeps a half-joined hash from opening as a founder) is handled inside
+ * the glue.
+ *
+ * D-06: the code is a bearer credential. The only console calls are three closed tokens whose second
+ * argument is a typed reason, a literal or `errorClassName(<caught>)`. A result's `detail` and an
+ * engine error's text are never read, shown or logged; every sentence is chosen by the typed reason.
+ *
+ * OQ1, copy branch B: the user approved a guard that refuses a founder joining a foreign network, so
+ * the glue can resolve `founder-cannot-join`, and this screen maps it to its own sentence.
+ *
+ * A signing-key gap (`NO_KEY_PROVISIONED` from the select step) is routed to the provisioning ceremony
+ * exactly as `ImportFoundingBundleScreen` does: the completion is retried once when this screen is
+ * focused again, and a failed retry is not routed again (no ceremony loop).
+ *
+ * `done` reuses the Verifying label because no copy exists for it: completion runs under the last
+ * label.
+ */
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	AccessibilityInfo,
+	ActivityIndicator,
+	Linking,
+	Platform,
+	Pressable,
+	ScrollView,
+	StyleSheet,
+	Text,
+	TextInput,
+	View,
+	type HostInstance,
+} from "react-native";
+import { ExtendedTheme, useFocusEffect, useNavigation, useTheme } from "@react-navigation/native";
+import { useTranslation } from "react-i18next";
+import Clipboard from "@react-native-clipboard/clipboard";
+import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { decodeNetworkJoinCode } from "@votetorrent/vote-engine/rn";
+import type { NetworkJoinCodeDecodeFailure, NetworkJoinFailureReason, NetworkJoinStep } from "@votetorrent/vote-engine/rn";
+import type { NetworkReference } from "@votetorrent/vote-core";
+import { completeAuthorityJoin, runAuthorityNetworkJoin, type AuthorityJoinNode } from "../../engines/authority-network-join";
+import { ThemedText } from "../../components/ThemedText";
+import { CustomButton } from "../../components/CustomButton";
+import { useApp } from "../../providers/AppProvider";
+import { useCadreNode } from "../../providers/CadreNodeProvider";
+import { getDeviceUser } from "../../engines/device-user";
+import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
+import { useKeyboardInset } from "../../hooks/useKeyboardInset";
+import { mapDeviceSigningError } from "../../utils/deviceSigningError";
+import { errorClassName } from "../../utils/errorClassName";
+import { globalStyles } from "../../theme/styles";
+import type { NavigationProp } from "../../navigation/types";
+import JoinCodeScanner, { type JoinScanCameraState, useScanImage } from "./JoinCodeScanner";
+
+/** The translated sentence for each way a join can fail, chosen by the typed reason only. */
+export function joinNetworkFailureKey(reason: NetworkJoinFailureReason | "founder-cannot-join"): string {
+	switch (reason) {
+		case "invitation-malformed":
+			return "joinNetworkErrorInvalidCode";
+		case "invitation-expired":
+			return "joinNetworkErrorExpired";
+		case "invitation-used-up":
+			return "joinNetworkErrorUsedUp";
+		case "invitation-older-version":
+			return "joinNetworkErrorOlderCode";
+		case "not-admitted":
+			return "joinNetworkErrorNotAdmitted";
+		case "no-peers":
+			return "joinNetworkErrorNoPeers";
+		case "not-synced":
+			return "joinNetworkErrorNotSynced";
+		case "digest-mismatch":
+			return "joinNetworkErrorDigestMismatch";
+		case "open-failed":
+			return "joinNetworkErrorOpenFailed";
+		case "founder-cannot-join":
+			return "joinNetworkErrorFounderCannotJoin";
+		default:
+			return "joinNetworkErrorGeneric";
+	}
+}
+
+/** The translated sentence for each reason a pasted text does not decode. */
+export function joinNetworkDecodeErrorKey(reason: NetworkJoinCodeDecodeFailure): string {
+	switch (reason) {
+		case "unsupported-version":
+			return "joinNetworkErrorNewerCode";
+		case "invitation-older-version":
+			return "joinNetworkErrorOlderCode";
+		case "not-join-code":
+			return "joinNetworkErrorNotJoinCode";
+		default:
+			return "joinNetworkErrorInvalidCode";
+	}
+}
+
+/** The progress label for each join step; `done` has no copy of its own. */
+export function joinNetworkStepKey(step: NetworkJoinStep): string {
+	switch (step) {
+		case "admitting":
+			return "joinNetworkStepAdmitting";
+		case "syncing":
+			return "joinNetworkStepSyncing";
+		default:
+			return "joinNetworkStepVerifying";
+	}
+}
+
+type ScanNotice = "scanned" | "denied" | "failed";
+type ScanAvailability = "ready" | "blocked" | "none";
+
+type Phase =
+	| { kind: "idle" }
+	| { kind: "joining"; step: NetworkJoinStep }
+	| { kind: "joined"; name: string; trustSaved: boolean }
+	| { kind: "failed"; key: string; message?: string };
+
+const resolvedNoop = (): Promise<void> => Promise.resolve();
+
+export interface JoinNetworkScreenProps {
+	/** True on the `JoinNetworkByScan` route: the scanner opens as the screen arrives. */
+	openScannerOnMount?: boolean;
+}
+
+export default function JoinNetworkScreen({ openScannerOnMount = false }: JoinNetworkScreenProps = {}): React.JSX.Element {
+	const { colors, dark } = useTheme() as ExtendedTheme;
+	const { t } = useTranslation();
+	const navigation = useNavigation<NavigationProp>();
+	const insets = useSafeAreaInsets();
+	const keyboardInset = useKeyboardInset();
+	const { networksEngine, selectNetwork } = useApp();
+	const cadre = useCadreNode();
+	const handleDeviceSigningError = useDeviceSigningErrorHandler();
+
+	const [text, setText] = useState("");
+	const [phase, setPhase] = useState<Phase>({ kind: "idle" });
+	const [scannerOpen, setScannerOpen] = useState(openScannerOnMount);
+	const [availability, setAvailability] = useState<ScanAvailability>("ready");
+	const [scanNotice, setScanNotice] = useState<ScanNotice | null>(null);
+	const [scanCount, setScanCount] = useState(0);
+	// The sentence (an i18n key) after a Choose image pick from the camera notice.
+	const [imageNoticeKey, setImageNoticeKey] = useState<string | null>(null);
+	const image = useScanImage("join-code");
+	const scanButtonRef = useRef<HostInstance>(null);
+	const wasScannerOpenRef = useRef(false);
+	const announcedCountRef = useRef(0);
+
+	const mountedRef = useRef(true);
+	const inFlightRef = useRef(false);
+	const retryOnFocusRef = useRef<{ node: AuthorityJoinNode; networkRef: NetworkReference } | null>(null);
+	// Latest-value refs: the focus effect below runs with no dependencies and must not retry behind
+	// the officer's back when an identity changes.
+	const selectNetworkRef = useRef(selectNetwork);
+	selectNetworkRef.current = selectNetwork;
+	const refreshRef = useRef(cadre.refreshOwnerTrust);
+	refreshRef.current = cadre.refreshOwnerTrust;
+	const handleSigningRef = useRef(handleDeviceSigningError);
+	handleSigningRef.current = handleDeviceSigningError;
+
+	useEffect(() => {
+		mountedRef.current = true;
+		return () => {
+			mountedRef.current = false;
+		};
+	}, []);
+
+	const decoded = useMemo(() => (text.trim().length === 0 ? null : decodeNetworkJoinCode(text)), [text]);
+
+	// Focus returns to the Scan button when the scanner closes.
+	useEffect(() => {
+		if (wasScannerOpenRef.current && !scannerOpen && scanButtonRef.current) {
+			AccessibilityInfo.sendAccessibilityEvent(scanButtonRef.current, "focus");
+		}
+		wasScannerOpenRef.current = scannerOpen;
+	}, [scannerOpen]);
+
+	// iOS has no live regions, so a scan that decodes ok is announced once.
+	const scannedOk = scanNotice === "scanned" && decoded?.ok === true;
+	useEffect(() => {
+		if (scanCount > announcedCountRef.current && scannedOk && Platform.OS === "ios") {
+			announcedCountRef.current = scanCount;
+			AccessibilityInfo.announceForAccessibility(t("joinScanScanned"));
+		}
+	}, [scanCount, scannedOk, t]);
+
+	async function finishJoin(joinNode: AuthorityJoinNode, networkRef: NetworkReference, mayRoute: boolean): Promise<void> {
+		const refreshOwnerTrust = typeof refreshRef.current === "function" ? refreshRef.current : resolvedNoop;
+		try {
+			const { trustSaved } = await completeAuthorityJoin({
+				node: joinNode,
+				networkRef,
+				selectNetwork: selectNetworkRef.current,
+				refreshOwnerTrust,
+			});
+			if (mountedRef.current) setPhase({ kind: "joined", name: networkRef.name, trustSaved });
+		} catch (error) {
+			if (!mountedRef.current) {
+				console.error("JoinNetworkScreen: select failed:", errorClassName(error));
+				return;
+			}
+			let message: string | undefined;
+			let routed = false;
+			if (mayRoute) {
+				const outcome = handleSigningRef.current(error);
+				if (outcome.handled && mapDeviceSigningError(error) !== "cancellation") {
+					// The hook has navigated to the ceremony; its CONTINUE pops back here.
+					retryOnFocusRef.current = { node: joinNode, networkRef };
+					routed = true;
+				}
+				message = outcome.message;
+			}
+			// A first-run joiner has no signing key yet (NO_KEY_PROVISIONED): routing it to the ceremony is
+			// the designed path, not a failure, so it is logged as info (2026-11-17: the error line was
+			// mistaken for a broken join on the Redmi).
+			if (routed) console.info("JoinNetworkScreen: select routed to the signing ceremony:", mapDeviceSigningError(error));
+			else console.error("JoinNetworkScreen: select failed:", errorClassName(error));
+			setPhase({ kind: "failed", key: "joinNetworkErrorGeneric", message });
+		}
+	}
+	const finishJoinRef = useRef(finishJoin);
+	finishJoinRef.current = finishJoin;
+
+	// Back from the routed ceremony, retry the completion ONCE. A failure is not routed again.
+	useFocusEffect(
+		useCallback(() => {
+			const pending = retryOnFocusRef.current;
+			retryOnFocusRef.current = null;
+			if (!pending || inFlightRef.current) return;
+			inFlightRef.current = true;
+			setPhase({ kind: "joining", step: "verifying" });
+			finishJoinRef
+				.current(pending.node, pending.networkRef, false)
+				.catch(() => undefined)
+				.finally(() => {
+					inFlightRef.current = false;
+				});
+		}, []),
+	);
+
+	function onChangeText(value: string): void {
+		setText(value);
+		setScanNotice(null);
+		setImageNoticeKey(null);
+		setPhase((p) => (p.kind === "failed" ? { kind: "idle" } : p));
+		retryOnFocusRef.current = null;
+	}
+
+	function onPaste(): void {
+		Clipboard.getString()
+			.catch(() => "")
+			.then((value) => {
+				if (!value || !mountedRef.current) return;
+				setText(value);
+				setScanNotice(null);
+				setImageNoticeKey(null);
+				setPhase({ kind: "idle" });
+				retryOnFocusRef.current = null;
+			});
+	}
+
+	function onScanPress(): void {
+		if (phase.kind === "joining" || availability !== "ready") return;
+		setScanNotice(null);
+		setImageNoticeKey(null);
+		setScannerOpen(true);
+	}
+
+	// A scan only fills the field, exactly as a paste would. Joining stays a separate tap.
+	function onScanAccept(scanned: string): void {
+		setText(scanned);
+		setPhase({ kind: "idle" });
+		retryOnFocusRef.current = null;
+		setScannerOpen(false);
+		setScanNotice("scanned");
+		setScanCount((count) => count + 1);
+	}
+
+	// Choose image from the camera notice: the same check and the same fill as a scan.
+	async function onChooseImage(): Promise<void> {
+		if (phase.kind === "joining") return;
+		setImageNoticeKey(null);
+		const outcome = await image.pick();
+		if (outcome === null || !mountedRef.current) return;
+		if (outcome.type === "accepted") onScanAccept(outcome.value);
+		else setImageNoticeKey(outcome.key);
+	}
+
+	function onScanClose(): void {
+		setScannerOpen(false);
+	}
+
+	function onCameraState(state: JoinScanCameraState): void {
+		if (state === "ready" || state === "blocked" || state === "none") setAvailability(state);
+		if (state === "denied" || state === "failed") setScanNotice(state);
+		if (state !== "ready") setScannerOpen(false);
+	}
+
+	function onOpenSettings(): void {
+		Linking.openSettings().catch(() => {
+			// The rejection (it can carry anything) is never read.
+			console.info("[join] scan: open-settings-failed");
+		});
+	}
+
+	async function onJoin(): Promise<void> {
+		if (!decoded || !decoded.ok || inFlightRef.current) return;
+		const code = decoded.code;
+		inFlightRef.current = true;
+		retryOnFocusRef.current = null;
+		setPhase({ kind: "joining", step: "admitting" });
+		const show = (key: string): void => {
+			if (mountedRef.current) setPhase({ kind: "failed", key });
+		};
+		try {
+			const node = cadre.node;
+			if (!node) {
+				console.warn("JoinNetworkScreen: join refused:", "no-peers");
+				show(joinNetworkFailureKey("no-peers"));
+				return;
+			}
+			if (!networksEngine) {
+				console.error("JoinNetworkScreen: join failed:", "no-engine");
+				show("joinNetworkErrorGeneric");
+				return;
+			}
+			let result;
+			let joinNode: AuthorityJoinNode;
+			try {
+				const user = await getDeviceUser();
+				joinNode = node as unknown as AuthorityJoinNode;
+				result = await runAuthorityNetworkJoin({
+					node: joinNode,
+					networksEngine,
+					user,
+					code,
+					onStep: (step) => {
+						if (mountedRef.current) setPhase({ kind: "joining", step });
+					},
+				});
+			} catch (error) {
+				console.error("JoinNetworkScreen: join failed:", errorClassName(error));
+				show("joinNetworkErrorGeneric");
+				return;
+			}
+			if (!result.ok) {
+				console.warn("JoinNetworkScreen: join refused:", result.reason);
+				show(joinNetworkFailureKey(result.reason));
+				return;
+			}
+			await finishJoin(joinNode, result.networkRef, true);
+		} finally {
+			inFlightRef.current = false;
+		}
+	}
+
+	const busy = phase.kind === "joining";
+	const decodeError = decoded !== null && !decoded.ok ? decoded : null;
+	const scanDisabled = busy || availability !== "ready";
+	let statusKind: "none" | "blocked" | "scanned" | "denied" | "failed" | null = null;
+	if (availability === "none") statusKind = "none";
+	else if (availability === "blocked") statusKind = "blocked";
+	else if (scannedOk) statusKind = "scanned";
+	else if (scanNotice === "denied" || scanNotice === "failed") statusKind = scanNotice;
+	const cameraSentenceKey =
+		statusKind === "none"
+			? "joinScanCameraNone"
+			: statusKind === "blocked"
+				? "joinScanCameraBlocked"
+				: statusKind === "denied"
+					? "joinScanCameraDenied"
+					: "joinScanCameraFailed";
+
+	return (
+		<>
+		<ScrollView
+			testID="join-network-screen"
+			style={globalStyles.container}
+			contentContainerStyle={{ paddingBottom: insets.bottom + 16 + keyboardInset, gap: 16 }}
+			keyboardShouldPersistTaps="handled"
+		>
+			{phase.kind === "joined" ? (
+				<View style={styles.stack}>
+					<ThemedText type="defaultSemiBold" accessibilityRole="header" testID="join-network-joined">
+						{t("joinNetworkJoinedTitle", { name: phase.name })}
+					</ThemedText>
+					{!phase.trustSaved ? (
+						<ThemedText type="small" accessibilityRole="alert" testID="join-network-trust-warning" style={{ color: colors.error }}>
+							{t("joinNetworkTrustNotSaved")}
+						</ThemedText>
+					) : null}
+					<CustomButton testID="join-network-done" title={t("joinNetworkDone")} onPress={() => navigation.goBack()} />
+				</View>
+			) : (
+				<>
+					<ThemedText testID="join-network-intro" style={{ color: colors.text }}>
+						{t("joinNetworkIntro")}
+					</ThemedText>
+					<View
+						testID="join-network-card"
+						style={[
+							styles.card,
+							{ backgroundColor: colors.card, borderColor: dark ? colors.accent : colors.border },
+						]}
+					>
+						<CustomButton
+							ref={scanButtonRef}
+							testID="join-network-scan"
+							title={t("joinScanButton")}
+							icon="qrcode"
+							disabled={scanDisabled}
+							onPress={onScanPress}
+						/>
+						<View style={styles.labelRow}>
+							<ThemedText type="defaultSemiBold">{t("joinNetworkCodeLabel")}</ThemedText>
+							<Pressable
+								testID="join-network-paste"
+								accessibilityRole="button"
+								accessibilityLabel={t("joinNetworkPaste")}
+								disabled={busy}
+								onPress={onPaste}
+								style={styles.paste}
+							>
+								<Text style={{ color: colors.primary, fontSize: 16, fontWeight: "400" }}>{t("joinNetworkPaste")}</Text>
+							</Pressable>
+						</View>
+						<TextInput
+							testID="join-network-code-input"
+							value={text}
+							onChangeText={onChangeText}
+							multiline
+							editable={!busy}
+							autoCapitalize="none"
+							autoCorrect={false}
+							accessibilityLabel={t("joinNetworkCodeLabel")}
+							placeholder={t("joinNetworkCodePlaceholder")}
+							placeholderTextColor={dark ? colors.text : colors.textSecondary}
+							style={[styles.input, { color: colors.text, borderColor: decodeError ? colors.error : colors.primary }]}
+						/>
+						{decodeError ? (
+							<ThemedText type="small" testID="join-network-code-error" style={{ color: colors.error }}>
+								{t(joinNetworkDecodeErrorKey(decodeError.reason))}
+							</ThemedText>
+						) : null}
+						{statusKind ? (
+							<View testID="join-network-scan-status" style={styles.stack}>
+								{statusKind === "scanned" ? (
+									<View style={styles.noticeRow}>
+										<FontAwesome6 name="circle-check" size={16} color={colors.text} style={styles.noticeIcon} />
+										<ThemedText accessibilityLiveRegion="polite" style={{ color: colors.text, flexShrink: 1 }}>
+											{t("joinScanScanned")}
+										</ThemedText>
+									</View>
+								) : (
+									<View
+										accessibilityRole="alert"
+										style={[styles.noticeRow, styles.noticeShell, { backgroundColor: colors.card, borderColor: colors.warning }]}
+									>
+										<FontAwesome6 name="triangle-exclamation" size={16} color={colors.warning} style={styles.noticeIcon} />
+										<ThemedText style={{ color: colors.text, flexShrink: 1 }}>{t(cameraSentenceKey)}</ThemedText>
+									</View>
+								)}
+								{statusKind === "blocked" ? (
+									<Pressable
+										testID="join-network-scan-open-settings"
+										accessibilityRole="button"
+										onPress={onOpenSettings}
+										style={styles.openSettings}
+									>
+										<Text style={{ color: colors.primary, fontSize: 16, fontWeight: "400" }}>{t("joinScanOpenSettings")}</Text>
+									</Pressable>
+								) : null}
+							</View>
+						) : null}
+						{statusKind !== null && statusKind !== "scanned" && image.available ? (
+							<Pressable
+								testID="join-network-scan-status-image"
+								accessibilityRole="button"
+								accessibilityLabel={t("scanImageLabel")}
+								accessibilityState={{ disabled: busy || image.picking, busy: image.picking }}
+								disabled={busy || image.picking}
+								onPress={onChooseImage}
+								style={styles.chooseImage}
+							>
+								{image.picking ? (
+									<ActivityIndicator color={colors.primary} />
+								) : (
+									<FontAwesome6 name="image" size={16} color={colors.primary} />
+								)}
+								<Text style={{ color: colors.primary, fontSize: 16, fontWeight: "400" }}>{t("scanImageButton")}</Text>
+							</Pressable>
+						) : null}
+						{imageNoticeKey !== null ? (
+							<ThemedText testID="join-network-image-notice" accessibilityRole="alert" style={{ color: colors.text }}>
+								{t(imageNoticeKey)}
+							</ThemedText>
+						) : null}
+						{decoded && decoded.ok ? (
+							<View testID="join-network-preview" style={styles.stack}>
+								<ThemedText type="small" style={{ color: colors.textSecondary }}>
+									{t("network")}
+								</ThemedText>
+								<ThemedText type="defaultSemiBold" testID="join-network-preview-name">
+									{decoded.code.name}
+								</ThemedText>
+								<ThemedText type="small" style={{ color: colors.textSecondary }}>
+									{t("networkFoundingExportFingerprintLabel")}
+								</ThemedText>
+								<Text
+									testID="join-network-preview-fingerprint"
+									selectable
+									maxFontSizeMultiplier={1.5}
+									style={{ fontFamily: "monospace", fontSize: 16, fontWeight: "600", color: colors.text }}
+								>
+									{decoded.fingerprint}
+								</Text>
+								<ThemedText type="small" style={{ color: colors.text }}>
+									{t("joinNetworkPreviewCheck")}
+								</ThemedText>
+							</View>
+						) : null}
+						{phase.kind === "failed" ? (
+							<ThemedText testID="join-network-error" accessibilityRole="alert" style={{ color: colors.error }}>
+								{phase.message ?? t(phase.key)}
+							</ThemedText>
+						) : null}
+						{phase.kind === "joining" ? (
+							<View testID="join-network-progress" style={styles.progress}>
+								<ActivityIndicator color={colors.primary} />
+								<ThemedText testID="join-network-step" style={{ color: colors.text, flexShrink: 1 }}>
+									{t(joinNetworkStepKey(phase.step))}
+								</ThemedText>
+							</View>
+						) : (
+							<CustomButton
+								testID="join-network-submit"
+								size="tall"
+								title={t("joinNetworkSubmit")}
+								backgroundColor={colors.primary}
+								disabled={!decoded?.ok}
+								onPress={onJoin}
+							/>
+						)}
+					</View>
+				</>
+			)}
+		</ScrollView>
+		<JoinCodeScanner
+			visible={scannerOpen && phase.kind !== "joined"}
+			onAccept={onScanAccept}
+			onClose={onScanClose}
+			onPasteInstead={onScanClose}
+			onCameraState={onCameraState}
+		/>
+		</>
+	);
+}
+
+/** The `JoinNetworkByScan` route: the same screen, with the scanner open as it arrives. */
+export function JoinNetworkByScanScreen(): React.JSX.Element {
+	return <JoinNetworkScreen openScannerOnMount />;
+}
+
+const styles = StyleSheet.create({
+	stack: {
+		gap: 8,
+	},
+	card: {
+		borderWidth: 1,
+		borderRadius: 8,
+		padding: 16,
+		gap: 8,
+	},
+	labelRow: {
+		flexDirection: "row",
+		justifyContent: "space-between",
+		alignItems: "center",
+	},
+	paste: {
+		minHeight: 44,
+		minWidth: 44,
+		justifyContent: "center",
+		alignItems: "flex-end",
+	},
+	input: {
+		borderWidth: 1,
+		borderRadius: 8,
+		padding: 12,
+		minHeight: 96,
+		textAlignVertical: "top",
+		fontSize: 14,
+	},
+	progress: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 12,
+	},
+	noticeRow: {
+		flexDirection: "row",
+		alignItems: "flex-start",
+	},
+	noticeShell: {
+		borderWidth: 1,
+		borderRadius: 8,
+		padding: 16,
+	},
+	noticeIcon: {
+		marginRight: 8,
+		marginTop: 3,
+	},
+	openSettings: {
+		minHeight: 44,
+		justifyContent: "center",
+	},
+	chooseImage: {
+		minHeight: 44,
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 8,
+	},
+});

@@ -135,6 +135,24 @@ describe('device-user.ts — 49-16 provisioning record + typed unprovisioned rej
 		})
 	})
 
+	describe('persistProvisionedDeviceUser — kept user id (UAT 62 gap 5)', () => {
+		it('P1: persists and returns the supplied user id (recovery keeps the network identity)', async () => {
+			const user = await persistProvisionedDeviceUser('Una', 'ab'.repeat(33), { userId: 'u-1' })
+			expect(user.id).toBe('u-1')
+			expect(user.activeKeys[0]).toMatchObject({ key: 'ab'.repeat(33), type: UserKeyType.p256 })
+			expect((await getDeviceUser())?.id).toBe('u-1')
+		})
+
+		it('P2: without options it still mints a fresh id (first run)', async () => {
+			const a = await persistProvisionedDeviceUser('Una', 'ab'.repeat(33))
+			expect(typeof a.id).toBe('string')
+			expect(a.id.length).toBeGreaterThan(0)
+			expect(a.id).not.toBe('u-1')
+			const b = await persistProvisionedDeviceUser('Una', 'ab'.repeat(33), { userId: '' })
+			expect(b.id).not.toBe('')
+		})
+	})
+
 	describe('49-14 follow-up — recovery-in-progress marker (device-signer.ts fail-closed check)', () => {
 		it('isRecoveryInProgress() is false before anything is written', async () => {
 			await expect(isRecoveryInProgress()).resolves.toBe(false)

@@ -10,14 +10,47 @@
  * path back to recovery).
  *
  * Reconciliation this test encodes (so a future reader does not conclude the rollout is short):
- *   - 22 non-test files under `src` reference `device-signer` in some form.
- *   - 20 of those actually INVOKE `createDeviceSigner(` (a call expression, not a comment).
- *   - 17 of the 20 route through `useDeviceSigningErrorHandler` (8 from 49-11, 9 from 49-12).
- *   - 3 of the 20 are named, justified exemptions (`ROLLOUT_EXEMPT` below).
+ *   - 27 non-test files under `src` reference `device-signer` in some form.
+ *   - 25 of those actually INVOKE `createDeviceSigner(` (a call expression, not a comment) —
+ *     62-11's lazy ballot-submit signer, now `screens/ballots/EditBallotScreen.tsx` (moved there from CreateBallotScreen by 62-55: the persisted ballot is where submit lives; inventory unchanged at 25), 62-23's
+ *     `screens/networks/components/FoundingBundleExportCard.tsx` (the founding-bundle export
+ *     signer), and 62-25's `screens/registration/BulkImportSyncScreen.tsx` (the registration
+ *     bridge-URL save action) are all among them.
+ *   - 23 of the 25 route through `useDeviceSigningErrorHandler` (8 from 49-11, 9 from 49-12,
+ *     1 from `screens/dashboard/PairBrowserScreen.tsx` (the browser-pairing request signer; it
+ *     replaced the dashboard sign-in code screen, so the counts are unchanged), 1 from
+ *     62-11's ballot-submit signer (now `screens/ballots/EditBallotScreen.tsx` after the 62-55 move; routed count unchanged at 23), 1 from 62-23's
+ *     `screens/networks/components/FoundingBundleExportCard.tsx`, and 1 from 62-25's
+ *     `screens/registration/BulkImportSyncScreen.tsx`), and 2 from 62-27
+ *     (`screens/registration/AssociationRequestApprovalScreen.tsx`, the device-change review
+ *     ceremony, and `screens/elections/components/ReassociationReviewToggle.tsx`, the D-46
+ *     re-association review setting; both route through the hook).
+ *   - 2 of the 25 are named, justified exemptions (`ROLLOUT_EXEMPT` below) — unchanged by 62-25.
+ *   - 62-25 (D-28/D-29) REMOVES two of the four prior registration-sync exemptions:
+ *     `screens/registration/attach-sync-bindings.ts` no longer invokes `createDeviceSigner(` at
+ *     all (the bridge-key auto-provisioning loop that called it is deleted — T-62-25-02), and
+ *     `screens/registration/attach-association-sync-bindings.ts` is deleted outright (D-28: no
+ *     association REST/filesystem app binding exists any more). Neither 62-21's
+ *     `attach-peer-sync-binding.ts` nor `officer-intake-key.ts` invoke `createDeviceSigner(`
+ *     directly — both take an injected `createSigner` dependency instead (see each file's own
+ *     header). 62-25 ADDS exactly one new invoker, `BulkImportSyncScreen.tsx` (routed through the
+ *     hook, so ROLLOUT_EXEMPT is unaffected): net effect, the inventory count goes 24 -> 22 (Task
+ *     1, the two registration-sync removals) -> 23 (Task 3, the one screen addition) -> 25 (62-27: the
+ *     device-change review screen and the re-association review toggle, both routed through the hook).
  *   - 2 files (`engines/registrant-dev-seed.ts`, `engines/signing-proof.ts`) reference
  *     `createDeviceSigner` only in prose comments, never as a call — they are correctly
- *     excluded from the 20-file invocation inventory by this test's comment-stripping walk,
- *     and are NOT part of the 22/20/17/3 arithmetic below (22 = 20 invokers + 2 comment-only).
+ *     excluded from the invocation inventory by this test's comment-stripping walk, and are NOT
+ *     part of the 25/23/21/2/2 arithmetic above (27 = 25 invokers + 2 comment-only).
+ *   - 2026-11-02 ADDS exactly one invoker, `screens/elections/ElectionResultsScreen.tsx` (an officer
+ *     publishes the signed ElectionTally row), routed through the hook, so ROLLOUT_EXEMPT is unchanged:
+ *     invokers 25 -> 26, routed 23 -> 24, files referencing `device-signer` 27 -> 28.
+ *   - The paired-browsers list ADDS exactly one invoker, `screens/dashboard/PairedBrowsersScreen.tsx`
+ *     (the paired-browser Remove signer, routed through the hook), so ROLLOUT_EXEMPT is unchanged:
+	 *     invokers 26 -> 27, routed 24 -> 25.
+ *   - The administration-change Cancel ADDS exactly one invoker,
+ *     `screens/authorities/useAdminChangeCancel.ts` (the one-prompt Cancel change signer shared by
+ *     Authority Details and Proposed Administration), routed through the hook, so ROLLOUT_EXEMPT is
+ *     unchanged: invokers 27 -> 28.
  *
  * Convention mirrors this workspace's other release-guard-style source-inspection tests (see
  * `engines/__tests__/`): reads files as TEXT rather than importing them, so it fails on what is
@@ -33,11 +66,15 @@ import * as path from 'path';
 const SRC_ROOT = path.join(__dirname, '..');
 
 /**
- * The three files that invoke `createDeviceSigner(` but must NEVER route through
- * `useDeviceSigningErrorHandler`. Each entry carries the one-line rationale from
- * 49-12-PLAN.md's objective table. Adding a fourth entry here is a deliberate,
- * reviewable act — not a silent omission — because test 4 below re-derives the
+ * The files that invoke `createDeviceSigner(` but must NEVER route through
+ * `useDeviceSigningErrorHandler`. Each entry carries a one-line rationale. Adding an entry here
+ * is a deliberate, reviewable act — not a silent omission — because test 4 below re-derives the
  * invocation set from the tree and asserts every non-exempt member routes.
+ *
+ * 62-25 (D-28/D-29) removes the two prior registration-sync exemptions:
+ * `screens/registration/attach-sync-bindings.ts` no longer invokes `createDeviceSigner(` at all
+ * (its bridge-key auto-provisioning loop — the only call site — is deleted, T-62-25-02), and
+ * `screens/registration/attach-association-sync-bindings.ts` is deleted outright (D-28).
  */
 const ROLLOUT_EXEMPT: string[] = [
 	// Its call constructs the LAZY factory thunk; it never resolves a signer and
@@ -50,12 +87,6 @@ const ROLLOUT_EXEMPT: string[] = [
 	// Device-proof harness with no UI surface and no navigation context. Same
 	// class of exemption as D-11's dev-seed carve-out.
 	'engines/persistence-proof.ts',
-	// Its own header declares it "DEVELOPMENT / DEVICE-PROOF ATTACHMENT ONLY
-	// (D-01)", it is not a component (no hooks available), and
-	// BulkImportSyncScreen.tsx deliberately never surfaces this binding's error
-	// text (T-48-20-02). Routing here would violate an existing security
-	// decision.
-	'screens/registration/attach-sync-bindings.ts',
 ];
 
 /** Recursively lists every `.ts`/`.tsx` file under `dir`, excluding `__tests__` segments. */
@@ -108,18 +139,18 @@ describe('D-09/D-13/D-14 rollout completeness: every createDeviceSigner call sit
 		.map((f) => path.relative(SRC_ROOT, f))
 		.sort();
 
-	it('the call-site inventory has exactly 20 members (fail loud, with the full list, if this drifts)', () => {
-		if (invokingFiles.length !== 20) {
+	it('the call-site inventory has exactly 28 members (fail loud, with the full list, if this drifts)', () => {
+		if (invokingFiles.length !== 28) {
 			throw new Error(
-				`Expected exactly 20 createDeviceSigner(...) call-site files, found ` +
+				`Expected exactly 28 createDeviceSigner(...) call-site files, found ` +
 					`${invokingFiles.length}:\n${invokingFiles.join('\n')}`,
 			);
 		}
-		expect(invokingFiles).toHaveLength(20);
+		expect(invokingFiles).toHaveLength(28);
 	});
 
-	it('ROLLOUT_EXEMPT has exactly 3 entries', () => {
-		expect(ROLLOUT_EXEMPT).toHaveLength(3);
+	it('ROLLOUT_EXEMPT has exactly 2 entries', () => {
+		expect(ROLLOUT_EXEMPT).toHaveLength(2);
 	});
 
 	it('every entry in ROLLOUT_EXEMPT is actually present in the collected invocation set (no stale exemptions)', () => {

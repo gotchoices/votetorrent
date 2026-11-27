@@ -1,6 +1,6 @@
 import { useLayoutEffect } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
-import { ExtendedTheme, useNavigation, useTheme } from "@react-navigation/native";
+import { CommonActions, ExtendedTheme, useNavigation, useTheme } from "@react-navigation/native";
 import { useTranslation } from "react-i18next";
 import { globalStyles } from "../../theme/styles";
 import { ThemedText } from "../../components/ThemedText";
@@ -18,7 +18,10 @@ export default function EditElectionScreen() {
 
 	const onResend = undefined;
 
-	const onBackToTasks = undefined;
+	// `Home` is the tab navigator; CommonActions lets us target its Tasks tab
+	// without widening RootStackParamList's `Home: undefined`.
+	const onBackToTasks = () =>
+		navigation.dispatch(CommonActions.navigate({ name: "Home", params: { screen: "Tasks" } }));
 
 	return (
 		<View style={styles.content}>
@@ -44,7 +47,6 @@ export default function EditElectionScreen() {
 					backgroundColor={colors.success}
 					size="thin"
 					flex={true}
-					disabled={true}
 					onPress={onBackToTasks}
 				/>
 			</Footer>

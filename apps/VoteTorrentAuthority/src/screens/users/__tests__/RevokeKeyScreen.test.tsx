@@ -246,7 +246,7 @@ describe('RevokeKeyScreen — UKEY-02 / D-20 (49-05) per-key signing (screen lay
     expect(mockGoBack).not.toHaveBeenCalled();
   });
 
-  it('(4) every OTHER revokeKey failure still renders the raw engine error message (single-condition override, not a rewrite)', async () => {
+  it('(4) every OTHER revokeKey failure renders translated generic copy, never the raw engine message', async () => {
     mockRevokeKey.mockRejectedValueOnce(new Error('UserEngine.revokeKey: no EngineContext bound'));
     const tr = await render();
     await selectBothKeysAndSign(tr);
@@ -257,7 +257,8 @@ describe('RevokeKeyScreen — UKEY-02 / D-20 (49-05) per-key signing (screen lay
     });
 
     const rendered = JSON.stringify(tr.toJSON());
-    expect(rendered).toContain('UserEngine.revokeKey: no EngineContext bound');
+    expect(rendered).toContain('errorActionFailedGeneric');
+    expect(rendered).not.toContain('no EngineContext bound');
     expect(rendered).not.toContain('revokeKeySignatureInvalid');
   });
 });

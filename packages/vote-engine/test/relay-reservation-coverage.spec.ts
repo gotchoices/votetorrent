@@ -2,7 +2,7 @@
  * relay-reservation-coverage.spec.ts
  *
  * P2P-11 gap-closure regression lock, updated in lockstep with the 41-02 D-05
- * relay-qualified-listenAddrs fix (per 41-01's Node gate + probe findings).
+ * relay-reservation config (migrated to network.relayAddrs on cadre-core 0.12.0).
  *
  * History: 38-20 closed the prior wall by arming `replication-proof-runner.ts`
  * with the bare sentinel `listenAddrs: ['/p2p-circuit']` (matching
@@ -30,6 +30,10 @@
  * constant (the n=4 on-device harness drives 2 drones; `CadreNodeProvider.tsx`
  * is the production single-authority app and only ever needs 1).
  *
+ *
+ * Both apps' CadreNodeProvider.tsx now build their node options through @votetorrent/workflows
+ * common/cadre-node-options.ts, so this gate reads that one file (it also closes the old gap where the
+ * Voter provider was covered by neither lock).
  * Assertions are anchored to the `network: { ... hibernation: }` config-body
  * slice (extract-between-markers, mirrors relay-reachability-coverage.spec.ts's
  * extractConnectBody) for the listenAddrs-assignment/cast checks, and to the
@@ -59,8 +63,8 @@ function findRepoRoot (): string {
 }
 
 const REPO_ROOT = findRepoRoot()
-const CADRE_PROVIDER_PATH = join(
-  REPO_ROOT, 'apps', 'VoteTorrentAuthority', 'src', 'providers', 'CadreNodeProvider.tsx'
+const NODE_OPTIONS_PATH = join(
+  REPO_ROOT, 'packages', 'workflows', 'src', 'common', 'cadre-node-options.ts'
 )
 const PROOF_RUNNER_PATH = join(
   REPO_ROOT, 'apps', 'VoteTorrentAuthority', 'src', 'engines', 'replication-proof-runner.ts'
@@ -80,17 +84,21 @@ const CLUSTER_SIZE_MARKER = 'cluster' + 'Size'
 const BARE_SENTINEL_MARKER = 'listenAddrs' + ": ['/p2p" + "-circuit']"
 // The prior (38-20) empty-array regression shape — also must stay absent.
 const EMPTY_LISTEN_MARKER = 'listenAddrs' + ': []'
-// The qualified per-drone template-literal construction (RESEARCH Pattern 1) —
-// declared as a top-level constant above the network body in both files, then
-// referenced by identifier inside listenAddrs. Search the WHOLE file, not just
-// the network-body slice.
+// The qualified per-drone template-literal construction (RESEARCH Pattern 1).
+// RETIRED on cadre-core 0.12.0 and now asserted ABSENT: a `<relay>/p2p-circuit` entry in
+// network.listenAddrs is rejected at construction on a control node, because libp2p dials
+// that relay from inside `libp2p.start()` — during the bring-up quiet period that denies
+// exactly that dial. relayAddrs takes the bare relay addr and appends the suffix itself.
+// Search the WHOLE file, not just the network-body slice.
 const QUALIFIED_ADDR_TEMPLATE_MARKER = '${addr}' + '/p2p' + '-circuit'
-// The listenAddrs assignment must reference the qualified-addrs constant by
-// identifier (not a bare array literal) inside the network body.
-// Repointed for cadre-core 0.10.0: the 41-11 two-relay split is retired (upstream gave
-// each strand node its OWN derived transport peerId, so one relay is correct), and the
-// surviving single relay-qualified constant is the CONTROL one.
-const LISTEN_ADDRS_BY_IDENTIFIER_MARKER = 'listenAddrs' + ': ' + 'CONTROL_RELAY_LISTEN_ADDRS'
+// The relay assignment must reference the relay-addrs constant by identifier (not a bare
+// array literal) inside the network body.
+// Repointed for cadre-core 0.12.0: relays moved from `listenAddrs` to `relayAddrs`, and the
+// constant no longer pre-qualifies its entries — hence CONTROL_RELAY_ADDRS, not
+// CONTROL_RELAY_LISTEN_ADDRS.
+const RELAY_ADDRS_BY_IDENTIFIER_MARKER = 'relay' + 'Addrs' + ': ' + 'CONTROL_RELAY_ADDRS'
+// The retired pre-0.12.0 assignment. Must NOT reappear: cadre-core throws on it.
+const RETIRED_LISTEN_ADDRS_RELAY_MARKER = 'listen' + 'Addrs' + ': ' + 'CONTROL_RELAY'
 // The retired per-node-type override. Must NOT reappear: `strandNetwork` is dead config on
 // cadre-core 0.10.0 (zero occurrences in the published types/dist), so re-adding it would
 // silently do nothing while looking load-bearing.
@@ -175,14 +183,24 @@ function assertQualifiedListenAddrsShape (path: string, label: string): void {
   ).to.equal(true)
   expect(
     strippedFullSrc.includes(QUALIFIED_ADDR_TEMPLATE_MARKER),
-    `Expected ${label} to construct a relay-qualified per-drone listenAddrs entry ` +
-    '(the `${addr}/p2p-circuit` template literal, RESEARCH Pattern 1) — not merely a comment reference'
+    `Expected the relay-qualified per-drone template literal to be GONE from ${label}. ` +
+    'cadre-core 0.12.0 REJECTS a `<relay>/p2p-circuit` entry in network.listenAddrs on a ' +
+    'control node ("network.listenAddrs names a relay directly ... Move the relay to ' +
+    'network.relayAddrs, which reserves after bring-up"), because libp2p dials that relay ' +
+    'from inside libp2p.start() during the bring-up quiet period that denies exactly that ' +
+    'dial. relayAddrs takes the BARE relay addr and appends the suffix itself, so this ' +
+    'construction is not merely unnecessary now — it is fatal at start().'
+  ).to.equal(false)
+  expect(
+    body.includes(RELAY_ADDRS_BY_IDENTIFIER_MARKER),
+    `Expected ${label} network.relayAddrs to be assigned the relay-addrs constant by ` +
+    'identifier (CONTROL_RELAY_ADDRS), not a bare array literal'
   ).to.equal(true)
   expect(
-    body.includes(LISTEN_ADDRS_BY_IDENTIFIER_MARKER),
-    `Expected ${label} network.listenAddrs to be assigned the qualified-addrs constant by ` +
-    'identifier (CONTROL_RELAY_LISTEN_ADDRS), not a bare array literal'
-  ).to.equal(true)
+    body.includes(RETIRED_LISTEN_ADDRS_RELAY_MARKER),
+    `Expected the retired pre-0.12.0 relay-in-listenAddrs assignment to be gone from ` +
+    `${label}'s network config — cadre-core throws on it at construction`
+  ).to.equal(false)
   expect(
     stripCommentLines(fullSrc).includes(RETIRED_STRAND_OVERRIDE_MARKER),
     `Expected the retired per-node-type \`strandNetwork\` override to be GONE from ${label}. ` +
@@ -201,14 +219,14 @@ function assertQualifiedListenAddrsShape (path: string, label: string): void {
   ).to.equal(false)
 }
 
-describe('P2P-11/41-02: relay-qualified per-drone listenAddrs + reservationConcurrency + transportSymbol cast', () => {
+describe('P2P-11/41-02: network.relayAddrs (cadre-core 0.12.0) + reservationConcurrency + transportSymbol cast', () => {
   it('both apps/ source files exist at the expected paths', () => {
-    expect(existsSync(CADRE_PROVIDER_PATH), `Expected ${CADRE_PROVIDER_PATH}`).to.equal(true)
+    expect(existsSync(NODE_OPTIONS_PATH), `Expected ${NODE_OPTIONS_PATH}`).to.equal(true)
     expect(existsSync(PROOF_RUNNER_PATH), `Expected ${PROOF_RUNNER_PATH}`).to.equal(true)
   })
 
-  it('CadreNodeProvider.tsx: relay-qualified listenAddrs + reservationConcurrency + transportSymbol cast', () => {
-    assertQualifiedListenAddrsShape(CADRE_PROVIDER_PATH, 'CadreNodeProvider.tsx')
+  it('cadre-node-options.ts: relay-qualified listenAddrs + reservationConcurrency + transportSymbol cast', () => {
+    assertQualifiedListenAddrsShape(NODE_OPTIONS_PATH, 'cadre-node-options.ts')
   })
 
   it('replication-proof-runner.ts: relay-qualified listenAddrs + reservationConcurrency + transportSymbol cast', () => {
@@ -221,7 +239,7 @@ describe('P2P-11/41-02: relay-qualified per-drone listenAddrs + reservationConcu
     // this test, which is exactly the parity anchor's job (verified by reasoning: temporarily
     // reverting either file's listenAddrs/transports block to the retired shape reproduces a
     // failure in the corresponding assertQualifiedListenAddrsShape call above).
-    expect(() => assertQualifiedListenAddrsShape(CADRE_PROVIDER_PATH, 'CadreNodeProvider.tsx')).to.not.throw()
+    expect(() => assertQualifiedListenAddrsShape(NODE_OPTIONS_PATH, 'cadre-node-options.ts')).to.not.throw()
     expect(() => assertQualifiedListenAddrsShape(PROOF_RUNNER_PATH, 'replication-proof-runner.ts')).to.not.throw()
   })
 
@@ -238,7 +256,7 @@ describe('P2P-11/41-02: relay-qualified per-drone listenAddrs + reservationConcu
   })
 
   it('no superMajorityThreshold/clusterSize literal is introduced in either edited file', () => {
-    const providerSrc = readFileSync(CADRE_PROVIDER_PATH, 'utf8')
+    const providerSrc = readFileSync(NODE_OPTIONS_PATH, 'utf8')
     const runnerSrc = readFileSync(PROOF_RUNNER_PATH, 'utf8')
     expect(providerSrc.includes(SUPER_MAJORITY_MARKER)).to.equal(false)
     expect(providerSrc.includes(CLUSTER_SIZE_MARKER)).to.equal(false)
@@ -247,7 +265,7 @@ describe('P2P-11/41-02: relay-qualified per-drone listenAddrs + reservationConcu
   })
 
   it('no GSD phase number appears on a runtime (non-comment) line of either edited file', () => {
-    const providerLines = runtimeLines(readFileSync(CADRE_PROVIDER_PATH, 'utf8'))
+    const providerLines = runtimeLines(readFileSync(NODE_OPTIONS_PATH, 'utf8'))
     const runnerLines = runtimeLines(readFileSync(PROOF_RUNNER_PATH, 'utf8'))
     const isOffender = (l: string): boolean =>
       l.includes(PHASE_38_20_MARKER) || l.includes(PHASE_38_21_MARKER) ||

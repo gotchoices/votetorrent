@@ -1,0 +1,11 @@
+{
+  "base": "base-device",
+  "ops": [
+    {
+      "op": "write",
+      "path": "64-device-evidence/checks/camera-gate/attempt-1/android/verdict.txt",
+      "content": "VERDICT: PASS\nleg: android\n"
+    }
+  ],
+  "expect": "retry-without-failure"
+}

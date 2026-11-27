@@ -1,15 +1,26 @@
 import type { TransportSyncState } from "../../components/TransportStatusCard";
+import {
+	runAssociationSync,
+	type PeerSyncCounts,
+	type SyncBindingContext,
+	type TransportSyncReport,
+} from "@votetorrent/workflows/authority";
+
+export type { PeerSyncCounts, SyncBindingContext, TransportSyncReport };
+export { runAssociationSync };
 
 /**
  * bulk-import-sync-model.ts — the pure, RN-safe view-model for the Bulk Import / Sync screen
  * (D-01/D-11). Owns the binding injection seam (the registry below), the per-card state
  * resolution (`resolveTransportCardState`), and the error-row derivation (`toSyncErrorRefs`).
- * Plain TypeScript only — no React, no `react-native`, no `@votetorrent/*` import of any kind —
- * so every rule this file owns is unit-testable without a renderer.
+ * Plain TypeScript only — no React, no `react-native`, and no `@votetorrent/*` import except the
+ * shared sync-report contract from `@votetorrent/workflows/authority` (67-09; itself plain
+ * TypeScript with no import of its own) — so every rule this file owns is unit-testable without a
+ * renderer.
  *
  * (b) THE BUNDLING RULE. `FilesystemRegistrationTransport` (48-09) imports `node:fs/promises` and
  * is therefore NOT RN-bundleable: it carries no `transport/index.ts` barrel and is unreachable
- * from `@votetorrent/vote-engine`'s root barrel for exactly that reason. Neither this file nor the
+ * from the engine package's root barrel for exactly that reason. Neither this file nor the
  * screen may import ANY transport module — by barrel OR by deep path — because either route would
  * drag `node:fs` toward the Metro bundle and reproduce the failure class Phase 44's `@peculiar`
  * device-boot wall cost two plans to unstick, invisibly to jest (jest runs on Node, where the
@@ -18,11 +29,27 @@ import type { TransportSyncState } from "../../components/TransportStatusCard";
  * the app already reaches its engines through `useApp().getEngine()` instead of importing engine
  * classes directly.
  *
- * (c) THE D-11 RULE. The peer-cluster leg ships **code-complete, unverified**: P2P-11 is
- * device-REFUTED, its wall has moved repeatedly, and this project has already lived through
- * "implemented but unproven" being read as "done" more than once. This file attaches NO peer
- * binding, and `SyncBindingId` deliberately excludes a peer/p2p member so a peer binding cannot be
- * registered at this seam without an out-loud type change — see `INERT_PEER_SYNC` below.
+ * (c) THE D-11/D-23/D-28 RULE, updated 62-21/62-25. The peer-cluster leg ships **code-complete,
+ * unverified**: P2P-11 is device-REFUTED, its wall has moved repeatedly, and this project has
+ * already lived through "implemented but unproven" being read as "done" more than once. Through
+ * 62-20 this file deliberately attached no peer binding. **62-21 is the plan that changes that**:
+ * per D-28, the `'peer'` binding IS attached in every build (no `__DEV__` gate, no configuration —
+ * see `attach-peer-sync-binding.ts`), and per D-31 its card (`PeerTransportStatusCard.tsx`, which
+ * replaces the retired `Experimental`-prefixed peer card) reports real numeric pending/synced/failed counts
+ * read from the P2P transport's own reports. The peer leg itself remains code-complete and
+ * unverified on devices (D-23, proof debt against P2P-11) — attaching it unconditionally and
+ * showing real counts does not change that; `PeerTransportStatusCard`'s hardcoded warning frame
+ * and verbatim caveat are what keep that distinction visible to the officer.
+ *
+ * **62-25 closes D-28 the rest of the way**: association processing (first association AND D-46
+ * re-association) is now driven ENTIRELY by the `'peer'` binding's `processPending` step — there is
+ * no association REST or filesystem app binding of any kind. The `'rest'` binding registered by
+ * `attach-sync-bindings.ts` is REGISTRATION-ONLY, and is attached in every build (D-29) the same
+ * unconditional way the `'peer'` binding is — it is simply inert (refuses before any network call)
+ * until an officer saves a bridge URL. `mergeTransportSyncReports`/`runAssociationSync` below stay
+ * exported: `runAssociationSync` is still the ordering/pre-filter helper the `'peer'` binding's
+ * association leg uses; `mergeTransportSyncReports` is retained for any future binding composition
+ * but currently has no caller (the association REST composition it served is retired).
  *
  * (d) THE PII RULE. A sync error carries an **identifier** and nothing else. A failing item is a
  * registration payload containing real registrant PII, so `SyncErrorRef` and
@@ -43,27 +70,16 @@ import type { TransportSyncState } from "../../components/TransportStatusCard";
  *
  * **48-23, 2026-08-06: `'peer'` is now admitted.** This member's addition IS that out-loud step.
  * The peer-cluster leg it routes to is **code-complete, unverified** (D-11) — admitting the id at
- * this seam does not change that, and it does not change what the peer card SHOWS:
- * `ExperimentalTransportStatusCard` (48-17) still accepts only `disabled?` and `onTrySync`, with
- * no state channel of any kind. Widening this union changes what the peer control's press CAN DO
- * (resolve a `'peer'` binding through the seam below) — never what the card renders.
+ * this seam does not change that. Through 62-20 the peer card showed no state at all
+ * (the retired `Experimental`-prefixed peer card, `disabled?`/`onTrySync` only). **62-21** replaces that card
+ * with `PeerTransportStatusCard` (D-31), which DOES render real numeric counts — but every count,
+ * the caveat, the heading and the border are still structurally fixed by the card itself, never by
+ * a prop a caller controls (see that component's own doc comment).
  */
 export type SyncBindingId = "filesystem" | "rest" | "peer";
 
-/**
- * What a binding's `syncNow()` resolves to. `errorItemIds` is an array of `string` and NOT a
- * record type — there is structurally no field through which a payload value, a requester name,
- * or an HTTP response body could travel from a transport to this screen. A host adapting 48-09's
- * `skipped` accumulator or 48-10's non-2xx error mapping takes the filename / item id and drops
- * everything else. Do NOT widen this to carry a `reason`, a `message`, or a `detail` — doing so
- * would reopen exactly the leak 48-10 closed at the binding.
- */
-export interface TransportSyncReport {
-	syncedAt: string;
-	imported: number;
-	pending: number;
-	errorItemIds: readonly string[];
-}
+// `TransportSyncReport`, `SyncBindingContext` and `PeerSyncCounts` (with their PII-rule doc comments)
+// moved to `packages/workflows/src/authority/sync-report.ts` (67-09) and are re-exported above.
 
 /**
  * A view-model shape, NOT `IRegistrationRequestTransport` itself. The screen must never hold a
@@ -72,10 +88,15 @@ export interface TransportSyncReport {
  * documents, or `RestRegistrationTransport` polling its endpoint — in this handle and registers
  * it via `registerSyncBinding`. The transport seam's own discipline is unchanged and unweakened:
  * a handle never receives, derives, or holds key material.
+ *
+ * 62-21 widens `syncNow` to take an OPTIONAL `SyncBindingContext` (additive — the filesystem/REST
+ * bindings' existing zero-arg calls stay valid) and adds an OPTIONAL `readCounts`, which the peer
+ * binding implements (D-31) to report numeric counts without signing or submitting anything.
  */
 export interface SyncBindingHandle {
 	id: SyncBindingId;
-	syncNow: () => Promise<TransportSyncReport>;
+	syncNow: (context?: SyncBindingContext) => Promise<TransportSyncReport>;
+	readCounts?: (context: SyncBindingContext) => Promise<PeerSyncCounts>;
 }
 
 /**
@@ -102,12 +123,13 @@ export interface TransportCardEntry {
 const bindings = new Map<SyncBindingId, SyncBindingHandle>();
 
 /**
- * Stores `handle` by `handle.id`. This is the attachment point for the two real D-01 bindings —
- * the REST binding is RN-constructible (built-in `fetch` only) and is attached wherever its
- * `baseUrl` is configured, typically at app bootstrap; the filesystem binding is attached by the
- * Node-side host that owns the drop directory (the bulk-import bridge process, or the on-device
- * harness leg 48-22 drives), because `node:fs/promises` is not Metro-resolvable and can never be
- * attached from inside the RN app itself.
+ * Stores `handle` by `handle.id`. This is the attachment point for the real D-01/D-28/D-29
+ * bindings — the REST binding (registration only, D-29) is RN-constructible (built-in `fetch`
+ * only) and is attached at app boot in EVERY build, reading its target URL from the replicated
+ * `AuthorityIntakePolicy` at every sync rather than from a configured constant; the filesystem
+ * binding is attached by the Node-side host that owns the drop directory (the bulk-import bridge
+ * process, or the on-device harness leg 48-22 drives), because `node:fs/promises` is not
+ * Metro-resolvable and can never be attached from inside the RN app itself.
  *
  * This plan registers nothing here — it owns the seam and the screen, not the app's transport
  * configuration. A later host wiring plan is responsible for calling this function.
@@ -142,9 +164,10 @@ export function clearSyncBindings(): void {
  * instead of this export.** `INERT_PEER_SYNC` stays exported anyway — 48-20's own test suite
  * asserts it exists and returns `undefined` (Suite F), and this export is retained precisely so
  * that assertion keeps documenting the transition it was written to describe: the peer card WAS
- * structurally inert through 48-20, and is now wired through the seam. The peer-cluster leg
- * itself remains **code-complete, unverified** (D-11) either way — this export's retirement from
- * the call site changes nothing about that.
+ * structurally inert through 48-20, and is now wired through the seam. **62-21: `PeerTransportStatusCard`
+ * is the live card this wiring now drives** — the peer-cluster leg itself remains **code-complete,
+ * unverified** (D-23) either way; this export's retirement from the call site changes nothing about
+ * that.
  */
 export const INERT_PEER_SYNC = (): void => {};
 
@@ -221,7 +244,7 @@ export function resolveTransportCardState(entry: TransportCardEntry): TransportC
  * choice: the officer saw a card and a press that reported nothing.
  *
  * What this widening does NOT do: it softens the D-11 posture nowhere. The peer card still carries
- * no state channel at all (`ExperimentalTransportStatusCardProps` is exactly
+ * no state channel at all (its props type was exactly
  * `{disabled?, onTrySync}`) and still renders its unconditional warning treatment; this function
  * still reads ONLY `errorItemIds`, never `imported`/`pending`/`syncedAt`; and a caught transport
  * error's `message` is never placed into a report in the first place
@@ -246,3 +269,55 @@ export function toSyncErrorRefs(
 	}
 	return refs;
 }
+
+// ---------------------------------------------------------------------------
+// D-19 — the association processing trigger, composed onto the SAME "rest"
+// binding registration already uses.
+// ---------------------------------------------------------------------------
+
+/**
+ * D-19 SHAPE DECISION (51-10): `SyncBindingId` stays exactly
+ * `"filesystem" | "rest" | "peer"` — NO fourth `"association"` member was
+ * added. `BulkImportSyncScreen.tsx` is untouched by this plan and renders
+ * exactly three cards, each with its own "Sync Now" press wired to
+ * `runSync(id)`; a fourth `SyncBindingId` with no card ever calling
+ * `runSync("association")` would register a binding NOTHING in the running
+ * app ever invokes — the exact "correct code, unreachable by the app"
+ * defect class this phase is scored against (`e64e112`, the Phase 48
+ * registration stack the voter never referenced). D-19 also says ONE
+ * trigger, and a fourth card would itself be a NEW pressable control, which
+ * is what the rejected-alternatives note in `51-CONTEXT.md` calls out.
+ *
+ * Instead, `attach-association-sync-bindings.ts` COMPOSES onto the existing
+ * `"rest"` id through this module's own registry seam
+ * (`resolveSyncBinding`/`registerSyncBinding` — exactly the "attached by
+ * whichever host CAN construct them" mechanism this file's header already
+ * documents): it resolves whatever `"rest"` handle registration's
+ * `attach-sync-bindings.ts` already registered, wraps it so `syncNow()`
+ * calls the ORIGINAL handle first and then drives association processing,
+ * merges the two `TransportSyncReport`s with `mergeTransportSyncReports`
+ * below, and re-registers the combined handle under the SAME `"rest"` id.
+ * The REST card's existing "Sync Now" press is therefore the one press that
+ * now drives both legs. `TransportSyncReport` keeps its 4 fields unchanged
+ * — merging counts and concatenating `errorItemIds` needs no new field.
+ *
+ * Composition ordering is load-bearing: `attach-sync-bindings.ts` must
+ * attach FIRST (registering the real registration `"rest"` handle) before
+ * `attach-association-sync-bindings.ts` attaches (capturing that handle as
+ * its `previous`, then overwriting the registry entry with the combined
+ * one). `AppProvider.tsx` sequences the two calls in that order.
+ */
+export function mergeTransportSyncReports(
+	a: TransportSyncReport,
+	b: TransportSyncReport,
+): TransportSyncReport {
+	return {
+		syncedAt: b.syncedAt,
+		imported: a.imported + b.imported,
+		pending: a.pending + b.pending,
+		errorItemIds: [...a.errorItemIds, ...b.errorItemIds],
+	};
+}
+
+// `skipsAsAlreadyImported` and `runAssociationSync` (with the D-19 ordering doc comment) moved to
+// `packages/workflows/src/authority/sync-report.ts` (67-09); `runAssociationSync` is re-exported above.

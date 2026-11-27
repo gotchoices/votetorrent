@@ -1,0 +1,34 @@
+{
+  "fixtures": [
+    {
+      "address": "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWA3Vv8dEqvzTpBJvVdKPQnH4fBQnpvvzzD4Nw5wLKKZKz",
+      "expected": "valid",
+      "why": "well-formed ip4/tcp/p2p multiaddr — both the real parser and the jest stub agree it is valid"
+    },
+    {
+      "address": "/dns4/relay.example.com/tcp/443/wss/p2p/12D3KooWA3Vv8dEqvzTpBJvVdKPQnH4fBQnpvvzzD4Nw5wLKKZKz",
+      "expected": "valid",
+      "why": "well-formed dns4/tcp/wss/p2p multiaddr — both parsers agree it is valid; also the example shown in the errRelayInvalid copy"
+    },
+    {
+      "address": "not-a-multiaddr",
+      "expected": "invalid",
+      "why": "does not start with '/' — the ONLY invalid fixture both the real parser and the jest stub reject, so it is the sole address safe for the mock-backed screen test. Note: bare '/' is deliberately NOT used anywhere in this corpus — the real parser ACCEPTS it while the stub REJECTS it, a reverse asymmetry that would make a mock-backed test pass for the wrong reason"
+    },
+    {
+      "address": "/ip4/999.999.999.999/tcp/4001",
+      "expected": "invalid",
+      "why": "not a valid IPv4 octet range — the real parser rejects this with a ValidationError, but the jest stub only checks for a leading '/' and accepts it (discriminating fixture)"
+    },
+    {
+      "address": "/nope/1/foo/2",
+      "expected": "invalid",
+      "why": "unknown protocol name — the real parser rejects this with an UnknownProtocolError, but the jest stub accepts any '/'-prefixed string (discriminating fixture)"
+    },
+    {
+      "address": "/ip4/1.2.3.4/tcp/notaport",
+      "expected": "invalid",
+      "why": "port is not an integer — the real parser rejects this with a ValidationError, but the jest stub does not grammar-check segment values (discriminating fixture)"
+    }
+  ]
+}

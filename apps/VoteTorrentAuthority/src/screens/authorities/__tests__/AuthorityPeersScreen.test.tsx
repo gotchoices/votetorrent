@@ -32,7 +32,7 @@
 
 import React from "react";
 import renderer from "react-test-renderer";
-import { StyleSheet } from "react-native";
+import { StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 import type { AuthorityPeer } from "@votetorrent/vote-core";
 
 // ---------------------------------------------------------------------------
@@ -470,8 +470,8 @@ describe("AuthorityPeersScreen — D-08 / D-13 ('cap' scope)", () => {
 		expect(rowFlat.flexDirection).toBe("row");
 
 		const [cardSlot, removeWrapper] = row.props.children as [
-			{ props: { style?: unknown } },
-			{ props: { style?: unknown } }
+			{ props: { style?: StyleProp<ViewStyle> } },
+			{ props: { style?: StyleProp<ViewStyle> } }
 		];
 		const cardFlat = StyleSheet.flatten(cardSlot.props.style) as Record<string, unknown>;
 		expect(cardFlat.flex).toBe(1);

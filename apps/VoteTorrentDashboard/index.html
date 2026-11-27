@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<!--
+		Content Security Policy. This origin holds the officer's device key and every
+		row of the local copy, so scripts are limited to this origin.
+		- script-src: the production build ships no inline script. The one sha256 hash
+		  admits only @vitejs/plugin-react's dev preamble (the inline module script it
+		  injects for fast refresh), without which the dev server cannot start the app
+		  under 'self'. The hash is base64(sha256(preambleCode)) with __BASE__ = "/";
+		  pairing-screen.test.mjs recomputes it from the installed plugin.
+		- style-src 'unsafe-inline': Vite's dev server injects styles as <style> tags.
+		- connect-src: the peer stack dials relays over WebSocket on whatever host the
+		  network's bootstrap list names, so wss: stays open; ws: serves host-local test
+		  rigs (an https page cannot open ws: anyway, mixed content blocks it).
+		- object-src, base-uri and form-action are closed.
+		- frame-ancestors and violation reporting are ignored in a meta policy; they
+		  need an HTTP header where the dashboard is hosted.
+	-->
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Z2/iFzh9VMlVkEOar1f/oSHWwQk3ve1qk/C2WdsC4Xk='; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: ws:; object-src 'none'; base-uri 'none'; form-action 'none'" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>VoteTorrent Authority Dashboard</title>
+	<link rel="stylesheet" href="/src/app.css" />
+</head>
+<body>
+	<div id="root"></div>
+	<script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

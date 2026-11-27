@@ -129,7 +129,7 @@ let mockTasks: any[] = [taskFor(PENDING_READ)];
 let mockScopes: string[] | undefined = ["vrg"];
 
 const mockGetRegistrationRequest = jest.fn(async (_id: string) => mockCurrentRead);
-const mockGetPriorRejections = jest.fn(async (_requesterKey: string) => {
+const mockGetPriorRejections = jest.fn(async (_requesterKey: string, _excludeRequestId?: string) => {
 	if (mockPriorRejectionsError) throw mockPriorRejectionsError;
 	return mockPriorRejections;
 });
@@ -139,6 +139,9 @@ const mockRegistrationEngine = {
 	getRegistrationRequest: mockGetRegistrationRequest,
 	getPriorRejections: mockGetPriorRejections,
 	rejectRegistrationRequest: mockRejectRegistrationRequest,
+	// 62-27: D-44 duplicate reads. Defaults keep every pre-existing case on its original path.
+	getLikelyDuplicateRequests: jest.fn(async (_requestId: string) => []),
+	getDuplicateClosure: jest.fn(async (_requestId: string) => undefined),
 };
 
 const mockGetRequestedSignatures = jest.fn(async (_pending: boolean) => mockTasks);
@@ -149,6 +152,8 @@ const mockSignatureTasksEngine = {
 	getRequestedSignatures: mockGetRequestedSignatures,
 	getSignatureDigest: mockGetSignatureDigest,
 	completeSignature: mockCompleteSignature,
+	// 62-27: D-11 display-only status; null = no progress note.
+	getRegistrantSigningStatus: jest.fn(async (_requestId: string) => null),
 };
 
 const mockGetEngine = jest.fn(async (name: string): Promise<any> => {
@@ -190,6 +195,10 @@ jest.mock("react-i18next", () => ({
 }));
 
 jest.mock("@react-navigation/native", () => ({
+	useFocusEffect: (cb: () => void | (() => void)) => {
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		require("react").useEffect(() => cb(), [cb]);
+	},
 	// Distinct sentinel values for every color token so a color assertion can
 	// never pass by accidental equality between two tokens.
 	dark: false,
@@ -229,7 +238,7 @@ jest.mock("../../../engines/device-signer", () => ({
 }));
 
 jest.mock("../../../hooks/useCurrentOfficerScopes", () => ({
-	useCurrentOfficerScopes: (_authorityId: string) => ({ scopes: mockScopes, loading: false }),
+	useCurrentOfficerScopes: (_authorityId: string) => ({ scopes: mockScopes, loading: false, refresh: () => undefined }),
 }));
 
 jest.mock("../../../providers/SettingsProvider", () => ({
@@ -492,10 +501,73 @@ describe("RegistrationRequestApprovalScreen — Group A (render order, D-03)", (
 // Group B — the D-07 checklist gate and the accept ceremony.
 // ---------------------------------------------------------------------------
 
+describe("RegistrationRequestApprovalScreen — payload field labels (never raw keys)", () => {
+	it("known Voter fields render their translation keys; unknown fields render a humanized label", async () => {
+		const tr = await renderScreen();
+		expect(textOf(tr, "registration-request-approval-summary-label-public-lastname")).toBe(
+			"registrationRequestFieldLastName"
+		);
+		expect(textOf(tr, "registration-request-approval-summary-label-public-firstname")).toBe(
+			"registrationRequestFieldFirstName"
+		);
+		// Not submitted by the Voter app — humanized fallback, not the raw key.
+		expect(textOf(tr, "registration-request-approval-summary-label-public-district")).toBe("District");
+		expect(textOf(tr, "registration-request-approval-summary-label-public-note")).toBe("Note");
+		expect(textOf(tr, "registration-request-approval-summary-label-private-ssn")).toBe("Ssn");
+	});
+
+	it("buildRequestSummaryRows: every field the Voter submits maps to a labelKey and no row label is a raw camelCase key", () => {
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		const { buildRequestSummaryRows } = require("../RegistrationRequestApprovalScreen");
+		const rows = buildRequestSummaryRows({
+			...PENDING_READ,
+			payload: {
+				electionId: "e-1",
+				registrant: { id: "r-1", authorityId: "auth-1", expiration: FUTURE_EXPIRATION },
+				public: { firstName: "María", lastName: "Fernández" },
+				private: {
+					expiration: FUTURE_EXPIRATION,
+					details: [
+						{ name: "dob", value: "01/02/1990" },
+						{ name: "email", value: "m@example.org" },
+						{ name: "phone", value: "5551234567" },
+						{ name: "addressLine1", value: "1 Main St" },
+						{ name: "addressLine2", value: "Apt 2" },
+						{ name: "addressLine3", value: "Springfield" },
+						{ name: "homeCounty_code2", value: "x" },
+					],
+				},
+				selective: { expiration: FUTURE_EXPIRATION, details: [{ name: "party", value: "independent" }] },
+			},
+		});
+		const byKey = new Map(rows.map((r: any) => [r.key, r]));
+		const expected: Record<string, string> = {
+			"public-firstname": "registrationRequestFieldFirstName",
+			"public-lastname": "registrationRequestFieldLastName",
+			"private-dob": "registrationRequestFieldDob",
+			"private-email": "registrationRequestFieldEmail",
+			"private-phone": "registrationRequestFieldPhone",
+			"private-addressline1": "registrationRequestFieldAddressLine1",
+			"private-addressline2": "registrationRequestFieldAddressLine2",
+			"private-addressline3": "registrationRequestFieldAddressLine3",
+			"selective-party": "registrationRequestFieldParty",
+		};
+		for (const [key, labelKey] of Object.entries(expected)) {
+			expect((byKey.get(key) as any)?.labelKey).toBe(labelKey);
+		}
+		expect((byKey.get("private-homecounty-code2") as any)?.label).toBe("Home county code 2");
+		for (const row of rows as any[]) {
+			if (row.label !== undefined) expect(row.label).not.toMatch(/[a-z][A-Z]|_/);
+		}
+	});
+});
+
 describe("RegistrationRequestApprovalScreen — Group B (D-07 gate, accept ceremony)", () => {
-	it("5. at mount Approve is disabled and Reject is not", async () => {
+	it("5. at mount Approve and Reject are both disabled (D-07: Reject mirrors the engine's checklist gate)", async () => {
 		const tr = await renderScreen();
 		expect(isDisabled(tr, "registration-request-approval-approve")).toBe(true);
+		expect(isDisabled(tr, "registration-request-approval-reject")).toBe(true);
+		press(tr, "verification-checklist-toggle-id");
 		expect(isDisabled(tr, "registration-request-approval-reject")).toBe(false);
 	});
 
@@ -634,7 +706,8 @@ describe("RegistrationRequestApprovalScreen — Group B (D-07 gate, accept cerem
 		mockTasks = []; // no 'registrant' task materialized for this request yet
 		const tr = await renderScreen();
 		press(tr, "verification-checklist-toggle-id");
-		expect(isDisabled(tr, "registration-request-approval-approve")).toBe(false);
+		// Approve is not offered without a task; the handler is still driven directly to prove it fails closed.
+		expect(isDisabled(tr, "registration-request-approval-approve")).toBe(true);
 
 		await pressAsync(tr, "registration-request-approval-approve");
 
@@ -642,6 +715,12 @@ describe("RegistrationRequestApprovalScreen — Group B (D-07 gate, accept cerem
 		expect(mockCompleteSignature).toHaveBeenCalledTimes(0);
 		expect(mockGoBack).not.toHaveBeenCalled();
 		expect(exists(tr, "registration-request-approval-error")).toBe(true);
+	});
+
+	it("10c. R3: getPriorRejections is called with the read's own requesterKey AND its own requestId, so the request cannot cite itself", async () => {
+		await renderScreen();
+
+		expect(mockGetPriorRejections.mock.calls[0]).toEqual([PENDING_READ.requesterKey, PENDING_READ.requestId]);
 	});
 });
 
@@ -674,6 +753,7 @@ describe("RegistrationRequestApprovalScreen — Group C (D-06 reject gate, no-si
 
 	it("13. a non-empty reason enables Confirm; confirming calls rejectRegistrationRequest once with the TRIMMED reason", async () => {
 		const tr = await renderScreen();
+		press(tr, "verification-checklist-toggle-id");
 		press(tr, "registration-request-approval-reject");
 
 		const input = tr.root.findByProps({ testID: "reject-reason-reason-input" });
@@ -693,6 +773,7 @@ describe("RegistrationRequestApprovalScreen — Group C (D-06 reject gate, no-si
 
 	it("14. the no-sign discipline: getSignatureDigest is called zero times on reject, and completeSignature carries the blank triple with no sign/decision", async () => {
 		const tr = await renderScreen();
+		press(tr, "verification-checklist-toggle-id");
 		press(tr, "registration-request-approval-reject");
 
 		const input = tr.root.findByProps({ testID: "reject-reason-reason-input" });
@@ -722,6 +803,7 @@ describe("RegistrationRequestApprovalScreen — Group C (D-06 reject gate, no-si
 		mockCompleteSignature.mockRejectedValueOnce(new Error("task close failed"));
 
 		const tr = await renderScreen();
+		press(tr, "verification-checklist-toggle-id");
 		press(tr, "registration-request-approval-reject");
 		const input = tr.root.findByProps({ testID: "reject-reason-reason-input" });
 		renderer.act(() => {
@@ -744,6 +826,7 @@ describe("RegistrationRequestApprovalScreen — Group C (D-06 reject gate, no-si
 		mockRejectRegistrationRequest.mockRejectedValueOnce(new Error("rejection failed"));
 
 		const tr = await renderScreen();
+		press(tr, "verification-checklist-toggle-id");
 		press(tr, "registration-request-approval-reject");
 		const input = tr.root.findByProps({ testID: "reject-reason-reason-input" });
 		renderer.act(() => {
@@ -752,8 +835,73 @@ describe("RegistrationRequestApprovalScreen — Group C (D-06 reject gate, no-si
 		await pressAsync(tr, "reject-reason-confirm");
 
 		expect(mockCompleteSignature).not.toHaveBeenCalled();
-		expect(exists(tr, "registration-request-approval-error")).toBe(true);
+		expect(exists(tr, "reject-reason-error")).toBe(true);
 		expect(mockGoBack).not.toHaveBeenCalled();
+	});
+
+	it("15b. (D-07) with the card open, unticking the checklist disables Confirm and shows the gate hint; re-ticking restores it", async () => {
+		const tr = await renderScreen();
+		press(tr, "verification-checklist-toggle-id");
+		press(tr, "registration-request-approval-reject");
+		const input = tr.root.findByProps({ testID: "reject-reason-reason-input" });
+		renderer.act(() => {
+			input.props.onChangeText("dup");
+		});
+		expect(isDisabled(tr, "reject-reason-confirm")).toBe(false);
+		expect(exists(tr, "reject-reason-gate-hint")).toBe(false);
+		press(tr, "verification-checklist-toggle-id");
+		expect(isDisabled(tr, "reject-reason-confirm")).toBe(true);
+		expect(textOf(tr, "reject-reason-gate-hint")).toBe("registrationRequestRejectChecklistRequired");
+		press(tr, "verification-checklist-toggle-id");
+		expect(isDisabled(tr, "reject-reason-confirm")).toBe(false);
+	});
+
+	it("15c. (D-07) an ungated confirm invoked directly sets the checklist-required copy, rethrows, and spends no signer or engine call", async () => {
+		const tr = await renderScreen();
+		press(tr, "verification-checklist-toggle-id");
+		press(tr, "registration-request-approval-reject");
+		press(tr, "verification-checklist-toggle-id");
+		// Read the handler AFTER the untick so it closes over the unmet checklist.
+		const onConfirm = tr.root.findAll((n) => typeof n.props.onConfirm === "function" && "decisionGateMet" in n.props)[0].props.onConfirm;
+		let thrown: unknown;
+		await renderer.act(async () => {
+			try {
+				await onConfirm("dup");
+			} catch (e) {
+				thrown = e;
+			}
+		});
+		expect(thrown).toBeInstanceOf(Error);
+		expect(mockCreateDeviceSigner).not.toHaveBeenCalled();
+		expect(mockRejectRegistrationRequest).not.toHaveBeenCalled();
+		expect(jsonSubtreeText(tr, "reject-reason-error")).toContain("registrationRequestRejectChecklistRequired");
+	});
+
+	it("15d. (T-62-52-01) a non-signing reject failure renders the fixed failed copy, never the engine text", async () => {
+		mockRejectRegistrationRequest.mockRejectedValueOnce(
+			new Error("RegistrationEngine.rejectRegistrationRequest: decision.checklist does not satisfy the D-07 gate (req-1)")
+		);
+		const tr = await renderScreen();
+		press(tr, "verification-checklist-toggle-id");
+		press(tr, "registration-request-approval-reject");
+		const input = tr.root.findByProps({ testID: "reject-reason-reason-input" });
+		renderer.act(() => {
+			input.props.onChangeText("dup");
+		});
+		await pressAsync(tr, "reject-reason-confirm");
+		const shown = jsonSubtreeText(tr, "reject-reason-error");
+		expect(shown).toContain("registrationRequestRejectFailed");
+		expect(shown).not.toContain("RegistrationEngine");
+		expect(shown).not.toContain("D-07");
+	});
+
+	it("15e. the reject card host pads the bottom by the safe-area inset", async () => {
+		const tr = await renderScreen();
+		press(tr, "verification-checklist-toggle-id");
+		press(tr, "registration-request-approval-reject");
+		const host = tr.root.findByProps({ testID: "registration-request-approval-reject-card-host" });
+		const style = Array.isArray(host.props.style) ? Object.assign({}, ...host.props.style.flat(5)) : host.props.style;
+		expect(typeof style.paddingBottom).toBe("number");
 	});
 
 	it("15. dismiss restores the footer and still fires zero engine calls", async () => {
@@ -884,7 +1032,8 @@ describe("RegistrationRequestApprovalScreen — Group F (never-log privacy rule)
 		});
 		const errorTr = await renderScreen();
 		const errorSubtreeText = jsonSubtreeText(errorTr, "registration-request-approval-error");
-		expect(errorSubtreeText).toContain("harmless-load-failure-token");
+		expect(errorSubtreeText).toContain("registrationRequestLoadFailed");
+		expect(errorSubtreeText).not.toContain("harmless-load-failure-token");
 		expect(errorSubtreeText).not.toContain(PII_SENTINEL);
 
 		const tr = await renderScreen();
@@ -1033,22 +1182,28 @@ describe("RegistrationRequestApprovalScreen — Group I (48-26 gap 4: footer sta
 });
 
 // ---------------------------------------------------------------------------
-// Group G — the untouched-file source gate.
+// Group G — SignatureTaskScreen.tsx's titleKey source gate.
 // ---------------------------------------------------------------------------
+//
+// 57-06 (R4) legitimately touches SignatureTaskScreen.tsx to narrow titleKey's
+// key type with Exclude<SignatureTask["signatureType"], "registrant">, so the
+// file's source now DOES carry the token "registrant" (in the Exclude<> type
+// and its explanatory comments) — the prior "carries no 'registrant' token at
+// all" assertion is now the wrong invariant to check. What must still hold,
+// and is asserted below at the source level since react-test-renderer cannot
+// see a sibling file: the titleKey MAP itself gains no `registrant` entry,
+// and its six existing entries are unchanged.
 
-describe("RegistrationRequestApprovalScreen — Group G (SignatureTaskScreen.tsx left alone)", () => {
-	it("23. SignatureTaskScreen.tsx carries no 'registrant' token and its titleKey record has exactly six entries — asserted at the source level, since react-test-renderer cannot see a file that was never touched", () => {
-		// react-test-renderer proves what RENDERS; it cannot prove a sibling
-		// file was left alone. This is a source-level gate by necessity,
-		// mirroring phase47Routes.test.tsx's own source-gate rationale.
+describe("RegistrationRequestApprovalScreen — Group G (SignatureTaskScreen.tsx titleKey map)", () => {
+	it("23. SignatureTaskScreen.tsx's titleKey record has exactly eight entries (six plus the two co-signer tasks) and none of them is 'registrant' — asserted at the source level, since react-test-renderer cannot see a sibling file", () => {
 		const filePath = path.join(__dirname, "..", "..", "tasks", "SignatureTaskScreen.tsx");
 		const source = fs.readFileSync(filePath, "utf8");
 
-		expect(/registrant/i.test(source)).toBe(false);
-
 		const titleKeyMatch = source.match(/const titleKey:[\s\S]*?= \{([\s\S]*?)\};/);
 		expect(titleKeyMatch).not.toBeNull();
-		const entryCount = (titleKeyMatch![1].match(/^\s*"?[a-zA-Z-]+"?:\s*"[^"]+",?\s*$/gm) ?? []).length;
-		expect(entryCount).toBe(6);
+		const mapBody = titleKeyMatch![1];
+		const entryCount = (mapBody.match(/^\s*"?[a-zA-Z-]+"?:\s*"[^"]+",?\s*$/gm) ?? []).length;
+		expect(entryCount).toBe(8);
+		expect(/^\s*"?registrant"?:/m.test(mapBody)).toBe(false);
 	});
 });

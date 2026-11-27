@@ -30,6 +30,9 @@ jest.mock("react-i18next", () => ({
 
 const mockNavigate = jest.fn();
 const mockGoBack = jest.fn();
+const mockReplace = jest.fn();
+// Off by default: most specs use a navigation object without `replace`, like a plain mock.
+let mockNavigationHasReplace = false;
 jest.mock("@react-navigation/native", () => ({
 	useTheme: () => ({
 		colors: {
@@ -49,7 +52,10 @@ jest.mock("@react-navigation/native", () => ({
 			light: "sentinel-light",
 		},
 	}),
-	useNavigation: () => ({ navigate: mockNavigate, goBack: mockGoBack }),
+	useNavigation: () =>
+		mockNavigationHasReplace
+			? { navigate: mockNavigate, goBack: mockGoBack, replace: mockReplace }
+			: { navigate: mockNavigate, goBack: mockGoBack },
 }));
 
 const mockGetOrCreateDeviceUser = jest.fn();
@@ -126,8 +132,38 @@ function inlineErrorMessage(tr: renderer.ReactTestRenderer): string {
 	return (matches[0]?.props as { message?: string } | undefined)?.message ?? "";
 }
 
+
+// A known-valid relay from the shared fixture corpus, so the relay check passes for real.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const VALID_RELAY: string = (
+	require("../../../../__fixtures__/relay-address-fixtures.json") as {
+		fixtures: Array<{ address: string; expected: "valid" | "invalid" }>;
+	}
+).fixtures.find((f) => f.expected === "valid")!.address;
+
+/** CREATE now checks every required field up front (network/authority/admin name, title, a relay,
+ * the signature) before any engine or biometric work. Fill them so specs exercise the path they
+ * are about rather than that check. `relay` is omitted by specs that test the empty-relay case. */
+const FILLED_NAME = "Test Net";
+async function fillRequiredFields(tr: renderer.ReactTestRenderer, opts: { relay?: string } = {}) {
+	await renderer.act(async () => {
+		for (const n of findByProps(tr, (p) => p.title === "name" && typeof p.onChangeText === "function")) {
+			(n.props as { onChangeText: (v: string) => void }).onChangeText(FILLED_NAME);
+		}
+		for (const n of findByProps(tr, (p) => p.title === "title" && typeof p.onChangeText === "function")) {
+			(n.props as { onChangeText: (v: string) => void }).onChangeText("Clerk");
+		}
+		if (opts.relay !== undefined) {
+			for (const n of findByProps(tr, (p) => p.placeholder === "multiaddress" && typeof p.onChangeText === "function")) {
+				(n.props as { onChangeText: (v: string) => void }).onChangeText(opts.relay);
+			}
+		}
+	});
+}
+
 /** Drives the screen to a signed, CREATE-pressed state so handleCreate's try body runs. */
 async function pressSignThenCreate(tr: renderer.ReactTestRenderer) {
+	await fillRequiredFields(tr, { relay: VALID_RELAY });
 	await renderer.act(async () => {
 		getSignButton(tr).props.onPress();
 	});
@@ -170,24 +206,82 @@ describe("AddNetworkScreen — 49-16 Gap A closure: routes NO_KEY_PROVISIONED th
 		expect(createButton.props.disabled).toBe(false);
 	});
 
-	it("a plain Error (no code) still reaches setErrorMessage with its own text, not a deviceSigningError copy key", async () => {
+	it("logs the NO_KEY_PROVISIONED routing as info, never as handleCreate error (no dev error toast on a first Create)", async () => {
+		const rejection = Object.assign(new Error("no device signing key provisioned"), {
+			code: "NO_KEY_PROVISIONED",
+		});
+		mockGetOrCreateDeviceUser.mockRejectedValue(rejection);
+		const info = jest.spyOn(console, "info").mockImplementation(() => undefined);
+		const error = jest.spyOn(console, "error").mockImplementation(() => undefined);
+
+		try {
+			const tr = await renderScreen();
+			await pressSignThenCreate(tr);
+
+			expect(error.mock.calls.filter((c) => c[0] === "handleCreate error:")).toHaveLength(0);
+			expect(info).toHaveBeenCalledWith("[network-create] routed to signing-key setup:", "Error");
+		} finally {
+			info.mockRestore();
+			error.mockRestore();
+		}
+	});
+
+	it("a plain Error still logs handleCreate error", async () => {
+		mockGetOrCreateDeviceUser.mockRejectedValue(new Error("boom"));
+		const error = jest.spyOn(console, "error").mockImplementation(() => undefined);
+
+		try {
+			const tr = await renderScreen();
+			await pressSignThenCreate(tr);
+
+			expect(error).toHaveBeenCalledWith("handleCreate error:", "Error");
+		} finally {
+			error.mockRestore();
+		}
+	});
+
+	it("a plain Error (no code) shows the translated create-failure copy, never its text, and is not a deviceSigningError copy key", async () => {
 		mockGetOrCreateDeviceUser.mockRejectedValue(new Error("boom"));
 
 		const tr = await renderScreen();
 		await pressSignThenCreate(tr);
 
 		expect(mockNavigate).not.toHaveBeenCalled();
-		expect(inlineErrorMessage(tr)).toBe("boom");
+		expect(inlineErrorMessage(tr)).toBe("networkCreateFailed");
+		expect(JSON.stringify(tr.toJSON())).not.toContain("boom");
 	});
 
 	it("mustSignBeforeCreating gate is unchanged: pressing CREATE without signing sets that error and never calls getOrCreateDeviceUser", async () => {
 		const tr = await renderScreen();
+		// Everything else filled, so the signature is the ONLY missing requirement and its
+		// dedicated copy (not the combined "missing fields" message) is what shows.
+		await fillRequiredFields(tr, { relay: VALID_RELAY });
 		await renderer.act(async () => {
 			await getCreateButton(tr).props.onPress();
 		});
 
 		expect(mockGetOrCreateDeviceUser).not.toHaveBeenCalled();
 		expect(inlineErrorMessage(tr)).toBe("mustSignBeforeCreating");
+	});
+
+	it("an empty form reports every missing requirement at once, never starts the device-key ceremony, and clears once they are all met", async () => {
+		const tr = await renderScreen();
+		await renderer.act(async () => {
+			await getCreateButton(tr).props.onPress();
+		});
+
+		// More than one requirement is missing, so the combined message (not a single-cause one).
+		expect(inlineErrorMessage(tr)).toBe("createMissingFields");
+		expect(mockGetOrCreateDeviceUser).not.toHaveBeenCalled();
+
+		// Sign FIRST, then fill: the last change is a field edit, so only the form-tracking effect
+		// (not the Sign button's own mustSign clear) can remove the message.
+		await renderer.act(async () => {
+			getSignButton(tr).props.onPress();
+		});
+		expect(inlineErrorMessage(tr)).toBe("createMissingFields");
+		await fillRequiredFields(tr, { relay: VALID_RELAY });
+		expect(inlineErrorMessage(tr)).toBe("");
 	});
 });
 
@@ -248,6 +342,28 @@ describe("AddNetworkScreen — 49-19: the recovery-key ceremony survives handleC
 		expect(mockGoBack).not.toHaveBeenCalled();
 	});
 
+	it("REPLACES this screen with the ceremony on a native stack, so finishing it does not land back on the filled form", async () => {
+		// Release APK, 2026-10-31: the ceremony was pushed on top of Add Network, and its own
+		// `goBack()` exit returned the officer to this form although the network existed.
+		mockNavigationHasReplace = true;
+		try {
+			mockGetDeviceProvisioningRecord.mockResolvedValue({
+				recoveryPublicKeyCompressedHex: RECOVERY_KEY,
+			});
+			mockGetSummary.mockResolvedValue({ id: "u1", activeKeys: [{ key: SIGNING_KEY }] });
+
+			const tr = await renderScreen();
+			await pressSignThenCreate(tr);
+
+			expect(mockReplace).toHaveBeenCalledTimes(1);
+			expect(mockReplace).toHaveBeenCalledWith("ProvisionSigningKey", { reason: "first-run" });
+			expect(mockNavigate).not.toHaveBeenCalled();
+			expect(mockGoBack).not.toHaveBeenCalled();
+		} finally {
+			mockNavigationHasReplace = false;
+		}
+	});
+
 	it("still goes back when the recovery key is already registered — the gate must not strand the officer on this screen", async () => {
 		mockGetDeviceProvisioningRecord.mockResolvedValue({
 			recoveryPublicKeyCompressedHex: RECOVERY_KEY,
@@ -274,4 +390,11 @@ describe("AddNetworkScreen — 49-19: the recovery-key ceremony survives handleC
 		expect(mockNavigate).not.toHaveBeenCalled();
 		expect(mockGoBack).toHaveBeenCalledTimes(1);
 	});
+});
+
+// The duplicate-create gate keeps in-flight creates in module state (it must outlive one screen);
+// a commit a spec leaves pending must not refuse the next spec's create of the same network.
+beforeEach(() => {
+	// eslint-disable-next-line @typescript-eslint/no-var-requires
+	require("../networkCreateOutcome").resetNetworkCreatesInFlightForTests();
 });

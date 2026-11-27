@@ -15,6 +15,7 @@
  */
 
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import renderer from 'react-test-renderer';
 
 jest.mock('react-native-vector-icons/FontAwesome6', () => 'FontAwesome6');
@@ -109,6 +110,19 @@ function styleValue(tr: renderer.ReactTestRenderer, testID: string, key: string)
   return withKey?.[key];
 }
 
+/**
+ * The CLICKABLE element's margin: read from CustomButton's real styles (via the rendered
+ * touchable inside the slot), so changing CustomButton.marginVertical breaks the pin below.
+ */
+function buttonVerticalMargin(tr: renderer.ReactTestRenderer, slotTestID: string): number {
+  const slot = tr.root.findByProps({ testID: slotTestID });
+  const touchable = slot.findAll(
+    (n) => n.props.accessibilityRole === 'button' && n.props.style !== undefined,
+  )[0];
+  const flat = StyleSheet.flatten(touchable.props.style) as { marginVertical?: number };
+  return flat.marginVertical ?? 0;
+}
+
 function buttonBackground(tr: renderer.ReactTestRenderer, wrapperTestID: string): unknown {
   const wrapper = tr.root.findByProps({ testID: wrapperTestID });
   const withBg = [wrapper, ...wrapper.findAll(() => true)].find((node) => 'backgroundColor' in node.props);
@@ -135,6 +149,7 @@ function renderCard(overrides: Record<string, unknown> = {}) {
     requesterName: 'Jane Doe',
     onConfirm,
     onDismiss,
+    decisionGateMet: true,
     testIDPrefix: PREFIX,
     ...overrides,
   };
@@ -336,6 +351,7 @@ describe('RejectReasonCard — D-06', () => {
           requesterName="Ada Vasquez"
           onConfirm={jest.fn().mockResolvedValue(undefined)}
           onDismiss={jest.fn()}
+          decisionGateMet
           testIDPrefix={PREFIX}
         />,
       );
@@ -343,5 +359,51 @@ describe('RejectReasonCard — D-06', () => {
 
     expect(tr.root.findByProps({ testID: `${PREFIX}-reason-input` }).props.value).toBe('');
     expect(isDisabled(tr, `${PREFIX}-confirm`)).toBe(true);
+  });
+
+  // STRUCTURAL pin only: react-test-renderer runs no Yoga pass, so this is NOT a
+  // geometry proof. CustomButton's `flex` (flex:1 + alignSelf:stretch) assumes a ROW
+  // parent. In a column slot it zeroed the vertical flex-basis (32px on Pixel_8), and
+  // dropping it left a one-line thin button at 36dp. So each slot must be a ROW. The
+  // real proof is scripts/assert-card-button-geometry.mjs against a device dump.
+  it('13. structural: both button slots are row-direction so CustomButton flex stretches (not a geometry proof)', () => {
+    const { tr } = renderCard();
+    for (const id of ['reject-reason-dismiss', 'reject-reason-confirm']) {
+      expect(styleValue(tr, id, 'flexDirection')).toBe('row');
+      // The clickable button is the slot minus its own vertical margins (flex stretch), so the
+      // slot floor must be 48dp of button PLUS 2 x marginVertical. A bare 48 floor never bound:
+      // the 36dp thin button plus 16dp of margin is already 52dp.
+      expect(
+        (styleValue(tr, id, 'minHeight') as number) - 2 * buttonVerticalMargin(tr, id),
+      ).toBeGreaterThanOrEqual(48);
+    }
+  });
+
+  it('14. decisionGateMet=false disables Confirm even with a valid reason, shows the gate hint, and a direct press fires nothing', () => {
+    const { tr, onConfirm } = renderCard({ decisionGateMet: false });
+    type(tr, PREFIX, 'dup');
+    expect(isDisabled(tr, `${PREFIX}-confirm`)).toBe(true);
+    expect(tr.root.findByProps({ testID: `${PREFIX}-gate-hint` })).toBeTruthy();
+    expect(treeText(tr)).toContain('registrationRequestRejectChecklistRequired');
+    press(tr, `${PREFIX}-confirm`);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it('15. decisionGateMet=true: no gate hint, Confirm enabled once a reason is typed', () => {
+    const { tr } = renderCard({ decisionGateMet: true });
+    type(tr, PREFIX, 'dup');
+    expect(tr.root.findAllByProps({ testID: `${PREFIX}-gate-hint` }).length).toBe(0);
+    expect(isDisabled(tr, `${PREFIX}-confirm`)).toBe(false);
+  });
+
+  it('RC1: errorMessage renders inside the card only when non-empty', () => {
+    const empty = renderCard();
+    expect(empty.tr.root.findAllByProps({ testID: `${PREFIX}-error` }).length).toBe(0);
+    const blank = renderCard({ errorMessage: '' });
+    expect(blank.tr.root.findAllByProps({ testID: `${PREFIX}-error` }).length).toBe(0);
+    const shown = renderCard({ errorMessage: 'Something failed' });
+    const card = shown.tr.root.findByProps({ testID: `${PREFIX}-card` });
+    expect(card.findAllByProps({ testID: `${PREFIX}-error` }).length).toBeGreaterThan(0);
+    expect(treeText(shown.tr)).toContain('Something failed');
   });
 });

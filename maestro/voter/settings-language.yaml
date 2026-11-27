@@ -1,0 +1,31 @@
+# Journey: switch the app language to Spanish and back (Settings > Language).
+# The choice persists in AsyncStorage, so this flow always ends on English. Tabs are found by
+# testID, so they work in either language; the assertions read the translated tab labels.
+appId: ${APP_ID}
+name: "Voter: language switch"
+tags:
+  - voter
+  - smoke
+  - settings
+env:
+  APP_ID: "${typeof VOTER_APP_ID == 'undefined' ? 'org.votetorrent.voter' : VOTER_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/voter/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- runFlow:
+    file: ../subflows/voter/open-tab.yaml
+    env:
+      TAB: settings
+- tapOn: "Español"
+- extendedWaitUntil:
+    visible: "Votar"
+    timeout: 10000
+- assertVisible: "Unirse a una red"
+- tapOn: "English"
+- extendedWaitUntil:
+    visible: "Vote"
+    timeout: 10000
+- assertVisible: "Join a network"

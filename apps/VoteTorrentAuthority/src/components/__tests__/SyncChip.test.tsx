@@ -12,6 +12,8 @@
  *   - 'offline'    → renders a red link-slash icon
  *   - Sync state is driven by mocked useCadreNode() hook (event-driven, D-10)
  *   - No setInterval / polling (D-10 hard requirement)
+ *   - D-14 (56-10): a non-null configFault takes precedence over syncState —
+ *     asserted below in the "configFault precedence" describe block.
  */
 
 import React from 'react';
@@ -35,7 +37,7 @@ import renderer from 'react-test-renderer';
 // ---------------------------------------------------------------------------
 
 jest.mock('../../providers/CadreNodeProvider', () => ({
-  useCadreNode: jest.fn(() => ({ syncState: 'connected', node: null, connectedPeers: jest.fn() })),
+  useCadreNode: jest.fn(() => ({ syncState: 'connected', configFault: null, node: null, connectedPeers: jest.fn() })),
 }));
 
 // ESM-only ("type": "module", exports map exposes only an `import` condition) and
@@ -109,8 +111,8 @@ describe('SyncChip — P2P-07', () => {
     jest.clearAllMocks();
   });
 
-  it('renders a wifi icon (connected state) when syncState is "connected"', () => {
-    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'connected', node: null, connectedPeers: jest.fn() });
+  it('renders a wifi icon (connected state) when syncState is "connected" (configFault: null, non-regression)', () => {
+    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'connected', configFault: null, node: null, connectedPeers: jest.fn() });
     const tree = renderChip().toJSON();
     const treeStr = JSON.stringify(tree);
     // Icon name should be wifi (connected state)
@@ -119,16 +121,16 @@ describe('SyncChip — P2P-07', () => {
     expect(treeStr).not.toMatch(/link-slash/i);
   });
 
-  it('renders an activity-indicator style icon when syncState is "syncing"', () => {
-    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'syncing', node: null, connectedPeers: jest.fn() });
+  it('renders an activity-indicator style icon when syncState is "syncing" (configFault: null, non-regression)', () => {
+    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'syncing', configFault: null, node: null, connectedPeers: jest.fn() });
     const tree = renderChip().toJSON();
     const treeStr = JSON.stringify(tree);
     // In syncing state the icon name should reference rotation/activity (e.g. 'rotate' or 'sync' or 'spinner')
     expect(treeStr).toMatch(/sync|rotate|spinner|activity/i);
   });
 
-  it('renders a link-slash icon (offline state) when syncState is "offline"', () => {
-    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'offline', node: null, connectedPeers: jest.fn() });
+  it('renders a link-slash icon (offline state) when syncState is "offline" (configFault: null, non-regression)', () => {
+    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'offline', configFault: null, node: null, connectedPeers: jest.fn() });
     const tree = renderChip().toJSON();
     const treeStr = JSON.stringify(tree);
     // 'wifi-slash' is FontAwesome6 Pro-only (renders as tofu); offline uses the free 'link-slash'.
@@ -144,8 +146,125 @@ describe('SyncChip — P2P-07', () => {
   });
 
   it('uses useCadreNode hook to read syncState (not props, not polling)', () => {
-    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'offline', node: null, connectedPeers: jest.fn() });
+    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'offline', configFault: null, node: null, connectedPeers: jest.fn() });
     renderChip();
     expect(useCadreNode).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-14 (56-10): configFault takes precedence over syncState.
+// ---------------------------------------------------------------------------
+describe('SyncChip — configFault precedence (D-14)', () => {
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('renders the not-configured presentation when configFault is non-null, even when syncState is "connected"', () => {
+    (useCadreNode as jest.Mock).mockReturnValue({
+      syncState: 'connected',
+      configFault: { kind: 'missing', reason: 'empty-address-list' },
+      node: null,
+      connectedPeers: jest.fn(),
+    });
+    const tree = renderChip().toJSON();
+    const treeStr = JSON.stringify(tree);
+    expect(treeStr).toMatch(/triangle-exclamation/i);
+    // Fault beats sync state — the 'connected' presentation must NOT leak through.
+    expect(treeStr).not.toMatch(/"wifi"/);
+  });
+
+  it('renders the not-configured presentation for every syncState value when configFault is non-null', () => {
+    for (const syncState of ['connected', 'syncing', 'offline'] as const) {
+      (useCadreNode as jest.Mock).mockReturnValue({
+        syncState,
+        configFault: { kind: 'malformed', reason: 'invalid-address' },
+        node: null,
+        connectedPeers: jest.fn(),
+      });
+      const tree = renderChip().toJSON();
+      expect(JSON.stringify(tree)).toMatch(/triangle-exclamation/i);
+    }
+  });
+
+  it('the rendered label contains no digits and no phase/decision markers', () => {
+    (useCadreNode as jest.Mock).mockReturnValue({
+      syncState: 'offline',
+      configFault: { kind: 'missing', reason: 'no-config-document' },
+      node: null,
+      connectedPeers: jest.fn(),
+    });
+    const tree = renderChip().toJSON();
+    // Extract the label TEXT NODE specifically, not the whole serialized tree
+    // (which also carries numeric style values like fontSize/size — a whole-
+    // tree digit scan would false-positive on those). The chip is [icon, Text];
+    // the Text node's children is the array of rendered text content.
+    const treeNode = tree as unknown as { children: Array<{ type: string; children: string[] }> };
+    const textNode = treeNode.children.find((child) => child.type === 'Text');
+    const label = textNode?.children?.join('') ?? '';
+    // The mocked react-i18next `t` echoes the key verbatim (t('syncNotConfigured')
+    // -> 'syncNotConfigured'), so this proves the CORRECT key is wired, and the
+    // key name itself carries no digits or phase/decision markers.
+    expect(label).toBe('syncNotConfigured');
+    expect(label).not.toMatch(/\d/);
+    expect(label).not.toMatch(/Phase|D-1|56/);
+  });
+
+  it('carries a redundant textual cue (the label text node), not colour alone', () => {
+    (useCadreNode as jest.Mock).mockReturnValue({
+      syncState: 'offline',
+      configFault: { kind: 'missing', reason: 'no-address-list' },
+      node: null,
+      connectedPeers: jest.fn(),
+    });
+    const tree = renderChip().toJSON();
+    // ThemedText renders as a native Text host node whose child is the label
+    // string — this asserts the actual text node is present, not merely that
+    // the icon glyph name shows up in the serialized tree.
+    const treeStr = JSON.stringify(tree);
+    expect(treeStr).toContain('syncNotConfigured');
+  });
+});
+
+// todo 2026-09-11-optimystic-commit-success-hides-unresolvable-cohort: writes on this phone that no
+// other member holds yet. A minimal tracker double -- the hooks read only these members.
+describe('SyncChip — writes not shared yet', () => {
+  const { CommitShareProvider } = require('../../hooks/useCommitShare');
+  function fakeTracker(unsharedCount: number) {
+    return { unsharedCount, subscribe: () => () => undefined, actionState: () => 'unknown', waitingActionCount: () => 0 };
+  }
+  function renderWith(unsharedCount: number): string {
+    let tr!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tr = renderer.create(
+        <CommitShareProvider tracker={fakeTracker(unsharedCount) as never}>
+          <SyncChip />
+        </CommitShareProvider>,
+      );
+    });
+    return JSON.stringify(tr.toJSON());
+  }
+  afterEach(() => jest.clearAllMocks());
+
+  it('connected with unshared writes shows the not-shared presentation instead of Connected', () => {
+    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'connected', configFault: null, node: null, connectedPeers: jest.fn() });
+    const out = renderWith(3);
+    expect(out).toMatch(/cloud-arrow-up/);
+    expect(out).toMatch(/syncUnshared/);
+    expect(out).not.toMatch(/syncConnected/);
+  });
+
+  it('control: zero unshared writes keeps the plain Connected chip', () => {
+    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'connected', configFault: null, node: null, connectedPeers: jest.fn() });
+    const out = renderWith(0);
+    expect(out).toMatch(/syncConnected/);
+    expect(out).not.toMatch(/cloud-arrow-up/);
+  });
+
+  it('offline and a config fault both take precedence over unshared writes', () => {
+    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'offline', configFault: null, node: null, connectedPeers: jest.fn() });
+    expect(renderWith(2)).toMatch(/syncOffline/);
+    (useCadreNode as jest.Mock).mockReturnValue({ syncState: 'connected', configFault: { kind: 'missing', reason: 'empty-address-list' }, node: null, connectedPeers: jest.fn() });
+    expect(renderWith(2)).toMatch(/syncNotConfigured/);
   });
 });

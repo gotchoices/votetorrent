@@ -1,0 +1,85 @@
+--- a/apps/VoteTorrentAuthority/src/navigation/index.tsx
++++ b/apps/VoteTorrentAuthority/src/navigation/index.tsx
+@@ -201,6 +201,7 @@
+ 				// Without this, Android joins the icon glyph's empty text to the label and
+ 				// screen readers announce ", Elections".
+ 				tabBarAccessibilityLabel: t(route.name.toLowerCase()),
++				tabBarButtonTestID: `tab-${route.name.toLowerCase()}`,
+ 				tabBarIcon: ({ color }) => {
+ 					// One icon family for every tab (previously E/T/A letters beside a gear).
+ 					const iconMap: Record<string, string> = {
+--- a/apps/VoteTorrentAuthority/src/screens/networks/AddNetworkScreen.tsx
++++ b/apps/VoteTorrentAuthority/src/screens/networks/AddNetworkScreen.tsx
+@@ -508,7 +508,7 @@
+ 				</ThemedText>
+ 
+ 				<View style={styles.section}>
+-					<CustomTextInput title={t("name")} value={networkName} onChangeText={setNetworkName} />
++					<CustomTextInput testID="add-network-name" title={t("name")} value={networkName} onChangeText={setNetworkName} />
+ 					<CustomTextInput
+ 						title={t("imageUrl")}
+ 						value={networkImageUrl}
+@@ -580,6 +580,7 @@
+ 						{t("primaryAuthority")}
+ 					</ThemedText>
+ 					<CustomTextInput
++						testID="add-network-authority-name"
+ 						title={t("name")}
+ 						value={authorityName}
+ 						onChangeText={setAuthorityName}
+@@ -602,6 +603,7 @@
+ 						/>
+ 					) : null}
+ 					<CustomTextInput
++						testID="add-network-domain"
+ 						title={t("domainName")}
+ 						value={domainName}
+ 						onChangeText={setDomainName}
+@@ -629,6 +631,7 @@
+ 					{relayAddresses.map((address, index) => (
+ 						<CustomTextInput
+ 							key={index}
++							testID={`add-network-relay-${index}`}
+ 							placeholder={t("multiaddress")}
+ 							value={address}
+ 							onChangeText={(value) => updateRelayAddress(index, value)}
+@@ -647,18 +650,21 @@
+ 						{t("initialAdministrator")}
+ 					</ThemedText>
+ 					<CustomTextInput
++						testID="add-network-admin-name"
+ 						title={t("name")}
+ 						value={adminName}
+ 						placeholder={t("yourNameOnPermanentRecord")}
+ 						onChangeText={setAdminName}
+ 					/>
+ 					<CustomTextInput
++						testID="add-network-admin-title"
+ 						title={t("title")}
+ 						value={adminTitle}
+ 						placeholder={t("yourTitleOnPermanentRecord")}
+ 						onChangeText={setAdminTitle}
+ 					/>
+ 					<CustomButton
++						testID="add-network-sign"
+ 						title={t("sign")}
+ 						icon={isSigned ? "square-check" : "square"}
+ 						backgroundColor={colors.important}
+@@ -686,6 +692,7 @@
+ 					</ThemedText>
+ 				) : null}
+ 				<CustomButton
++					testID="add-network-create"
+ 					title={creating ? t("creating") : t("create")}
+ 					icon={creating ? "spinner" : "floppy-disk"}
+ 					// Neutral grey until every requirement is met, green once CREATE can succeed. Still
+--- a/apps/VoteTorrentAuthority/package.json
++++ b/apps/VoteTorrentAuthority/package.json
+@@ -10,6 +10,7 @@
+ 		"verify:relay-multiaddr": "node scripts/assert-relay-multiaddr-fixtures.mjs",
+ 		"start": "react-native start",
+ 		"test": "jest",
++		"test:maestro": "../../maestro/scripts/run.sh --app authority",
+ 		"test:node": "jest --config jest.node.config.js",
+ 		"test:require-exports": "node --test test/node/workspace-require-exports.test.mjs",
+ 		"typecheck": "tsc --noEmit",

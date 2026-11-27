@@ -124,6 +124,21 @@ any_failed() {
   return 1
 }
 
+# R5a (57-03): shared platform-tag exclusion list for the cancel legs' post-dismissal
+# error-count checks — a name in this set is a platform-emitted tag whose ` E ` lines share the
+# app's pid (StrongBox-fallback keygen noise, GC pauses, ART) but are not evidence of an
+# app-authored fault. Both leg_cancel_negative_button and leg_cancel_back_key read this SAME
+# variable so the two legs cannot drift from each other. Matched against the threadtime-format
+# tag field (` E TagName:`), never a bare substring, so an app-authored message that happens to
+# contain one of these words cannot be excluded by accident.
+PLATFORM_TAG_EXCLUSIONS=' E (KeyStore|Perf|ART):'
+
+# R5d (57-03): set by dump_ui() alongside its existing stdout (a dump-file path) contract, which
+# stays UNCHANGED for every caller. Callers that need to distinguish "could not observe" from
+# "observed absent" read this immediately after calling dump_ui — see leg_cancel_negative_button /
+# leg_cancel_back_key.
+DUMP_UI_STATUS="ok"
+
 # ── Preflights (all fail loudly, none proceed silently) ─────────────────────
 preflight() {
   echo "[ceremony] Preflight: adb device state ..."
@@ -252,6 +267,40 @@ preflight() {
     exit 1
   fi
 
+  # R5b (57-03): the ceremony attributes device behaviour to source it may not actually be
+  # running. Compare the installed APK's own lastUpdateTime against the newest commit under
+  # packages/attestation-native/android — the native Kotlin surface every leg here exercises — and
+  # abort rather than silently measure a stale build. The human-readable `lastUpdateTime=` string
+  # dumpsys prints is converted to an epoch ON THE DEVICE (its own toybox `date -d`), never
+  # host-side, so this comparison is immune to host/device timezone or date-binary differences —
+  # same reasoning as the clock-skew check just above.
+  echo "[ceremony] Preflight: installed APK freshness vs packages/attestation-native/android ..."
+  local installed_update_str installed_update_epoch newest_source_epoch
+  installed_update_str=$(adb ${ADBD} shell dumpsys package "${PACKAGE}" 2>/dev/null | grep -m1 'lastUpdateTime=' | sed -E 's/^[[:space:]]*lastUpdateTime=//' | tr -d '\r')
+  if [ -n "${installed_update_str}" ]; then
+    installed_update_epoch=$(adb ${ADBD} shell "date -d '${installed_update_str}' +%s" 2>/dev/null | tr -d '\r')
+  fi
+  newest_source_epoch=$(git log -1 --format=%ct -- packages/attestation-native/android 2>/dev/null || true)
+  if [ -z "${installed_update_epoch:-}" ] || ! echo "${installed_update_epoch:-}" | grep -qE '^[0-9]+$' \
+    || [ -z "${newest_source_epoch}" ] || ! echo "${newest_source_epoch}" | grep -qE '^[0-9]+$'; then
+    echo "[ceremony] PREFLIGHT FAIL: could not read a usable installed-APK update time (raw dumpsys value: '${installed_update_str:-<none>}', device epoch: '${installed_update_epoch:-<none>}') or the newest packages/attestation-native/android commit time ('${newest_source_epoch:-<none>}') — an unreadable freshness check is an instrument gap, never a pass. Rebuild and install: 'cd apps/VoteTorrentAuthority/android && ./gradlew installDebug'." >&2
+    exit 1
+  fi
+  if [ "${installed_update_epoch}" -lt "${newest_source_epoch}" ]; then
+    echo "[ceremony] PREFLIGHT FAIL: the installed APK (lastUpdateTime epoch=${installed_update_epoch}) predates the newest packages/attestation-native/android change (committed epoch=${newest_source_epoch}) — this ceremony would measure device behaviour against STALE Kotlin. Rebuild and install: 'cd apps/VoteTorrentAuthority/android && ./gradlew installDebug'." >&2
+    exit 1
+  fi
+  echo "[ceremony]   -> installed APK (lastUpdateTime epoch=${installed_update_epoch}) is at or after the newest attestation-native/android change (epoch=${newest_source_epoch})."
+
+  echo "[ceremony] Preflight: installed build is debuggable (a release APK ignores Metro) ..."
+  local pkg_flags
+  pkg_flags=$(adb ${ADBD} shell dumpsys package "${PACKAGE}" 2>/dev/null | grep -m1 -i 'pkgFlags=' || true)
+  if ! echo "${pkg_flags}" | grep -qi 'DEBUGGABLE'; then
+    echo "[ceremony] PREFLIGHT FAIL: the installed '${PACKAGE}' build does not report DEBUGGABLE (pkgFlags: '${pkg_flags:-<not found>}') — a release APK ignores Metro's live JS bundle, so this ceremony would measure a stale JS bundle in addition to stale native code. Rebuild and install the DEBUG variant: 'cd apps/VoteTorrentAuthority/android && ./gradlew installDebug'." >&2
+    exit 1
+  fi
+  echo "[ceremony]   -> installed build reports DEBUGGABLE."
+
   echo "[ceremony] Preflights OK."
 }
 
@@ -336,19 +385,31 @@ dump_ui() {
   # negative) rather than silently returning a prior ceremony's leftover
   # content as a false positive. Retry up to 3 times (observed under load:
   # a single dump attempt can transiently fail even while the app is
-  # genuinely fully rendered) before giving up and returning whatever (or
-  # empty) content was last captured — callers treat "no match" as the
-  # correct negative either way.
+  # genuinely fully rendered) before giving up.
+  #
+  # R5d (57-03): if all 3 retries still fail to produce a well-formed hierarchy, that is "could
+  # not observe" — NOT the same fact as "observed absent" — and every prior version of this
+  # function returned whatever partial/empty content it last captured with no way for a caller to
+  # tell the two apart, so a genuine instrument gap read as a false negative. The stdout contract
+  # (a dump-file path, unconditionally echoed) is UNCHANGED — existing callers that only ever
+  # treated "no match" as a negative keep doing exactly that. Callers that need the distinction
+  # read the shared DUMP_UI_STATUS variable immediately after calling dump_ui.
   local attempt
+  DUMP_UI_STATUS="unobservable"
   for attempt in 1 2 3; do
     adb ${ADBD} shell rm -f /sdcard/window_dump.xml >/dev/null 2>&1
     adb ${ADBD} shell uiautomator dump /sdcard/window_dump.xml >/dev/null 2>&1
     adb ${ADBD} pull /sdcard/window_dump.xml "${out}" >/dev/null 2>&1 || : > "${out}"
     if [ -s "${out}" ] && grep -q "</hierarchy>" "${out}" 2>/dev/null; then
+      DUMP_UI_STATUS="ok"
       break
     fi
     sleep 1
   done
+  if [ "${DUMP_UI_STATUS}" = "unobservable" ]; then
+    echo "[ceremony] WARNING: dump_ui could not obtain a well-formed uiautomator hierarchy after 3 attempts — attempting a dumpsys activity fallback for confirmation." >&2
+    adb ${ADBD} shell dumpsys activity activities 2>/dev/null | grep -i "mResumedActivity\|mCurrentFocus" >&2 || true
+  fi
   echo "${out}"
 }
 
@@ -406,7 +467,7 @@ _find_nondegenerate_bounds() {
 # before this fix); only if every `text=` match is degenerate (or absent) does this
 # fall back to a `content-desc=` match with non-degenerate bounds.
 tap_on_text() {
-  local label="$1" dump="$2"
+  local label="$1" dump="$2" expect="${3:-}"
   local bounds
   bounds=$(_find_nondegenerate_bounds "text" "${label}" "${dump}" || true)
   if [ -z "${bounds}" ]; then
@@ -423,8 +484,40 @@ tap_on_text() {
   y2=$(echo "${bounds}" | sed -E 's/\[([0-9]+),([0-9]+)\]\[([0-9]+),([0-9]+)\]/\4/')
   cx=$(( (x1 + x2) / 2 ))
   cy=$(( (y1 + y2) / 2 ))
-  adb ${ADBD} shell input tap "${cx}" "${cy}"
-  return 0
+
+  # 57-UAT round 2 (Redmi 8, Android 10 / API 29) — TWO measured defects fixed here.
+  #
+  # (1) PRESS DURATION. An instantaneous `input tap` on this device's RN controls is
+  #     unreliable. Measured A/B inside a reproduced failure: ONE `input tap` on the
+  #     Settings tab was a no-op (the app stayed on Elections), while THREE taps, or a
+  #     single ~120ms press, navigated. A zero-distance `input swipe` gives the press a
+  #     real duration; it is a strict superset of the old behaviour on devices where the
+  #     instantaneous tap already worked.
+  #
+  # (2) DISPATCH != EFFECT. This function used to `return 0` the moment it had dispatched
+  #     a tap, never checking that anything happened. A swallowed tap therefore propagated
+  #     as a SUCCESS, and the leg failed later against a screen it never reached — which is
+  #     the same "could not observe" vs "observed absent" conflation R5(d) exists to fix,
+  #     one step earlier in the flow. Callers may now pass an optional EXPECT string: the
+  #     press is retried until that string is observable, and a genuine miss is reported at
+  #     the point it happens instead of downstream.
+  #
+  # Callers that omit EXPECT keep the previous fire-and-forget contract exactly.
+  local attempt
+  for attempt in 1 2 3; do
+    adb ${ADBD} shell input swipe "${cx}" "${cy}" "${cx}" "${cy}" 120
+    if [ -z "${expect}" ]; then
+      return 0
+    fi
+    sleep 2
+    if text_present "${expect}" "$(dump_ui)"; then
+      return 0
+    fi
+    echo "[ceremony] tap_on_text: pressed '${label}' (attempt ${attempt}/3) but '${expect}' is not yet observable — retrying." >&2
+    sleep 2
+  done
+  echo "[ceremony] ERROR: pressed '${label}' 3 times and '${expect}' never appeared — the press did not take effect." >&2
+  return 1
 }
 
 text_present() {
@@ -445,7 +538,8 @@ navigate_to_settings() {
   # negative.
   for attempt in 1 2 3; do
     dump=$(dump_ui)
-    if tap_on_text "Settings" "${dump}"; then
+    # Verify we actually ARRIVED: the Settings screen is identified by its Secure Signing row.
+    if tap_on_text "Settings" "${dump}" "${STR_SETTINGS_ROW}"; then
       sleep 2
       return 0
     fi
@@ -966,16 +1060,29 @@ leg_cancel_negative_button() {
   sleep 2
   dump=$(dump_ui)
 
-  adb ${ADBD} logcat -c
   if ! tap_on_text "${STR_SETUP_BUTTON}" "${dump}" && ! tap_on_text "Replace Signing Key" "${dump}"; then
     echo "[ceremony] 'cancel' leg: no provisioning/replace action reachable from the current screen — drive to a signing action manually first." >&2
   fi
   sleep 3
   dump=$(dump_ui)
+  # R5d: a dump_ui miss here used to be indistinguishable from "the prompt title genuinely isn't
+  # there" — record the instrument gap as NOT-EXERCISED instead of a false FAIL.
+  if [ "${DUMP_UI_STATUS}" = "unobservable" ]; then
+    record_leg "cancel-negative-button" "NOT-EXERCISED" "uiautomator could not observe the screen state before attempting dismissal — instrument gap, not a negative result"
+    return
+  fi
   if ! text_present "${STR_PROMPT_TITLE}" "${dump}"; then
     record_leg "cancel-negative-button" "FAIL" "deviceSigningPromptTitle ('${STR_PROMPT_TITLE}') not observed before attempting dismissal"
     return
   fi
+
+  # R5a: capture the DEVICE clock immediately before dispatching the dismissal — the error window
+  # this leg measures starts HERE, not at the app's cold-boot keygen. A host timestamp would be
+  # wrong: emulator clocks lag the host (see the clock-skew preflight above), which would silently
+  # widen or empty the window.
+  local dismissal_ts
+  dismissal_ts=$(adb ${ADBD} shell date "+%Y-%m-%d %H:%M:%S.000" | tr -d '\r')
+
   if ! tap_on_text "${STR_NEGATIVE_BUTTON}" "${dump}"; then
     record_leg "cancel-negative-button" "FAIL" "deviceSigningPromptNegativeButton ('${STR_NEGATIVE_BUTTON}') not found to dismiss the prompt"
     return
@@ -994,25 +1101,30 @@ leg_cancel_negative_button() {
     record_leg "cancel-no-error-text" "FAIL" "a deviceSigningError* string was rendered post-dismissal"
   fi
 
-  # Scope the error-level check to OUR app's pid — an unscoped `grep " E "`
-  # over the whole system logcat buffer matches heavy unrelated emulator
-  # noise (keystore2 StrongBox-fallback logs, FeatureFlagsImplExport,
-  # ThemeUtils, etc.) and makes this leg's verdict meaningless regardless of
-  # our app's actual behavior (observed: 15 unrelated system E-lines with 0
-  # from our own package). This mirrors the leg's own record_leg message,
-  # which already claims "app-package" scoping — the prior implementation
-  # didn't actually do that.
-  local app_pid err_lines
+  # R5a: window starts at dismissal_ts (captured above, device clock), scoped to our app's pid,
+  # with platform-emitted tags (PLATFORM_TAG_EXCLUSIONS) excluded so a StrongBox-fallback keygen
+  # line or similar cannot fail an app-authored-error leg. Previously this cleared logcat ~11-12s
+  # BEFORE the dismissal (well before this leg even reached it) and counted everything since —
+  # including boot/keygen noise unrelated to the dismissal under test. A read that returns ZERO
+  # lines of ANY level means the window/timestamp is wrong, not that the app was silent —
+  # NOT-EXERCISED, never PASS, in that case.
+  local app_pid post_dismissal_log total_lines err_lines
   app_pid=$(adb ${ADBD} shell pidof "${PACKAGE}" 2>/dev/null | tr -d '\r' | awk '{print $1}')
   if [ -n "${app_pid}" ]; then
-    err_lines=$(adb ${ADBD} logcat -d --pid="${app_pid}" 2>/dev/null | grep -c " E " || true)
+    post_dismissal_log=$(adb ${ADBD} logcat -d -T "${dismissal_ts}" --pid="${app_pid}" 2>/dev/null || true)
   else
-    err_lines=$(adb ${ADBD} logcat -d 2>/dev/null | grep " ${PACKAGE}" | grep -c " E " || true)
+    post_dismissal_log=$(adb ${ADBD} logcat -d -T "${dismissal_ts}" 2>/dev/null | grep " ${PACKAGE}" || true)
   fi
-  if [ "${err_lines}" -eq 0 ]; then
-    record_leg "cancel-no-logged-fault" "PASS" "0 error-level app-package logcat lines since dismissal"
+  total_lines=$(printf '%s\n' "${post_dismissal_log}" | grep -c . || true)
+  if [ "${total_lines}" -eq 0 ]; then
+    record_leg "cancel-no-logged-fault" "NOT-EXERCISED" "post-dismissal log window empty — instrument gap"
   else
-    record_leg "cancel-no-logged-fault" "FAIL" "${err_lines} error-level logcat line(s) since dismissal"
+    err_lines=$(printf '%s\n' "${post_dismissal_log}" | grep " E " | grep -vE "${PLATFORM_TAG_EXCLUSIONS}" | grep -c . || true)
+    if [ "${err_lines}" -eq 0 ]; then
+      record_leg "cancel-no-logged-fault" "PASS" "0 app-authored error-level logcat lines in the post-dismissal window (device-clock T=${dismissal_ts})"
+    else
+      record_leg "cancel-no-logged-fault" "FAIL" "${err_lines} app-authored error-level logcat line(s) in the post-dismissal window (device-clock T=${dismissal_ts})"
+    fi
   fi
 
   # Gap B closure: the raw native errorCode must remain recoverable from an
@@ -1050,16 +1162,28 @@ leg_cancel_back_key() {
   sleep 2
   dump=$(dump_ui)
 
-  adb ${ADBD} logcat -c
   if ! tap_on_text "${STR_SETUP_BUTTON}" "${dump}" && ! tap_on_text "Replace Signing Key" "${dump}"; then
     echo "[ceremony] 'cancel' leg (BACK-key variant): no provisioning/replace action reachable from the current screen — drive to a signing action manually first." >&2
   fi
   sleep 3
   dump=$(dump_ui)
+  # R5d: a dump_ui miss here used to be indistinguishable from "the prompt title genuinely isn't
+  # there" — record the instrument gap as NOT-EXERCISED instead of a false FAIL.
+  if [ "${DUMP_UI_STATUS}" = "unobservable" ]; then
+    record_leg "cancel-negative-button-back" "NOT-EXERCISED" "uiautomator could not observe the screen state before attempting dismissal — instrument gap, not a negative result"
+    return
+  fi
   if ! text_present "${STR_PROMPT_TITLE}" "${dump}"; then
     record_leg "cancel-negative-button-back" "FAIL" "deviceSigningPromptTitle ('${STR_PROMPT_TITLE}') not observed before attempting dismissal"
     return
   fi
+
+  # R5a: capture the DEVICE clock immediately before dispatching the dismissal — see
+  # leg_cancel_negative_button's identical rationale above; the two legs share this shape
+  # deliberately so they cannot drift from each other.
+  local dismissal_ts
+  dismissal_ts=$(adb ${ADBD} shell date "+%Y-%m-%d %H:%M:%S.000" | tr -d '\r')
+
   adb ${ADBD} shell input keyevent KEYCODE_BACK
   record_leg "cancel-negative-button-back" "PASS" "KEYCODE_BACK dispatched, dismissing the prompt"
   sleep 2
@@ -1075,17 +1199,25 @@ leg_cancel_back_key() {
     record_leg "cancel-no-error-text-back" "FAIL" "a deviceSigningError* string was rendered post-dismissal"
   fi
 
-  local app_pid err_lines
+  # R5a: see leg_cancel_negative_button's identical block above for the full rationale
+  # (timestamped window + PLATFORM_TAG_EXCLUSIONS + empty-window NOT-EXERCISED guard).
+  local app_pid post_dismissal_log total_lines err_lines
   app_pid=$(adb ${ADBD} shell pidof "${PACKAGE}" 2>/dev/null | tr -d '\r' | awk '{print $1}')
   if [ -n "${app_pid}" ]; then
-    err_lines=$(adb ${ADBD} logcat -d --pid="${app_pid}" 2>/dev/null | grep -c " E " || true)
+    post_dismissal_log=$(adb ${ADBD} logcat -d -T "${dismissal_ts}" --pid="${app_pid}" 2>/dev/null || true)
   else
-    err_lines=$(adb ${ADBD} logcat -d 2>/dev/null | grep " ${PACKAGE}" | grep -c " E " || true)
+    post_dismissal_log=$(adb ${ADBD} logcat -d -T "${dismissal_ts}" 2>/dev/null | grep " ${PACKAGE}" || true)
   fi
-  if [ "${err_lines}" -eq 0 ]; then
-    record_leg "cancel-no-logged-fault-back" "PASS" "0 error-level app-package logcat lines since dismissal"
+  total_lines=$(printf '%s\n' "${post_dismissal_log}" | grep -c . || true)
+  if [ "${total_lines}" -eq 0 ]; then
+    record_leg "cancel-no-logged-fault-back" "NOT-EXERCISED" "post-dismissal log window empty — instrument gap"
   else
-    record_leg "cancel-no-logged-fault-back" "FAIL" "${err_lines} error-level logcat line(s) since dismissal"
+    err_lines=$(printf '%s\n' "${post_dismissal_log}" | grep " E " | grep -vE "${PLATFORM_TAG_EXCLUSIONS}" | grep -c . || true)
+    if [ "${err_lines}" -eq 0 ]; then
+      record_leg "cancel-no-logged-fault-back" "PASS" "0 app-authored error-level logcat lines in the post-dismissal window (device-clock T=${dismissal_ts})"
+    else
+      record_leg "cancel-no-logged-fault-back" "FAIL" "${err_lines} app-authored error-level logcat line(s) in the post-dismissal window (device-clock T=${dismissal_ts})"
+    fi
   fi
 
   local reject_line raw_code mapped_code

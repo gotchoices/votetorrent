@@ -1,0 +1,51 @@
+{
+  "base": "base-device",
+  "ops": [
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/network-n7/attempt-1/found-n7/verdict.txt",
+      "content": "VERDICT: FAIL create-left-early\n"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/network-n7/attempt-1/found-n7/leg.md",
+      "content": "create left early\n"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/network-n7/attempt-2/reason.txt",
+      "content": "RESTART notes-19-e50: the n7 network part redone\n"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/network-n7/attempt-2/join-redmi-n7/verdict.txt",
+      "content": "VERDICT: FAIL party-not-fresh\n"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/network-n7/attempt-2/join-redmi-n7/leg.md",
+      "content": "party not fresh\n"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/network-n7/attempt-3/reason.txt",
+      "content": "RESTART notes-19-e59: the n7 network part redone on the carried party\n"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/network-n7/attempt-3/found-n7/verdict.txt",
+      "content": "VERDICT: PASS\n"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/network-n7/attempt-4/reason.txt",
+      "content": "RESTART notes-19-e85: the n7 network part redone\n"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/network-n7/attempt-4/found-n7/verdict.txt",
+      "content": "VERDICT: PASS\n"
+    }
+  ],
+  "expect": "retry-without-failure"
+}

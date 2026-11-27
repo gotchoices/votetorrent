@@ -118,13 +118,16 @@ export class NetworkRespondToInviteBuilder implements INetworkRespondToInviteBui
       }
       throw new BuilderValidationError(allErrors)
     }
+    // WR-R2-06: the one-time invite private key travels to the engine (62-102 made it REQUIRED
+    // there, which signs the InviteResult with it). It is never serialized: toJSON omits it.
     return {
       invite: this.draft.invite!,
       isAccepted: this.draft.isAccepted!,
       inviteSignature: this.draft.inviteSignature!,
       invokes: this.draft.invokes,
       userInit: this.draft.userInit,
-      userId: this.draft.userId
+      userId: this.draft.userId,
+      ...(this.draft.invitePrivate !== undefined ? { invitePrivate: this.draft.invitePrivate } : {})
     }
   }
 
@@ -187,6 +190,8 @@ export class NetworkRespondToInviteBuilder implements INetworkRespondToInviteBui
 
   toJSON (): SerializedBuilder<Partial<InviteAction<unknown>>> {
     // Exclude undefined fields so JSON round-trip is stable (SER-04).
+    // `invitePrivate` is a secret and is deliberately never serialized (WR-R2-06): a draft
+    // restored with fromJSON must be given the key again before it can commit.
     const draft: Partial<InviteAction<unknown>> = {}
     if (this.draft.invite !== undefined) draft.invite = this.draft.invite
     if (this.draft.isAccepted !== undefined) draft.isAccepted = this.draft.isAccepted
@@ -212,7 +217,8 @@ export class NetworkRespondToInviteBuilder implements INetworkRespondToInviteBui
       inviteSignature: payload.inviteSignature,
       invokes: payload.invokes,
       userInit: payload.userInit,
-      userId: payload.userId
+      userId: payload.userId,
+      ...(payload.invitePrivate !== undefined ? { invitePrivate: payload.invitePrivate } : {})
     }) as this
   }
 

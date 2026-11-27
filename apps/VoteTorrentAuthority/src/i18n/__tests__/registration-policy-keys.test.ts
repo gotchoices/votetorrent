@@ -19,19 +19,23 @@ const esTranslation = resources.es.translation as Record<string, string>;
 
 const REGISTRATION_POLICY_RE = /^registrationPolicy[A-Z]/;
 const REGISTRATION_REQUEST_RE = /^registrationRequest[A-Z]/;
-// Phase 48 widened this to also carve out the `registrationRequest*` group. The
-// guard's purpose is unchanged — catch a key that lands in neither declared
-// namespace — and each carve-out is paid for by its own key-group test below.
-const BARE_REGISTRATION_RE = /^registration(?!Policy)(?!Request)/;
+// Phase 48 widened this to also carve out the `registrationRequest*` group. 62-10 widened it
+// again to carve out `registrationBridgeConfig*` (Group B) and `registrationContent*` (Group K) —
+// both would otherwise fall through to this bare-registration catch-all. The guard's purpose is
+// unchanged — catch a key that lands in no declared namespace — and each carve-out is paid for by
+// its own key-group test (`multipeer-continuity-keys.test.ts` Groups B and K).
+const BARE_REGISTRATION_RE = /^registration(?!Policy)(?!Request)(?!BridgeConfig)(?!Content)/;
 
 describe('registrationPolicy* i18n key group (D-11)', () => {
-	test('EN has exactly 55 registrationPolicy* keys, ES key set is deeply equal', () => {
+	// 62-10 added 7 registrationPolicyReassociation* keys (5 SPEC + 2 amendment), moving the pin
+	// from 55 to 62.
+	test('EN has exactly 62 registrationPolicy* keys, ES key set is deeply equal', () => {
 		const enKeys = Object.keys(enTranslation).filter(k => REGISTRATION_POLICY_RE.test(k));
 		const esKeys = Object.keys(esTranslation).filter(k => REGISTRATION_POLICY_RE.test(k));
 
-		expect(enKeys).toHaveLength(55);
+		expect(enKeys).toHaveLength(62);
 		expect(new Set(esKeys)).toEqual(new Set(enKeys));
-		expect(esKeys).toHaveLength(55);
+		expect(esKeys).toHaveLength(62);
 	});
 
 	test('no registrationPolicy* value is empty or whitespace-only, in either locale', () => {
@@ -54,13 +58,17 @@ describe('registrationPolicy* i18n key group (D-11)', () => {
 		expect(esTranslation.registrationDeadline).toBe('Fecha Límite de Registro');
 	});
 
-	test('EN has exactly 42 registrationRequest* keys, ES key set is deeply equal', () => {
+	test('EN has exactly 68 registrationRequest* keys, ES key set is deeply equal', () => {
 		const enKeys = Object.keys(enTranslation).filter(k => REGISTRATION_REQUEST_RE.test(k));
 		const esKeys = Object.keys(esTranslation).filter(k => REGISTRATION_REQUEST_RE.test(k));
 
-		expect(enKeys).toHaveLength(42);
+		// 46 = 45 + registrationRequestUnverifiable (the requester-signature-unverifiable refusal copy).
+		// 55 = 46 + the nine registrationRequestField* payload labels (request detail shows labels, never raw keys).
+		// 61 = 55 + six chunk-B copy keys (NotFound, LoadFailed, ChecklistIncomplete, NoTask, ApproveFailed, VoteFailed).
+		// 68 = 61 + the seven registrationRequestStaleClose* keys (Close as Rejected after the session timeout).
+		expect(enKeys).toHaveLength(68);
 		expect(new Set(esKeys)).toEqual(new Set(enKeys));
-		expect(esKeys).toHaveLength(42);
+		expect(esKeys).toHaveLength(68);
 	});
 
 	test('no registrationRequest* value is empty or whitespace-only, in either locale', () => {

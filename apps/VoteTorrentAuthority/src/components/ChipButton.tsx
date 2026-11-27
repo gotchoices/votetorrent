@@ -22,6 +22,9 @@ export function ChipButton({label, icon, fullWidth, onPress, disabled}: ChipButt
 			// This is using onPressIn because of a bug with onPress in headers
 			onPressIn={disabled ? undefined : onPress}
 			disabled={disabled}
+			accessibilityRole="button"
+			accessibilityLabel={label}
+			accessibilityState={{disabled: !!disabled}}
 			// The 32pt chip height is a deliberate app-wide visual constant, so
 			// raising `height` would reflow every header and card row. hitSlop
 			// lifts the effective touch target to 44 with ZERO layout change.

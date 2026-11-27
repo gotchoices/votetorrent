@@ -1,0 +1,11 @@
+{
+  "base": "base-host",
+  "ops": [
+    {
+      "op": "write",
+      "path": "64-WALL-GATE.md",
+      "content": "VERDICT: CLEAN\n\n# Wall gate\n\nhardware runs cover 'member joins a network founded before it was a member' only; 'Authority founds while members are connected' is covered by L1 on the host, with MemoryRawStorage.\n\nHistory: an old VERDICT: HIT line was here.\n"
+    }
+  ],
+  "expect": "wall-gate-line1-invalid"
+}

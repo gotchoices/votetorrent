@@ -1,0 +1,200 @@
+diff --git a/dist/src/runtime/emit/dml-executor.js b/dist/src/runtime/emit/dml-executor.js
+index 342e00e5173741a0a3b497f3edd0e688b8b708c2..506d0d86342b1b22dd792d97070c6cb3227c1a14 100644
+--- a/dist/src/runtime/emit/dml-executor.js
++++ b/dist/src/runtime/emit/dml-executor.js
+@@ -653,12 +653,15 @@ export function emitDmlExecutor(plan, ctx) {
+         // action on this write (see docs/sql-dml.md). This arm handles neither `evictedRows`
+         // nor a skipped row from a UNIQUE conflict; to honour declared actions here, it must
+         // run the eviction pipeline for REPLACE and raise violationError for FAIL and ROLLBACK.
++        // VoteTorrent patch (datetime-immediate-check-coercion): `preCoerced` forced
++        // to false — update.js no longer converts the NEW row up front, so the storage
++        // layer must coerce here as it did on 4.3.1.
+         const updateArgs = {
+             operation: 'update',
+             values: updatedRow,
+             oldKeyValues: keyValues,
+             onConflict: ConflictResolution.ABORT,
+-            preCoerced: true,
++            preCoerced: false,
+             mutationStatement: vtab.wantStatements ?
+                 buildUpdateStatement(tableSchema, updatedRow, keyValues, contextRow) : undefined,
+             // The arm is part of the INSERT's own write: its `disposition.clauses` describe it.
+@@ -1033,10 +1036,11 @@ export function emitDmlExecutor(plan, ctx) {
+             // can fall back to per-constraint defaultConflict directives. The memory
+             // module treats undefined as ABORT when no constraint default is set.
+             onConflict: plan.onConflict,
+-            // The emitters converted the NEW section to declared types up front
+-            // (emitInsert / constraint-check DEFAULT substitution), so the storage
+-            // layer must not convert again — JSON conversion is not repeatable.
+-            preCoerced: true,
++            // VoteTorrent patch (datetime-immediate-check-coercion): `preCoerced`
++            // forced to false — emitInsert no longer converts the NEW section up
++            // front (so immediate CHECKs see the value as provided), so the storage
++            // layer must coerce here as it did on 4.3.1.
++            preCoerced: false,
+             mutationStatement,
+             writeScope,
+         };
+@@ -1220,10 +1224,10 @@ export function emitDmlExecutor(plan, ctx) {
+             // can fall back to per-constraint defaultConflict directives. The memory
+             // module treats undefined as ABORT when no constraint default is set.
+             onConflict: plan.onConflict,
+-            // emitUpdate converted the NEW section to declared types (assigned
+-            // columns by static type, unassigned columns are stored values) — the
+-            // storage layer must not convert again.
+-            preCoerced: true,
++            // VoteTorrent patch (datetime-immediate-check-coercion): `preCoerced`
++            // forced to false — emitUpdate no longer converts the NEW section up
++            // front, so the storage layer must coerce here as it did on 4.3.1.
++            preCoerced: false,
+             mutationStatement,
+             writeScope,
+         };
+diff --git a/dist/src/runtime/emit/insert.js b/dist/src/runtime/emit/insert.js
+index 0b76a9275292239d2405534bd4eff42a8b96097f..5fef4571f854e947aedd7fadd842fc9e525576e6 100644
+--- a/dist/src/runtime/emit/insert.js
++++ b/dist/src/runtime/emit/insert.js
+@@ -22,8 +22,23 @@ export function emitInsert(plan, ctx) {
+     // the projection's announcement, for the reason above. If cell-conversion probes ever
+     // show up in a profile, the fix is a provenance flag saying a cell was converted by a
+     // WriteCoercionNode in this same plan — not dropping either pass.
+-    const sourceAttrs = plan.source.getAttributes();
+-    const coerceNewRow = buildRowCoercion(tableSchema.columns.map((_, i) => sourceAttrs[i]?.type.logicalType), tableSchema.columns);
++    // ---------------------------------------------------------------------------
++    // VoteTorrent patch (datetime-immediate-check-coercion): DISABLED.
++    //
++    // 4.4.1 moved declared-type conversion from the storage layer up to the TOP of
++    // the DML pipeline (this call), so an IMMEDIATE CHECK now evaluates the coerced
++    // storage form instead of the value as provided. For a `datetime` column the
++    // coercion drops the trailing `Z`, so a shape check such as
++    //   constraint ExpirationValid check (isISODatetime(Expiration) and like('%Z', Expiration))
++    // fails on input that passed identically on 4.3.1.
++    //
++    // Restore 4.3.1 semantics: leave the NEW row RAW here so immediate CHECKs see
++    // the value as provided, and let the storage layer coerce as it did in 4.3.1
++    // (see the matching `preCoerced: false` restorations in dml-executor.js).
++    // Upstream issue: gotchoices/quereus#28 — "datetime Z-stripped before immediate CHECK".
++    // Forward-ported 4.11.0 -> 4.14.0 (spike 064) -> 4.17.1 -> 4.18.0.
++    // ---------------------------------------------------------------------------
++    const coerceNewRow = undefined;
+     async function* run(_ctx, sourceValue) {
+         for await (const sourceRow of sourceValue) {
+             // Convert source row to flat OLD/NEW format
+diff --git a/dist/src/runtime/emit/update.js b/dist/src/runtime/emit/update.js
+index c2028920c89b76bf6ca275761b0234d3cb189f33..af52c56c16d7cf8686eb2b6eb554c09cff3a89e8 100644
+--- a/dist/src/runtime/emit/update.js
++++ b/dist/src/runtime/emit/update.js
+@@ -48,12 +48,18 @@ export function emitUpdate(plan, ctx) {
+     // type differs), phase 2 the generated cells. A generated column left in
+     // place by phase 1 still holds its scanned value, which is already in
+     // declared form.
+-    const sourceAttrs = plan.source.getAttributes();
+-    const regularCellTypes = tableSchema.columns.map((_, i) => sourceAttrs[i]?.type.logicalType);
+-    for (const i of regularIndices) {
+-        regularCellTypes[assignmentTargetIndices[i]] = plan.assignments[i].value.getType().logicalType;
+-    }
+-    const coerceRegular = buildRowCoercion(regularCellTypes, tableSchema.columns);
++    // ---------------------------------------------------------------------------
++    // VoteTorrent patch (datetime-immediate-check-coercion): DISABLED.
++    // Mirror of the insert.js restoration — see the note there.
++    //
++    // 4.18.0 RE-DERIVED, not verbatim: upstream replaced the phase-2 row-level
++    // `coerceGenerated = buildRowCoercion(...)` with a PER-CELL `generatedCoercions`
++    // Map consulted inside the loop, so "disabled" is an EMPTY MAP rather than an
++    // undefined row-coercer — every `.get(i)` misses and the `if (coerce)` guard
++    // skips, the same net effect the old `if (coerceGenerated)` guard had. If a
++    // future version drops that guard this stops being inert: re-check on each hop.
++    // ---------------------------------------------------------------------------
++    const coerceRegular = undefined;
+     // After phase 1 every non-generated cell is in declared form (identity ⇒
+     // skip), so only the generated cells can still need converting. Converted
+     // PER CELL inside the phase-2 loop — each value before the next generated
+@@ -61,12 +67,7 @@ export function emitUpdate(plan, ctx) {
+     // derives from the stored form, matching executeUpsertUpdate's recompute
+     // order (runtime/emit/dml-executor.ts).
+     const generatedCoercions = new Map();
+-    for (const i of generatedIndices) {
+-        const column = tableSchema.columns[assignmentTargetIndices[i]];
+-        const coerce = buildCellCoercion(plan.assignments[i].value.getType().logicalType, column.logicalType, column.name);
+-        if (coerce)
+-            generatedCoercions.set(i, coerce);
+-    }
++    // VoteTorrent patch: left EMPTY on purpose (see the note above).
+     // Distinct descriptor object carrying the same attribute IDs as `sourceRowDescriptor`,
+     // so tearing the phase-2 context down does not evict the streaming source slot (the
+     // context map is keyed by descriptor identity).
+diff --git a/dist/src/runtime/emit/write-coercion.js b/dist/src/runtime/emit/write-coercion.js
+index 512ab1ccd1722e8cbba5ce95f52ca410660fa9ae..906504978b692cb4b9b9bcf5dfbee743cf5584d4 100644
+--- a/dist/src/runtime/emit/write-coercion.js
++++ b/dist/src/runtime/emit/write-coercion.js
+@@ -6,7 +6,26 @@ export function buildWriteCoercionSpec(plan) {
+     // never nulls like CAST's lenientCast. Undefined means provably nothing to do.
+     const coerce = buildCellCoercion(plan.operand.getType().logicalType, plan.targetType.logicalType, plan.columnName);
+     function run(_runtimeCtx, operandValue) {
+-        return coerce ? coerce(operandValue) : operandValue;
++        // ---------------------------------------------------------------------------
++        // VoteTorrent patch (datetime-immediate-check-coercion), 4.18.0 ADDITION.
++        //
++        // 4.18.0 introduced this WriteCoercionNode and puts it in the row-expansion
++        // projection, i.e. UPSTREAM of emitInsert — so by the time the row reaches the
++        // emitters it has ALREADY been converted per cell, and disabling the emitters'
++        // own coercers (edits 1-4) no longer restores 4.3.1 semantics on its own. On
++        // 4.18.0 without this edit, 49 vote-engine specs fail with
++        //   CHECK constraint failed: SubmittedAtValid (isisodatetime(...) and like('%Z', ...))
++        // which is exactly the defect this whole patch exists to prevent.
++        //
++        // Pass the operand through raw so an immediate CHECK sees the value as
++        // provided; the storage layer still coerces (`preCoerced: false`).
++        //
++        // NOTE this is BROADER than edits 1-4: it disables write-path coercion for
++        // every column and type, not just datetime, so a type MISMATCH that used to
++        // throw here now surfaces from the storage layer instead. That is the same
++        // bargain edits 1-4 already make for the row-level coercers.
++        // ---------------------------------------------------------------------------
++        return operandValue;
+     }
+     return {
+         operands: [plan.operand],
+diff --git a/dist/src/runtime/row-constraints.js b/dist/src/runtime/row-constraints.js
+index ccab006ed283ac29befb3499135cb745be3d747d..c5a087bf026c385edfbc8883b0a7fed8101a503a 100644
+--- a/dist/src/runtime/row-constraints.js
++++ b/dist/src/runtime/row-constraints.js
+@@ -5,6 +5,7 @@ import { expressionToString } from '../emit/ast-stringify.js';
+ import { isTruthy } from '../util/comparison.js';
+ import { referencedKeyValueChanged } from './foreign-key-actions.js';
+ import { newSectionRowIdentity } from './deferred-constraint-queue.js';
++import { validateAndParse } from '../types/validation.js';
+ /**
+  * The violation message for a failing constraint — single source of truth for the
+  * immediate (row-time) and deferred (commit-time) paths, which must report a row
+@@ -257,7 +258,8 @@ async function checkCheckConstraints(rctx, scope, tableSchema, constraintMetadat
+                 return result ?? null;
+             };
+-            rowIdentity ??= writtenRowIdentity(scope, tableSchema, metadata.baseTable, flatRow);
++            const coercedFlatRow = coerceNewSection(flatRow, tableSchema);
++            rowIdentity ??= writtenRowIdentity(scope, tableSchema, metadata.baseTable, coercedFlatRow);
+-            rctx.db._queueDeferredConstraintRow(metadata.baseTable, metadata.constraintName, flatRow, metadata.flatRowDescriptor, deferredEvaluator, { connectionId: activeConnectionId, contextRow, contextDescriptor: metadata.contextDescriptor, rowIdentity });
++            rctx.db._queueDeferredConstraintRow(metadata.baseTable, metadata.constraintName, coercedFlatRow, metadata.flatRowDescriptor, deferredEvaluator, { connectionId: activeConnectionId, contextRow, contextDescriptor: metadata.contextDescriptor, rowIdentity });
+             continue;
+         }
+         // Resolve without a per-row microtask hop (see runtime/async-util.ts).
+@@ -278,3 +279,19 @@ async function checkCheckConstraints(rctx, scope, tableSchema, constraintMetadat
+     return { skip: false };
+ }
+ //# sourceMappingURL=row-constraints.js.map
++
++function coerceNewSection(row, tableSchema) {
++    const numCols = tableSchema.columns.length;
++    const snapshot = row.slice();
++    for (let i = 0; i < numCols; i++) {
++        const newIndex = numCols + i;
++        if (newIndex >= snapshot.length) break;
++        const column = tableSchema.columns[i];
++        const value = snapshot[newIndex];
++        try {
++            snapshot[newIndex] = validateAndParse(value, column.logicalType, column.name);
++        } catch {
++        }
++    }
++    return snapshot;
++}

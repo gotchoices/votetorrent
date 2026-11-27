@@ -1,0 +1,113 @@
+diff --git a/cpp/jsi/JSICache.hpp b/cpp/jsi/JSICache.hpp
+index 75785796aa14cd0a38711e8c8f231cf8064251ae..c48b6810dbd97d85efb747bcd4044e7810dab594 100644
+--- a/cpp/jsi/JSICache.hpp
++++ b/cpp/jsi/JSICache.hpp
+@@ -10,6 +10,7 @@
+ #include "BorrowingReference.hpp"
+ #include "NitroLogger.hpp"
+ #include "WeakReference.hpp"
++#include "WeakReferenceCache.hpp"
+ #include <jsi/jsi.h>
+ #include <memory>
+ #include <mutex>
+@@ -86,32 +87,32 @@ public:
+ public:
+   BorrowingReference<jsi::Value> makeShared(jsi::Value&& value) {
+     BorrowingReference<jsi::Value> owning(new jsi::Value(std::move(value)));
+-    _strongCache->_valueCache.push_back(owning.weak());
++    appendPruningExpired(_strongCache->_valueCache, owning.weak());
+     return owning;
+   }
+   BorrowingReference<jsi::Object> makeShared(jsi::Object&& value) {
+     BorrowingReference<jsi::Object> owning(new jsi::Object(std::move(value)));
+-    _strongCache->_objectCache.push_back(owning.weak());
++    appendPruningExpired(_strongCache->_objectCache, owning.weak());
+     return owning;
+   }
+   BorrowingReference<jsi::Function> makeShared(jsi::Function&& value) {
+     BorrowingReference<jsi::Function> owning(new jsi::Function(std::move(value)));
+-    _strongCache->_functionCache.push_back(owning.weak());
++    appendPruningExpired(_strongCache->_functionCache, owning.weak());
+     return owning;
+   }
+   BorrowingReference<jsi::WeakObject> makeShared(jsi::WeakObject&& value) {
+     BorrowingReference<jsi::WeakObject> owning(new jsi::WeakObject(std::move(value)));
+-    _strongCache->_weakObjectCache.push_back(owning.weak());
++    appendPruningExpired(_strongCache->_weakObjectCache, owning.weak());
+     return owning;
+   }
+   BorrowingReference<jsi::PropNameID> makeShared(jsi::PropNameID&& value) {
+     BorrowingReference<jsi::PropNameID> owning(new jsi::PropNameID(std::move(value)));
+-    _strongCache->_propNameIDCache.push_back(owning.weak());
++    appendPruningExpired(_strongCache->_propNameIDCache, owning.weak());
+     return owning;
+   }
+   BorrowingReference<jsi::ArrayBuffer> makeShared(jsi::ArrayBuffer&& value) {
+     BorrowingReference<jsi::ArrayBuffer> owning(new jsi::ArrayBuffer(std::move(value)));
+-    _strongCache->_arrayBufferCache.push_back(owning.weak());
++    appendPruningExpired(_strongCache->_arrayBufferCache, owning.weak());
+     return owning;
+   }
+ 
+diff --git a/cpp/utils/WeakReference.hpp b/cpp/utils/WeakReference.hpp
+index 22ca5c77fbf7383343e6e0e0be3d13c6604a76fd..43810e10442ba282173b515f4800d21829700f8f 100644
+--- a/cpp/utils/WeakReference.hpp
++++ b/cpp/utils/WeakReference.hpp
+@@ -94,6 +94,15 @@ public:
+   [[nodiscard]]
+   BorrowingReference<T> lock() const;
+ 
++  /**
++   * VoteTorrent patch: whether the value is gone (its last strong reference was released, or it
++   * was destroyed). An expired `WeakReference<T>` can never be locked again.
++   */
++  [[nodiscard]]
++  bool isExpired() const {
++    return _state == nullptr || _state->isDeleted;
++  }
++
+ public:
+   friend class BorrowingReference<T>;
+ 
+diff --git a/cpp/utils/WeakReferenceCache.hpp b/cpp/utils/WeakReferenceCache.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..31c9daff280013c27491888c3f56fad1d2b4acfe
+--- /dev/null
++++ b/cpp/utils/WeakReferenceCache.hpp
+@@ -0,0 +1,36 @@
++//
++//  WeakReferenceCache.hpp
++//  NitroModules
++//
++//  VoteTorrent patch: JSICache kept one WeakReference per value it ever converted and released
++//  them only in ~JSICache, so every ArrayBuffer passed to native code left its ReferenceState
++//  (~96 bytes) and a vector slot alive for the life of the runtime.
++//
++
++#pragma once
++
++#include "WeakReference.hpp"
++#include <algorithm>
++#include <vector>
++
++namespace margelo::nitro {
++
++/**
++ * Appends `ref` to `cache`, first dropping the entries whose value is gone when the vector is
++ * full. If more than half are still live after that, the capacity doubles, so a mostly-live
++ * vector is not rescanned on every append; either way the cost stays amortised O(1) per append.
++ * Live entries stay for ~JSICache to destroy.
++ */
++template <typename T>
++inline void appendPruningExpired(std::vector<WeakReference<T>>& cache, WeakReference<T>&& ref) {
++  if (cache.size() == cache.capacity()) {
++    cache.erase(std::remove_if(cache.begin(), cache.end(), [](const WeakReference<T>& entry) { return entry.isExpired(); }),
++                cache.end());
++    if (cache.size() > cache.capacity() / 2) {
++      cache.reserve(cache.capacity() * 2);
++    }
++  }
++  cache.push_back(std::move(ref));
++}
++
++} // namespace margelo::nitro

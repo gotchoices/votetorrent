@@ -215,7 +215,11 @@ describe('UserEngine', () => {
       const { engine, user } = await createUserEngineForExistingNetwork()
       const summary = await engine.getSummary()
       expect(summary?.id).to.equal(user.id)
-      expect(summary?.name).to.equal(user.name)
+      // 62-65: the founder's DB User.Name is the entered admin name, not the in-memory
+      // device user's name — proving the value is read from the DB row.
+      const enteredAdminName = makeNetworkInit().admin.officers[0]!.init!.name
+      expect(enteredAdminName).to.not.equal(user.name)
+      expect(summary?.name).to.equal(enteredAdminName)
     })
 
     // Needs a populated DB to assert the undefined branch is reachable via
@@ -448,6 +452,90 @@ describe('UserEngine', () => {
       }
     })
 
+    // 62 session 1 observation 2: Add Key failed SignatureValid on every officer whose user lists
+    // another key (the recovery key) first, because addKey bound context.UserKey to activeKeys[0]
+    // while the device signer signed with the device key. The bound key is the one that signed.
+    describe('signed by a registered key that is not activeKeys[0]', () => {
+      async function userWithSecondKey () {
+        const { engine, ctx, user } = await createUserEngineForExistingNetwork()
+        const second = randomTestKeyPair()
+        await engine.addKey(
+          { key: second.publicHex, type: UserKeyType.yubico, expiration: Date.now() + 86_400_000 },
+          makeTestSignCallback(user)
+        )
+        // activeKeys[0] stays the first key (the recovery key's position on a founder).
+        const twoKeyUser = {
+          ...user,
+          activeKeys: [
+            user.activeKeys[0]!,
+            { key: second.publicHex, type: UserKeyType.yubico, expiration: Date.now() + 86_400_000 }
+          ]
+        }
+        return { ctx, user: twoKeyUser, second, engine: new UserEngine(twoKeyUser, ctx) }
+      }
+
+      function signerFor (privateHex: string, publicHex: string, userId: string) {
+        const priv = hexToBytes(privateHex)
+        return async (digest: Uint8Array) => ({
+          signature: bytesToHex(secp256k1.sign(digest, priv)),
+          signerKey: publicHex,
+          signerUserId: userId
+        })
+      }
+
+      it('binds the signer\'s own key, so the insert passes SignatureValid', async () => {
+        const { ctx, user, second, engine } = await userWithSecondKey()
+        const third = randomTestKeyPair()
+        await engine.addKey(
+          { key: third.publicHex, type: UserKeyType.yubico, expiration: Date.now() + 86_400_000 },
+          signerFor(second.privateHex, second.publicHex, user.id)
+        )
+        const row = await ctx.db
+          .prepare('select PubKey from UserKey where UserId = :id and PubKey = :pk')
+          .get({ id: user.id, pk: third.publicHex })
+        expect(row?.PubKey).to.equal(third.publicHex)
+      })
+
+      it('a signer key that is not a registered key of the user is still refused', async () => {
+        const { ctx, user, engine } = await userWithSecondKey()
+        const stranger = randomTestKeyPair()
+        const third = randomTestKeyPair()
+        let caught: unknown
+        try {
+          await engine.addKey(
+            { key: third.publicHex, type: UserKeyType.yubico, expiration: Date.now() + 86_400_000 },
+            signerFor(stranger.privateHex, stranger.publicHex, user.id)
+          )
+        } catch (err) {
+          caught = err
+        }
+        expect(caught, 'an unregistered signer must be refused').to.be.instanceOf(Error)
+        const row = await ctx.db
+          .prepare('select PubKey from UserKey where UserId = :id and PubKey = :pk')
+          .get({ id: user.id, pk: third.publicHex })
+        expect(row).to.equal(undefined)
+      })
+
+      it('a signer that names the new key itself is refused before any write', async () => {
+        const { ctx, user, engine } = await userWithSecondKey()
+        const third = randomTestKeyPair()
+        let caught: unknown
+        try {
+          await engine.addKey(
+            { key: third.publicHex, type: UserKeyType.yubico, expiration: Date.now() + 86_400_000 },
+            signerFor(third.privateHex, third.publicHex, user.id)
+          )
+        } catch (err) {
+          caught = err
+        }
+        expect((caught as Error)?.message).to.include('cannot sign its own re-insertion')
+        const row = await ctx.db
+          .prepare('select PubKey from UserKey where UserId = :id and PubKey = :pk')
+          .get({ id: user.id, pk: third.publicHex })
+        expect(row).to.equal(undefined)
+      })
+    })
+
     // 999.1 T-999.1-19 (999.1-08): a subsequent-key insert signed by a key OTHER THAN
     // the existing active signer is DB-rejected by the schema's own SignatureValid
     // CHECK — a raw INSERT bypassing UserEngine.addKey's app-layer dispatch still fails.
@@ -663,7 +751,8 @@ describe('UserEngine', () => {
         AsyncStorage,
         ctx
       )
-      const fakeInviteKey = 'k'.repeat(66)
+      const fakeInviteKeyPair = randomTestKeyPair()
+      const fakeInviteKey = fakeInviteKeyPair.publicHex
       const fakeInvite = { inviteKey: fakeInviteKey, type: 'au' as const, expiration: '0', inviteSignature: 'a'.repeat(128) }
       await ctx.db.exec(
         `INSERT INTO InviteSlot (Cid, Type, Name, Expiration, InviteKey, InviteSignature, SigningNonce)
@@ -673,6 +762,7 @@ describe('UserEngine', () => {
       )
       await networkEngine.respondToInvite({
         invite: fakeInvite,
+        invitePrivate: fakeInviteKeyPair.privateHex,
         isAccepted: true,
         invokes: { authority: { name: 'Invokee', domainName: 'inv.example' }, admin: { effectiveAt: '2026-01-01T00:00:00', thresholdPolicies: '[{"policy":"rad","threshold":1}]' }, officers: [{ adminEffectiveAt: '2026-01-01T00:00:00', userId: 'user-1', title: 'Officer', scopes: '["rad"]' }] },
         inviteSignature: 'a'.repeat(128),
@@ -714,6 +804,7 @@ describe('UserEngine', () => {
       const inviteSignature = signInviteResult(fakeInvitePrivate, slotRowForSig!.Cid as string, 'null', false)
       await networkEngine.respondToInvite({
         invite: fakeInvite,
+        invitePrivate: fakeInvitePrivate,
         isAccepted: false,
         invokes: undefined,
         inviteSignature,

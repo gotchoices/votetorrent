@@ -1,5 +1,6 @@
 /**
  * @format
+ * @jest-environment node
  *
  * Phase 44 plan 44-09 — regression guards for the two layered Metro/Hermes
  * bundling defects diagnosed on-device in 44-UAT.md Test 1 (Cold Start Smoke

@@ -1,5 +1,5 @@
-import { MisuseError, QuereusError } from '@quereus/quereus'
-import { FeatureNotAvailableError, UserHistoryEvent, UserKeyType } from '@votetorrent/vote-core'
+import { rethrow as rethrowHelper } from '../signing/ceremony-helpers.js'
+import { FeatureNotAvailableError, toImageRef, UserHistoryEvent, UserKeyType } from '@votetorrent/vote-core'
 import { bytesToBase64url, digestToBytes, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
 import { verifySig, verifySigP256 } from '../database/initialize.js'
 import { allocateTid } from '../database/tid-allocator.js'
@@ -70,8 +70,9 @@ export class UserEngine implements IUserEngine {
    * - `sign` callback provided → signed subsequent-key path (UKEY-03 / D-14).
    *   The engine computes a SQL `Digest(userId, newPubKey, keyType, expirationCanon)`,
    *   converts to bytes via the shared `digestToBytes`, calls the callback with
-   *   those bytes, then binds `context.UserKey = existing active pubkey` (NOT the
-   *   new key — RESEARCH §Pitfall 5) and `context.Signature = real signature` so
+   *   those bytes, then binds `context.UserKey = the signer's key` (the returned
+   *   `signature.signerKey`, an existing key, NOT the new key — RESEARCH §Pitfall 5)
+   *   and `context.Signature = real signature` so
    *   `UserKey.SignatureValid`'s real branch (999.1 R-02/D-11) verifies it via the
    *   shared `SignatureValid` UDF.
    *
@@ -87,9 +88,13 @@ export class UserEngine implements IUserEngine {
   async addKey (key: UserKey, sign?: (digest: Uint8Array) => Promise<Signature>): Promise<void> {
     this.requireCtx('addKey')
     const tid = await allocateTid(this.ctx!.db, 'user')
-    // EXISTING active pubkey — bound to context.UserKey in BOTH paths.
-    // Per RESEARCH §Pitfall 5: this MUST be the EXISTING key, never key.key.
-    const signerKey = this.user.activeKeys?.[0]?.key ?? null
+    // EXISTING pubkey bound to context.UserKey in BOTH paths. Per RESEARCH §Pitfall 5 this MUST be
+    // an existing key, never key.key. Unsigned path: the snapshot's first active key. Signed path:
+    // the key that actually produced the signature (`signature.signerKey`, below), the same rule
+    // revokeKey follows. A user can hold several active keys in any order (a founder lists the
+    // recovery key first), so activeKeys[0] is not necessarily the signer: binding it failed
+    // SignatureValid on every Add Key signed by the device key (62 session 1, observation 2).
+    let signerKey = this.user.activeKeys?.[0]?.key ?? null
 
     let boundSignature: string | null = null
     let evtSignature: string | null = null
@@ -127,6 +132,12 @@ export class UserEngine implements IUserEngine {
 
       const digestBytes: Uint8Array = digestToBytes(digestRow.d)
       const signature = await sign(digestBytes)
+      signerKey = signature.signerKey ?? signerKey
+      if (signerKey === key.key) {
+        throw new Error(
+          'UserEngine.addKey: the existing active key cannot sign its own re-insertion (T-21-07-01)'
+        )
+      }
       boundSignature = signature.signature
       evtSignature = signature.signature
     }
@@ -158,9 +169,10 @@ export class UserEngine implements IUserEngine {
           keyType: key.type,
           keyValue: key.key,
           expiration: toCanonicalDatetime(key.expiration),
-          // context.UserKey is ALWAYS the EXISTING active pubkey (never key.key).
+          // context.UserKey is ALWAYS an EXISTING pubkey (never key.key).
           // When sign is absent: signerKey may be null (first-key path).
-          // When sign is present: signerKey is the existing authorized signer (guard above).
+          // When sign is present: signerKey is the key that signed (guards above); the
+          // schema's InsertValid still requires it to be a registered, unexpired key of this user.
           userKey: signerKey,
           // Without sign callback: null (no-callback bootstrap path).
           // With sign callback: real secp256k1 hex signature from the existing active key.
@@ -357,15 +369,58 @@ export class UserEngine implements IUserEngine {
       return {
         id: row.Id as string,
         name: row.Name as string,
-        imageRef: parseJsonOr<ImageRef | undefined>(
+        imageRef: toImageRef(parseJsonOr<unknown>(
           row.ImageRef,
           undefined,
           'User.ImageRef'
-        ),
+        )),
         activeKeys
       }
     } catch (err) {
       this.rethrow(err, 'getSummary')
+    }
+  }
+
+  /**
+   * O-06 (engine half): read-only inspection for the forked-device-identity repair. Reports whether
+   * `localUserId` is a network User, and which CURRENT officers (any authority) hold `pubKey` as an
+   * active UserKey, sorted. Every UserKey read is a point lookup on the `UserId` primary-key prefix
+   * (`UserId = :userId and PubKey = :pubKey`); there is no scan of UserKey. Never logs ids.
+   */
+  async inspectDeviceIdentity (
+    localUserId: string,
+    pubKey: string
+  ): Promise<{ localIsNetworkUser: boolean, officerUserIdsHoldingKey: string[] }> {
+    this.requireCtx('inspectDeviceIdentity')
+    if (typeof localUserId !== 'string' || localUserId.length === 0) {
+      throw new Error('UserEngine.inspectDeviceIdentity: localUserId must be a non-empty string')
+    }
+    if (typeof pubKey !== 'string' || pubKey.length === 0) {
+      throw new Error('UserEngine.inspectDeviceIdentity: pubKey must be a non-empty string')
+    }
+    try {
+      const db = this.ctx!.db
+      const userRow = await db.prepare('select 1 as found from User where Id = :id').get({ id: localUserId })
+      const officerUserIds: string[] = []
+      for await (const row of db.eval(
+        `select distinct O.UserId as UserId
+           from Officer O
+           join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
+          order by O.UserId`
+      )) {
+        officerUserIds.push(row.UserId as string)
+      }
+      const now = nowCanonicalDatetime()
+      const holding: string[] = []
+      for (const userId of officerUserIds) {
+        const keyRow = await db
+          .prepare('select 1 as found from UserKey where UserId = :userId and PubKey = :pubKey and Expiration > :date')
+          .get({ userId, pubKey, date: now })
+        if (keyRow != null) holding.push(userId)
+      }
+      return { localIsNetworkUser: userRow != null, officerUserIdsHoldingKey: holding.sort() }
+    } catch (err) {
+      this.rethrow(err, 'inspectDeviceIdentity')
     }
   }
 
@@ -377,10 +432,10 @@ export class UserEngine implements IUserEngine {
    * T-18-01 mitigation: userId and scope are bound ONLY via the params object
    * `{ userId, scope }` — never string-interpolated into the SQL statement.
    *
-   * NOTE: The Scope TS type includes 'rnp' but the DB Scope view does not
-   * list it (existing schema inconsistency, not introduced here). The query
-   * is correct as-is; an Officer with 'rnp' in their Scopes JSON would have
-   * failed the ScopesValid CHECK at insert time — no special handling needed.
+   * NOTE (resolved 2026-08-25): the TS Scope union previously declared 'rnp',
+   * which the DB's `view Scope` never defined. That drift has been removed —
+   * the union, `scopeDescriptions` and `view Scope` now carry the same nine
+   * codes, so no scope reaching this query can be unrepresentable in the view.
    *
    * T-18-02 mitigation: Scope match uses exact equality (json_each value = :scope,
    * not LIKE), and the join is restricted to CurrentAdmin — prevents false-positive
@@ -618,14 +673,6 @@ export class UserEngine implements IUserEngine {
   }
 
   private rethrow (err: unknown, method: string): never {
-    if (err instanceof QuereusError) {
-      throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
-    } else if (err instanceof MisuseError) {
-      throw new Error(`API misuse: ${err.message}`)
-    } else if (err instanceof Error) {
-      throw new Error(`UserEngine.${method}: ${err.message}`)
-    } else {
-      throw new Error(`UserEngine.${method}: unknown error: ${String(err)}`)
-    }
+    return rethrowHelper(err, 'UserEngine', method)
   }
 }

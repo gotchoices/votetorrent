@@ -7,9 +7,10 @@
  * heading+body+icon+color together, the disabled control renders-not-hides, and the counts line
  * omits undefined segments.
  *
- * Suites F-H (appended in Task 3) prove the D-11 guarantee for the peer-to-peer card: it renders
- * byte-identically across every state payload a caller could try to push into it — including
- * success — and its branch reads no per-state lookup and no success/accent color.
+ * 62-21: the retired `Experimental`-prefixed peer card and its baseline/severance suites (formerly F-H) are
+ * DELETED from this file — the peer card is now `PeerTransportStatusCard.tsx` (D-31), which has
+ * its own test file (`PeerTransportStatusCard.test.tsx`) proving the equivalent structural-severance
+ * guarantee for its (now live-count) presentation.
  *
  * testIDBase inventory this file proves (built from `${kind}-${syncState}`, all six pairs are
  * exercised below), e.g. `transport-status-filesystem-never` and `transport-status-rest-success`.
@@ -78,7 +79,6 @@ jest.mock('react-native-vector-icons/FontAwesome6', () => 'FontAwesome6');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const {
   TransportStatusCard,
-  ExperimentalTransportStatusCard,
   transportCopy,
   TRANSPORT_STATE_ICONS,
   TRANSPORT_BODY_KEYS,
@@ -446,197 +446,5 @@ describe('TransportStatusCard.tsx — source-level gate (comments stripped)', ()
     expect(occurrences).toBe(1);
     expect(src).toMatch(/t\(copy\.bodyKey\)/);
     expect(src).not.toMatch(/t\(copy\.bodyKey,/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// D-11 — the peer-to-peer card. These suites exist to prevent a very specific future mistake: a
-// reader sees a peer card that just synced successfully, reads the warning styling as a bug, and
-// "fixes" it. The grounding for why that "fix" would be wrong: the peer-cluster transport ships
-// code-complete and unverified, P2P-11 is device-REFUTED, and connectivity in a session is not
-// verification. Suite F proves the baseline treatment; Suite G is the centerpiece — byte-identical
-// output across every state a caller could push in, including success; Suite H proves by source
-// inspection that the peer branch cannot even read the symbols that would let it drift.
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Suite F — baseline peer-card presentation.
-// ---------------------------------------------------------------------------
-
-describe('ExperimentalTransportStatusCard — baseline peer-card presentation (D-11)', () => {
-  function renderBaseline(): renderer.ReactTestRenderer {
-    return renderCard(<ExperimentalTransportStatusCard onTrySync={jest.fn()} />);
-  }
-
-  it('icon is flask-vial/#WARN000; root border is 4px #WARN000; heading/body render the P2P keys; try-sync button is warning+forceDarkText, never accent; full tree carries no success/accent color', () => {
-    const tree = renderBaseline();
-
-    const iconWrap = findByTestID(tree.root, 'transport-status-icon-p2p')[0];
-    const iconNode = iconWrap.findByType('FontAwesome6' as never);
-    expect(iconNode.props.name).toBe('flask-vial');
-    expect(iconNode.props.color).toBe(SENTINEL_COLORS.warning);
-
-    const rootNode = findByTestID(tree.root, 'transport-status-card-p2p')[0];
-    const rootStyle = JSON.stringify(rootNode.props.style);
-    expect(rootStyle).toContain('"borderLeftWidth":4');
-    expect(rootStyle).toContain(`"borderLeftColor":"${SENTINEL_COLORS.warning}"`);
-
-    const headingNode = findByTestID(tree.root, 'transport-status-p2p-heading')[0];
-    expect(serializeSubtree(headingNode)).toContain('bulkImportSyncP2pHeading');
-
-    const bodyNode = findByTestID(tree.root, 'transport-status-p2p-body')[0];
-    expect(serializeSubtree(bodyNode)).toContain('bulkImportSyncP2pBody');
-
-    const buttonSubtree = findByTestID(tree.root, 'transport-try-peer-sync-p2p')[0];
-    const buttonSerialized = serializeSubtree(buttonSubtree);
-    expect(buttonSerialized).toContain(SENTINEL_COLORS.warning);
-    expect(buttonSerialized).toContain('"forceDarkText":true');
-    expect(buttonSerialized).not.toContain(SENTINEL_COLORS.accent);
-
-    const full = JSON.stringify(tree.toJSON());
-    expect(full).not.toContain(SENTINEL_COLORS.success);
-    expect(full).not.toContain(SENTINEL_COLORS.accent);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Suite G — the state-invariance proof (the centerpiece): "peer card renders the experimental
-// treatment in every state, including success".
-// ---------------------------------------------------------------------------
-
-describe('peer card renders the experimental treatment in every state, including success', () => {
-  const emptyPayload: Record<string, unknown> = {};
-
-  // Candidate state payloads a caller might try to push at this card. Each is spread onto the
-  // element at the call site as an untyped `Record<string, unknown>` — these keys do not exist on
-  // `ExperimentalTransportStatusCardProps`, and spreading them in deliberately bypasses the
-  // compile-time prop check. That is how this test proves even a caller who bypasses the type
-  // system cannot change the rendering: the component itself has no input through which these
-  // values could reach its presentation.
-  const statePayloads: Array<{ label: string; payload: Record<string, unknown> }> = [
-    {
-      label: 'success payload with counts — the D-11 centerpiece case',
-      payload: {
-        syncState: 'success',
-        lastSyncedAt: '2026-08-05T12:00:00Z',
-        importedCount: 12,
-        pendingCount: 0,
-        errorCount: 0,
-      },
-    },
-    { label: 'error payload', payload: { syncState: 'error', errorCount: 9 } },
-    { label: 'never payload', payload: { syncState: 'never' } },
-    {
-      label: 'connected/peerCount/strandPeers payload',
-      payload: { connected: true, peerCount: 4, strandPeers: 2 },
-    },
-  ];
-
-  function renderPeerCard(payload: Record<string, unknown>): renderer.ReactTestRenderer {
-    const onTrySync = jest.fn();
-    return renderCard(
-      <ExperimentalTransportStatusCard onTrySync={onTrySync} {...payload} />,
-    );
-  }
-
-  const baselineJSON = JSON.stringify(renderPeerCard(emptyPayload).toJSON());
-
-  it.each(statePayloads.map(({ label, payload }) => [label, payload] as const))(
-    'renders byte-identical output to the empty-payload baseline for: %s',
-    (_label, payload) => {
-      const tree = renderPeerCard(payload);
-      expect(JSON.stringify(tree.toJSON())).toBe(baselineJSON);
-    },
-  );
-
-  it.each([
-    ['empty payload', emptyPayload] as const,
-    ...statePayloads.map(({ label, payload }) => [label, payload] as const),
-  ])(
-    'icon stays flask-vial/#WARN000, the body renders, and no success/accent/circle-check leaks through for: %s',
-    (_label, payload) => {
-      const tree = renderPeerCard(payload);
-
-      const iconWrap = findByTestID(tree.root, 'transport-status-icon-p2p')[0];
-      const iconNode = iconWrap.findByType('FontAwesome6' as never);
-      expect(iconNode.props.name).toBe('flask-vial');
-      expect(iconNode.props.color).toBe(SENTINEL_COLORS.warning);
-
-      expect(findByTestID(tree.root, 'transport-status-p2p-body')).toHaveLength(1);
-
-      const full = JSON.stringify(tree.toJSON());
-      expect(full).not.toContain(SENTINEL_COLORS.success);
-      expect(full).not.toContain(SENTINEL_COLORS.accent);
-      expect(full).not.toContain('circle-check');
-    },
-  );
-
-  it('disabled=true still renders the try-sync control, marks it disabled, and does not invoke onTrySync (disabled-not-hidden, same contract as the other cards)', () => {
-    const onTrySync = jest.fn();
-    const tree = renderCard(<ExperimentalTransportStatusCard disabled onTrySync={onTrySync} />);
-    const buttonWrap = findByTestID(tree.root, 'transport-try-peer-sync-p2p')[0];
-    expect(buttonWrap).toBeDefined();
-
-    const disabledTouchables = buttonWrap.findAll((node) => node.props.disabled === true);
-    expect(disabledTouchables.length).toBeGreaterThanOrEqual(1);
-    disabledTouchables[0].props.onPress?.();
-    expect(onTrySync).not.toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Suite H — source-level severance gates. react-test-renderer cannot see what a component
-// *doesn't* read, so this is asserted on source text at test time.
-// ---------------------------------------------------------------------------
-
-describe('ExperimentalTransportStatusCard — source-level severance gates', () => {
-  const componentSource = fs.readFileSync(
-    path.resolve(__dirname, '../TransportStatusCard.tsx'),
-    'utf8',
-  );
-
-  function peerBranchSlice(): string {
-    const i = componentSource.indexOf('export function ExperimentalTransportStatusCard');
-    expect(i).toBeGreaterThanOrEqual(0);
-    return componentSource.slice(i);
-  }
-
-  it('reads no per-state lookup, no syncState, and no success/error/accent color', () => {
-    const slice = peerBranchSlice();
-    for (const forbidden of [
-      'transportCopy',
-      'TRANSPORT_STATE_ICONS',
-      'syncState',
-      'colors.success',
-      'colors.error',
-      'colors.accent',
-    ]) {
-      expect(slice).not.toContain(forbidden);
-    }
-  });
-
-  it('reads colors.warning at least twice (icon and border) and uses forceDarkText', () => {
-    const slice = peerBranchSlice();
-    const warningCount = (slice.match(/colors\.warning/g) || []).length;
-    expect(warningCount).toBeGreaterThanOrEqual(2);
-    expect(slice).toContain('forceDarkText');
-  });
-
-  it('renders bulkImportSyncP2pBody exactly once, unconditionally — a coarse guard whose real backstop is Suite G byte-equality', () => {
-    const occurrences = (componentSource.match(/bulkImportSyncP2pBody/g) || []).length;
-    expect(occurrences).toBe(1);
-
-    const lines = componentSource.split('\n');
-    const lineIndex = lines.findIndex((line) => line.includes('bulkImportSyncP2pBody'));
-    expect(lineIndex).toBeGreaterThanOrEqual(0);
-    const line = lines[lineIndex];
-    expect(line.includes('?')).toBe(false);
-    expect(line.includes('&&')).toBe(false);
-  });
-
-  it("the file's first 60 lines state the D-11 reason verbatim", () => {
-    const first60 = componentSource.split('\n').slice(0, 60).join('\n');
-    expect(first60).toContain('code-complete, unverified');
-    expect(first60).toContain('not verification');
   });
 });

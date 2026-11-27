@@ -1,0 +1,15 @@
+Test Suites: 1 failed, 41 passed, 42 total
+Tests:       2 failed, 321 passed, 323 total
+Snapshots:   0 total
+Time:        12.34 s
+Ran all test suites.
+
+FAIL src/__fixtures__/selftest-unexpected.test.ts
+  ● Selftest Unexpected Suite › a fixture-only test title one
+
+    Error: synthetic failure for selftest
+
+  ● Selftest Unexpected Suite › a fixture-only test title two
+
+    Error: synthetic failure for selftest
+

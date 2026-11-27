@@ -29,8 +29,16 @@ import {
   BuilderValidationError
 } from '@votetorrent/vote-core'
 
-/** Valid Scope values for compile-time-safe runtime validation. */
-const VALID_SCOPES: readonly string[] = ['rn', 'rad', 'vrg', 'iad', 'rnp', 'uai', 'ceb', 'mel', 'cap']
+/**
+ * Valid Scope values for compile-time-safe runtime validation.
+ *
+ * Mirrors the schema's `view Scope` (schema/votetorrent.qsql:56-69) exactly.
+ * Corrected 2026-08-25: previously carried `'rnp'` (never in the view, so the
+ * database always rejected it) and omitted `'ik'` (added to the view 2026-07-30),
+ * which would have turned away a keyholder-invite signing session routed through
+ * this builder.
+ */
+const VALID_SCOPES: readonly string[] = ['rn', 'rad', 'vrg', 'iad', 'uai', 'ceb', 'mel', 'cap', 'ik']
 
 type Draft = { authorityId?: string; digestArgs?: AdminDigestArgs | null; scope?: Scope; signature?: Signature; nonce?: string }
 type DraftValidator = (draft: Readonly<Draft>) => BuilderError[]
@@ -88,6 +96,12 @@ export class SigningStartSigningSessionBuilder implements ISigningStartSigningSe
     }
     if (typeof draft.digestArgs.effectiveAt !== 'string' || draft.digestArgs.effectiveAt.trim() === '') {
       errors.push({ path: 'digestArgs.effectiveAt', code: 'EMPTY', message: 'digestArgs.effectiveAt required', kind: 'per-setter' })
+    }
+    // 57-01 (D-02): officers is the serialized roster; an empty roster still
+    // serializes to the non-empty string '[]', so the trim check below is
+    // correct as written (mirrors thresholdPolicies).
+    if (typeof draft.digestArgs.officers !== 'string' || draft.digestArgs.officers.trim() === '') {
+      errors.push({ path: 'digestArgs.officers', code: 'EMPTY', message: 'digestArgs.officers required', kind: 'per-setter' })
     }
     if (typeof draft.digestArgs.thresholdPolicies !== 'string' || draft.digestArgs.thresholdPolicies.trim() === '') {
       errors.push({ path: 'digestArgs.thresholdPolicies', code: 'EMPTY', message: 'digestArgs.thresholdPolicies required', kind: 'per-setter' })

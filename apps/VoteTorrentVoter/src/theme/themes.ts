@@ -41,6 +41,13 @@ export const type = {
 	h4: { fontSize: 20, lineHeight: 26 }, // office title / section header / button labels — Figma: 20px/18px(DIVERGE)
 	body: { fontSize: 16, lineHeight: 22 }, // body/labels/links/tab labels — Figma: 16px/18px(MATCH, ratio>1 already)
 	caption: { fontSize: 16, lineHeight: 20 }, // "N/M questions completed" — Figma: 16px/18px(DIVERGE, slightly tighter)
+	// CR-01: the countdown's shrunk label step. Sized from measured device geometry, not taste:
+	// on the Redmi 8 (720x1520 @320dpi) the card's inner width is ~371px and caption-16 labels
+	// render at ~20.6px/glyph, so the <24h label row (HOURS MINUTES SECONDS / HORAS MINUTOS
+	// SEGUNDOS) needs ~427px EN and ~449px ES and overflows. At 12px it lands at ~329px EN /
+	// ~345px ES, clearing 371px with ~26px to spare; 13px fits EN but lands exactly ON 371px in
+	// ES, which is no margin at all. Paired with type.h2 for the digits in the same shrink step.
+	captionSmall: { fontSize: 12, lineHeight: 16 },
 } as const;
 
 // Component corner radii, promoted from the SC2 parity render (Phase 38 Plan 02 Task 3 review) so

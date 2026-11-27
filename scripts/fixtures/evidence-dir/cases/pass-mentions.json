@@ -1,0 +1,11 @@
+{
+  "base": "base-device",
+  "ops": [
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/run-1/attempt-1/join/mentions.log",
+      "content": "{{PLANT:mention-vtjoin1}}\n{{PLANT:mention-sereus-invite}}\n{{PLANT:mention-invite-private}}\n{{PLANT:mention-device-id-code}}\n"
+    }
+  ],
+  "expect": "PASS"
+}

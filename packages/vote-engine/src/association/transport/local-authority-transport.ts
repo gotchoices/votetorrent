@@ -4,6 +4,17 @@ import type { IAuthorityTransport } from './authority-transport.js'
 type SignatureOrCallback = Signature | ((digest: Uint8Array) => Promise<Signature>)
 
 /**
+ * SUPERSEDED (D-04) for the register/associate flow, effective Phase 51.
+ *
+ * `IAssociationRequestTransport` (`association-request-transport.ts`) is
+ * now the seam for that flow. This class's `sendChallenge` is a documented
+ * no-op below, and it is wired into no app (verified by grep — zero
+ * `LocalAuthorityTransport`/`IAuthorityTransport` references anywhere under
+ * `apps/`, recorded in `51-04-SUMMARY.md`). It is retained ONLY as a
+ * Node-side test fixture and as the historical record of the in-process
+ * framing this doc comment states below. It MUST NOT be constructed by any
+ * app code, and it is NOT one of D-08's two real bindings.
+ *
  * LocalAuthorityTransport — the in-process implementation of
  * `IAuthorityTransport` (D-11, D-03: the authority peer runs the verifier
  * + engine in-process, NOT as a dedicated backend service). Delegates

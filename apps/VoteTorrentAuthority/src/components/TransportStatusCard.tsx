@@ -23,23 +23,14 @@ import { formatRequestTimestamp } from "../screens/registration/registration-req
  *     real transports whose sync outcome is a fact this app can observe and report. Their cards
  *     are state-driven — icon, color and copy all resolve from the reported `syncState`.
  *
- * (b) `ExperimentalTransportStatusCard` — peer-to-peer. This card is categorically different.
- *     The peer-cluster transport ships **code-complete, unverified** (D-11): P2P-11 is
+ * (b) **62-21: the peer-to-peer card moved to `PeerTransportStatusCard.tsx`.** The peer-cluster
+ *     transport ships **code-complete, unverified** (D-23/P2P-11 proof debt): P2P-11 is
  *     device-REFUTED, its wall has moved repeatedly, and this project has a documented history of
  *     "implemented but unproven" being read as "done" (Phase 45 closed with four such legs, Phase
- *     41's Node gate was device-REFUTED). So the warning treatment here is not a *state* the card
- *     enters — it is a *property* of the component. A successful peer sync does not license
- *     success styling because **connectivity in a given session is not verification**: a socket
- *     opening and bytes moving proves nothing about the correctness or safety of the underlying
- *     protocol, only that a session happened to connect this time.
- *
- *     That reasoning must be foreclosed *in the file*, not merely stated in a planning document,
- *     so the severance is structural: `ExperimentalTransportStatusCard` accepts **no** sync-state
- *     input of any kind. There is no prop through which a connection or sync result could reach
- *     this component's presentation, so a caller cannot make it look successful even by accident,
- *     and a state-driven treatment is not merely discouraged here — it is unwritable without first
- *     changing this component's prop type. Anyone who adds a state prop to
- *     `ExperimentalTransportStatusCard` is deleting the D-11 guarantee and must say so out loud.
+ *     41's Node gate was device-REFUTED). `PeerTransportStatusCard` DOES now render real numeric
+ *     counts (D-31) — unlike this file's two state-driven cards below, no prop reaches its border,
+ *     caveat, heading or icon colour. See that component's own doc comment for the full structural
+ *     severance argument this file's header used to carry for the retired `Experimental`-prefixed peer card.
  *
  * `disabled` on either card is a legibility/convenience control only, mirroring Phase 46's
  * `useCurrentOfficerScopes()` class of gate — it is **not** a security boundary.
@@ -230,70 +221,6 @@ export function TransportStatusCard({
 					size="thin"
 					disabled={disabled}
 					onPress={disabled ? NOOP : onSyncNow}
-				/>
-			</View>
-		</View>
-	);
-}
-
-/**
- * The structural severance (T-48-17-01/02, the central risk this plan mitigates): exactly two
- * props, neither of which is a sync-state signal. There is no `syncState`, no `lastSyncedAt`, no
- * counts, no `connected`, no `peerCount`, no `kind` — no input through which a connection or sync
- * result could reach this component's presentation. This omission IS the enforcement mechanism.
- * Anyone adding a state prop here is deleting the D-11 guarantee and must say so out loud.
- */
-interface ExperimentalTransportStatusCardProps {
-	/** Legibility/convenience control only — NOT a security boundary (see file doc comment). */
-	disabled?: boolean;
-	onTrySync: () => void;
-}
-
-export function ExperimentalTransportStatusCard({
-	disabled = false,
-	onTrySync,
-}: ExperimentalTransportStatusCardProps) {
-	const { colors } = useTheme() as ExtendedTheme;
-	const { t } = useTranslation();
-
-	return (
-		<View
-			testID="transport-status-card-p2p"
-			style={[
-				styles.cardSurface,
-				// The 4px warning left border is hardcoded, never computed from any input. 48-14's
-				// "warning left border reserved exclusively for bridge provenance" reservation is
-				// scoped to RegistrationRequestRow in the inbox list; on THIS screen the 4px warning
-				// border is the established callout treatment already shared by
-				// AttestationProvisioningStatusScreen and PriorRejectionsCallout.
-				{ backgroundColor: colors.card, borderLeftWidth: 4, borderLeftColor: colors.warning },
-			]}
-		>
-			<View style={localStyles.headingRow}>
-				<View testID="transport-status-icon-p2p">
-					<FontAwesome6 name={'flask-vial'} size={16} color={colors.warning} />
-				</View>
-				<ThemedText type="defaultSemiBold" testID="transport-status-p2p-heading">
-					{t("bulkImportSyncP2pHeading")}
-				</ThemedText>
-			</View>
-
-			{/* Unconditional — no surrounding conditional of any kind. This is not an error state and
-			    cannot be dismissed by a successful sync (D-11). */}
-			<ThemedText type="default" style={localStyles.bodyText} testID="transport-status-p2p-body">
-				{t("bulkImportSyncP2pBody")}
-			</ThemedText>
-
-			<View testID="transport-try-peer-sync-p2p" style={localStyles.footer}>
-				{/* The accent role is forbidden here so this control can never read as an
-				    equally-trusted third option beside the two proven bindings' Sync Now buttons. */}
-				<CustomButton
-					title={t("bulkImportSyncP2pTryButton")}
-					backgroundColor={colors.warning}
-					forceDarkText
-					size="thin"
-					disabled={disabled}
-					onPress={disabled ? NOOP : onTrySync}
 				/>
 			</View>
 		</View>

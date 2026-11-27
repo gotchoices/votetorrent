@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  App Attest environment. `development` makes DCAppAttestService issue attestations whose
+	  authData aaguid is the ASCII string `appattestdevelop`; `production` uses `appattest` + 7 zero
+	  bytes. The authority verifier checks this (spike 081, neg-production-aaguid-in-dev) — a
+	  development attestation must NEVER be accepted by a production authority, and the aaguid is
+	  the only thing that distinguishes them.
+
+	  NOTE: TestFlight and App Store builds get `production` regardless of this value; a development
+	  build signed with a development profile gets `development`. Do not assume the plist wins.
+
+	  MEASURED 2026-08-25 (spike 085, iPhone 13 / iOS 26.6.1, free personal team): a build with NO
+	  entitlements file at all still received a `development` attestation — aaguid
+	  `appattestdevelop`, receipt `sandbox`. So the absence of this key does NOT mean production.
+	  The provisioning profile is what decides. Configure the verifier from the aaguid you actually
+	  observe, never from an assumed default.
+	-->
+	<key>com.apple.developer.devicecheck.appattest-environment</key>
+	<string>development</string>
+</dict>
+</plist>

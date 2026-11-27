@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <node index="0" text="" class="android.widget.FrameLayout" clickable="false" bounds="[0,0][1080,2400]">
+    <node index="0" text="" class="android.view.ViewGroup" clickable="false" bounds="[0,1900][1080,2400]">
+      <node index="0" text="" class="android.view.ViewGroup" clickable="false" bounds="[0,1990][1080,2344]">
+        <node index="0" text="" class="android.view.ViewGroup" clickable="true" bounds="[48,2000][1032,2147]">
+          <node index="0" text="APPROVE REGISTRATION" class="android.widget.TextView" clickable="false" bounds="[300,2020][780,2127]" />
+        </node>
+        <node index="1" text="" class="android.view.ViewGroup" clickable="true" bounds="[48,2187][1032,2334]">
+          <node index="0" text="REJECT REQUEST" class="android.widget.TextView" clickable="false" bounds="[300,2207][780,2314]" />
+        </node>
+      </node>
+    </node>
+  </node>
+</hierarchy>

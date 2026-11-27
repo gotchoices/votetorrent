@@ -13,10 +13,13 @@
  *     that uses the noble v2 default (prehash:true). AdminSigning.SignatureValid /
  *     OfficerSignature.SignatureValid depend on this invariant.
  *
- *   Key storage (accepted, deferred, matches authority app posture): The device
- *     private key is stored in plaintext AsyncStorage. Android Keystore / secure
- *     storage migration is a deferred hardening task; this module does NOT change
- *     key storage.
+ *   Key storage (D-42, Phase 62 plan 08): the device private key is stored at rest wrapped
+ *     under a non-exportable OS-keystore AES key (`device-user.ts`'s
+ *     `VOTETORRENT_VOTER_IDENTITY_WRAP_KEY_V1`) and unwrapped in memory ONLY here, inside this
+ *     closure, to sign. `getDevicePrivKeyHex`/`getOrCreateDeviceUser` can throw
+ *     `DeviceIdentityKeyUnavailableError` (D-40: an unwrappable record fails closed and is never
+ *     regenerated) — that error propagates to this function's caller and is NEVER swallowed into
+ *     silently minting a fresh identity.
  *
  *   Digest source: The engine computes the canonical SQL Digest() and passes the
  *     resulting bytes to this callback. The callback signs EXACTLY those bytes —

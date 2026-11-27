@@ -113,7 +113,7 @@
  * or an emulator-NAT-only surface — see 41-04-STRAND-COHORT-DIAGNOSIS.md).
  */
 import { CadreNode } from '@serfab/cadre-core';
-import { MemoryRawStorage, createLibp2pNode } from '@optimystic/db-p2p';
+import { memoryNodeStorage, createLibp2pNode } from '@optimystic/db-p2p';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
 import { multiaddr } from '@multiformats/multiaddr';
@@ -235,12 +235,12 @@ async function bootDrone(name, bootstrapControlAddr, strandBootstrapAddr) {
       partyId: PARTY_ID,
       bootstrapNodes: bootstrapControlAddr ? [bootstrapControlAddr] : [],
     },
-    profile: 'storage',
+    nodeClass: 'server',
     strandFilter: { mode: 'all' },
     // Published cadre-core@0.8.1 defaults to fail-closed schema-signature verification
     // (types.d.ts:349-352); this dev-only unsigned MINIMAL_SCHEMA needs the explicit relax.
     requireSignedSchemas: false,
-    storage: { provider: () => new MemoryRawStorage() },
+    storage: { open: async () => memoryNodeStorage() },
     network: {
       transports: [webSockets()],
       listenAddrs: ['/ip4/0.0.0.0/tcp/0/ws'], // ephemeral — avoids EADDRINUSE
@@ -257,8 +257,23 @@ async function bootDrone(name, bootstrapControlAddr, strandBootstrapAddr) {
   await withTimeout(
     drone.addStrand({
       strandRow: { Id: STRAND_ID, MemberPrivateKey: null, Type: 'o' },
-      sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, latencyHint: 'interactive' },
+      sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, schemaVersion: 1, latencyHint: 'interactive' },
       mode: 'bootstrap',
+      // Founder-ness is normally DERIVED from `strandRow.FounderOwnerKey` matching this node's
+      // owner key, and the row above is hand-built with no such provenance -- so the derivation
+      // says "joiner" even for the drone that has no upstream to sync FROM. Under cadre-core
+      // >= 1.1.0's first-sync gate that is a deadlock: a joiner is withheld its database until
+      // some member's Header reaches it, and with nobody founding, no Header ever exists. Every
+      // node then reports StrandAwaitingFirstSyncError "no member of this strand has been
+      // reachable since this machine joined" -- which reads exactly like the relay-reachability
+      // wall this harness exists to measure. The FIRST drone (no strandBootstrapAddr) founds;
+      // the cross-bootstrapped one stays a real joiner so its gating is the genuine article.
+      ...(!strandBootstrapAddr && { founder: true }),
+      // The cross-bootstrapped drone IS a joiner, and cadre-core >= 1.1.0 blocks a joiner's
+      // addStrand until its first sync completes, rejecting after 30 s. That kills this harness
+      // at bring-up before any relay leg can report, so opt out and let the strand become
+      // writable as the topology assembles. The founder above is never gated either way.
+      awaitFirstSync: false,
     }),
     ADD_STRAND_TIMEOUT_MS,
     `${name} addStrand`,
@@ -305,9 +320,9 @@ function newClient(mode, droneAControlAddr, droneBControlAddr, droneAStrandAddr,
       partyId: PARTY_ID,
       bootstrapNodes: buildClientBootstrapNodes(mode, droneAControlAddr, droneBControlAddr),
     },
-    profile: 'transaction',
+    nodeClass: 'device',
     strandFilter: { mode: 'all' },
-    storage: { provider: () => new MemoryRawStorage() },
+    storage: { open: async () => memoryNodeStorage() },
     network: {
       transports: buildClientTransports(mode, 2),
       listenAddrs: buildClientListenAddrs(mode, droneAStrandAddr, droneBStrandAddr),
@@ -538,10 +553,10 @@ function newStrandCohortClient(droneAControlAddr, droneBControlAddr, droneAStran
       partyId: PARTY_ID,
       bootstrapNodes: [droneAControlAddr, droneBControlAddr],
     },
-    profile: 'transaction',
+    nodeClass: 'device',
     strandFilter: { mode: 'all' },
     requireSignedSchemas: false,
-    storage: { provider: () => new MemoryRawStorage() },
+    storage: { open: async () => memoryNodeStorage() },
     network: {
       transports: [webSockets(), circuitRelayTransport({ reservationConcurrency: 2 })],
       listenAddrs,
@@ -559,7 +574,7 @@ async function joinStrandAndPollCohort(client, name) {
     await withTimeout(
       client.addStrand({
         strandRow: { Id: STRAND_ID, MemberPrivateKey: null, Type: 'o' },
-        sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, latencyHint: 'interactive' },
+        sAppConfig: { id: SAPP_ID, version: '1.0.0', schema: MINIMAL_SCHEMA, schemaVersion: 1, latencyHint: 'interactive' },
       }),
       ADD_STRAND_TIMEOUT_MS,
       `${name} addStrand (cohort)`,

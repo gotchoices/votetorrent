@@ -5,6 +5,7 @@
  * ElectionsEngine.createElection.
  */
 
+import { timelineBuilderErrors } from '../../election/timeline-rules.js'
 import type {
   BuilderError,
   ElectionCoreInit,
@@ -113,8 +114,13 @@ export class ElectionsCreateElectionBuilder implements IElectionsCreateElectionB
     if (r.timeline && typeof r.timeline === 'object' && !Array.isArray(r.timeline)) {
       const t = r.timeline as Record<string, number>
       const ordered: Array<[string, string]> = [
-        ['votingStarts', 'tallyingStarts'],
-        ['tallyingStarts', 'certificationStarts']
+        ['votingStarts', 'accruingVotes'],
+        ['accruingVotes', 'hashingVotes'],
+        ['hashingVotes', 'releasingKeys'],
+        ['releasingKeys', 'tallyingStarts'],
+        ['tallyingStarts', 'validation'],
+        ['validation', 'certificationStarts'],
+        ['certificationStarts', 'closed']
       ]
       for (const [before, after] of ordered) {
         if (
@@ -130,6 +136,8 @@ export class ElectionsCreateElectionBuilder implements IElectionsCreateElectionB
           })
         }
       }
+      // The rest of what the Voter refuses (engine timeline check, election/timeline-rules.ts).
+      errors.push(...timelineBuilderErrors(r.timeline, draft.election ?? {}, errors))
     }
     return errors
   }

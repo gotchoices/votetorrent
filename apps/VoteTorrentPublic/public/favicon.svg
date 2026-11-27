@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+	<!--
+		favicon.svg — the D-20 primary vector icon (56-06), derived from the
+		one existing brand mark in this repo,
+		apps/VoteTorrentAuthority/android/app/src/main/res/mipmap-xxxhdpi/vt_auth_icon.png
+		(a wave-curl accent flowing into a checkmark, blue gradient). Re-drawn
+		as a simplified two-stroke vector rather than an embedded raster — an
+		SVG wrapping a <image> of that PNG would be a raster wearing an SVG
+		extension, not a scalable mark, and would fail at 16px anyway.
+
+		The single top-level <g> below carries translate(8,8) scale(0.75),
+		confining the artwork to a centred 48x48 box inside this 64x64
+		canvas. That is the tab-bar padding constraint (56-UI-SPEC.md Surface
+		4) expressed as something a test can read: the mark does not bleed to
+		the canvas edge, so it stays legible on both a light and a dark
+		browser tab bar. Background is deliberately transparent (no root
+		<rect>) so the current tab-bar color always shows through.
+	-->
+	<defs>
+		<linearGradient id="vtFaviconGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+			<stop offset="0%" stop-color="#0a2540" />
+			<stop offset="45%" stop-color="#1565c0" />
+			<stop offset="100%" stop-color="#29b6f6" />
+		</linearGradient>
+	</defs>
+	<g transform="translate(8,8) scale(0.75)">
+		<!-- wave-curl accent, echoing the source mark's spiral wave -->
+		<path
+			d="M6,22 C4,11 15,3 27,7 C19,6 12,11 13,18 C14,25 21,27 25,22"
+			fill="none"
+			stroke="url(#vtFaviconGrad)"
+			stroke-width="5"
+			stroke-linecap="round"
+		/>
+		<!-- checkmark, the same silhouette as the source mark's dominant shape -->
+		<path
+			d="M3,36 L24,57 L61,9"
+			fill="none"
+			stroke="url(#vtFaviconGrad)"
+			stroke-width="10"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+		/>
+	</g>
+</svg>

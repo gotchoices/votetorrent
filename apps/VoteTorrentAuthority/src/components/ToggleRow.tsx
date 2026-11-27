@@ -8,9 +8,11 @@ interface ToggleRowProps {
 	label: string;
 	value: boolean;
 	onValueChange: (next: boolean) => void;
+	testID?: string;
+	accessibilityLabel?: string;
 }
 
-export function ToggleRow({ label, value, onValueChange }: ToggleRowProps) {
+export function ToggleRow({ label, value, onValueChange, testID, accessibilityLabel }: ToggleRowProps) {
 	const { colors } = useTheme() as ExtendedTheme;
 
 	return (
@@ -18,6 +20,8 @@ export function ToggleRow({ label, value, onValueChange }: ToggleRowProps) {
 			<ThemedText type="defaultSemiBold">{label}</ThemedText>
 			<Switch
 				value={value}
+				testID={testID}
+				accessibilityLabel={accessibilityLabel}
 				onValueChange={onValueChange}
 				trackColor={{ false: colors.border, true: colors.primary }}
 				thumbColor={colors.card}

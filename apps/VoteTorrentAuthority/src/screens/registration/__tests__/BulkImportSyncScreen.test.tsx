@@ -1,23 +1,16 @@
 /**
- * BulkImportSyncScreen.test.tsx — D-01/D-11 proofs for the Bulk Import / Sync screen.
+ * BulkImportSyncScreen.test.tsx — D-01/D-04/D-28/D-31 proofs for the Bulk Import / Sync screen.
  *
  * DECLARED BLIND SPOT: this suite proves the screen's composition, ordering, seam invocation, and
  * PII discipline (T-48-20-01, T-48-20-02, T-48-20-05). It proves NOTHING about the peer-cluster
- * transport itself, whose leg ships **code-complete, unverified** — a green run here must never be
- * cited as verification for it. It also proves nothing about whether an approving officer actually
- * holds `'vrg'`: that gate is a legibility control, not enforcement (Phase 999.1), and this suite's
- * "disabled, not hidden" assertions describe presentation only.
+ * transport itself, whose leg ships **code-complete, unverified** (D-23) — a green run here must
+ * never be cited as verification for it. It also proves nothing about whether an approving officer
+ * actually holds `'vrg'`: that gate is a legibility control, not enforcement (Phase 999.1), and
+ * this suite's "disabled, not hidden" assertions describe presentation only.
  *
- * 48-23 UPDATE — Suite C: through 48-20, `SyncBindingId` excluded `'peer'` and the peer card's
- * `onTrySync` was the literal `INERT_PEER_SYNC` no-op — pressing it could invoke NOTHING, by
- * construction. 48-23 widens `SyncBindingId` to admit `'peer'` and routes the peer card's press
- * through `runSync('peer')` against the seam. Suite C below is rewritten to the POST-widening
- * truth: the peer control resolves nothing (because no host in this repo registers a `'peer'`
- * binding) and never reaches the filesystem or REST bindings, and the peer card's warning
- * treatment and experimental body copy survive a real bridge succeeding, a real bridge failing,
- * AND a peer sync attempt. The peer-cluster leg itself remains **code-complete, unverified**
- * throughout — nothing in this file verifies it, and a green assertion below proves only that the
- * seam resolved (or failed to resolve) a handle, never that the peer-cluster protocol works.
+ * 62-21 UPDATE (S1-S7): the peer card is now `PeerTransportStatusCard` (D-31, live numeric
+ * counts), and a new `OfficerIntakeKeyCard` (D-04) sits above it. `useApp`, `officer-intake-key`
+ * and `useDeviceSigningErrorHandler` are now mocked at module scope.
  *
  * PATTERN SOURCE: `RegistrantsListScreen.test.tsx` (mock preamble, press/present/absent/treeText
  * helpers) and `TransportStatusCard.test.tsx` (sentinel color palette, host-node testID filtering,
@@ -26,6 +19,8 @@
 
 import React from "react";
 import renderer from "react-test-renderer";
+
+jest.setTimeout(30_000);
 
 // ---------------------------------------------------------------------------
 // Mutable module-level slots. Prefixed `mock` so babel-plugin-jest-hoist allows the jest.mock()
@@ -59,8 +54,7 @@ const SENTINEL_COLORS = {
 };
 
 // ---------------------------------------------------------------------------
-// Module mocks — module scope, before any import of the screen. Copied in shape from
-// RegistrantsListScreen.test.tsx:56-70.
+// Module mocks — module scope, before any import of the screen.
 // ---------------------------------------------------------------------------
 
 jest.mock("react-native-vector-icons/FontAwesome6", () => "FontAwesome6");
@@ -92,6 +86,78 @@ jest.mock("../../../hooks/useCurrentOfficerScopes", () => ({
 	useCurrentOfficerScopes: () => mockScopesResult,
 }));
 
+const mockGetEngine = jest.fn(async () => ({}));
+const mockResolveDeviceSigner = jest.fn(async () => async () => ({
+	signerUserId: "u1",
+	signerKey: "k1",
+	signature: "sig1",
+}));
+jest.mock("../../../providers/AppProvider", () => ({
+	useApp: () => ({ getEngine: mockGetEngine, resolveDeviceSigner: mockResolveDeviceSigner }),
+}));
+
+type OfficerIntakeKeyDepsLike = { getEngine: unknown; createSigner: unknown };
+const mockReadOfficerIntakeKeyState = jest.fn<Promise<string>, [OfficerIntakeKeyDepsLike, string]>(
+	async () => "not-enabled",
+);
+const mockEnableOfficerEncryptedIntake = jest.fn<Promise<string>, [OfficerIntakeKeyDepsLike, string]>(
+	async () => "enabled",
+);
+jest.mock("../officer-intake-key", () => ({
+	readOfficerIntakeKeyState: (...args: unknown[]) => mockReadOfficerIntakeKeyState(...(args as [OfficerIntakeKeyDepsLike, string])),
+	enableOfficerEncryptedIntake: (...args: unknown[]) => mockEnableOfficerEncryptedIntake(...(args as [OfficerIntakeKeyDepsLike, string])),
+}));
+
+interface DeviceSigningErrorOutcomeLike {
+	handled: boolean;
+	message?: string;
+}
+const mockHandleDeviceSigningError = jest.fn<DeviceSigningErrorOutcomeLike, [unknown]>(
+	(_err: unknown) => ({ handled: false, message: undefined }),
+);
+jest.mock("../../../hooks/useDeviceSigningErrorHandler", () => ({
+	useDeviceSigningErrorHandler: () => mockHandleDeviceSigningError,
+}));
+
+// 62-25 (D-29): registration-bridge-config, device-signer and device-user are mocked at module
+// scope — the screen now resolves the device signer directly for the bridge-URL save action.
+// Default state: a saved https URL already exists (bridgeReady === true), so every PRE-EXISTING
+// test in this file that presses `transport-sync-now-rest` keeps working unchanged; S8 overrides
+// this per-case to exercise the unset/loading states.
+interface BridgeConfigDepsLike {
+	getEngine: unknown;
+}
+const mockReadRegistrationBridgeConfig = jest.fn<Promise<{ savedUrl: string | null; revision: number | undefined }>, [BridgeConfigDepsLike, string]>(
+	async () => ({ savedUrl: "https://bridge.example/intake", revision: 1 }),
+);
+const mockSaveRegistrationBridgeUrl = jest.fn<
+	Promise<{ outcome: string; config?: { savedUrl: string | null; revision: number | undefined } }>,
+	[BridgeConfigDepsLike, string, string, unknown, number | undefined]
+>(async (_deps, _authorityId, url) => ({ outcome: "saved", config: { savedUrl: url, revision: 2 } }));
+jest.mock("../registration-bridge-config", () => ({
+	// The model mock's isSaveableBridgeUrl: startsWith('https://') — a deliberately simpler rule
+	// than the real 62-14 validator, sufficient for this screen's own gating assertions.
+	isSaveableBridgeUrl: (url: string) => url.startsWith("https://"),
+	readRegistrationBridgeConfig: (...args: unknown[]) =>
+		mockReadRegistrationBridgeConfig(...(args as [BridgeConfigDepsLike, string])),
+	saveRegistrationBridgeUrl: (...args: unknown[]) =>
+		mockSaveRegistrationBridgeUrl(...(args as [BridgeConfigDepsLike, string, string, unknown, number | undefined])),
+}));
+
+const mockCreateDeviceSigner = jest.fn(async (_name: string) => async () => ({
+	signerUserId: "u1",
+	signerKey: "k1",
+	signature: "sig1",
+}));
+jest.mock("../../../engines/device-signer", () => ({
+	createDeviceSigner: (name: string) => mockCreateDeviceSigner(name),
+}));
+
+const mockGetOrCreateDeviceUser = jest.fn(async (name: string) => ({ id: "u1", name, activeKeys: [] }));
+jest.mock("../../../engines/device-user", () => ({
+	getOrCreateDeviceUser: (name: string) => mockGetOrCreateDeviceUser(name),
+}));
+
 // ---------------------------------------------------------------------------
 // The model — plain TypeScript, no mocked dependency of its own, safe to import directly.
 // ---------------------------------------------------------------------------
@@ -103,8 +169,10 @@ import {
 	resolveTransportCardState,
 	toSyncErrorRefs,
 	INERT_PEER_SYNC,
+	type SyncBindingHandle,
 	type TransportSyncReport,
 } from "../bulk-import-sync-model";
+import { OfficerIntakeKeyCard } from "../components/OfficerIntakeKeyCard";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -119,9 +187,6 @@ async function flushTicks(count: number): Promise<void> {
 }
 
 async function renderScreen(): Promise<renderer.ReactTestRenderer> {
-	// Required lazily, at test-runtime, AFTER every jest.mock() factory and every `mock`-prefixed
-	// slot above has already been assigned — mirrors RegistrantsListScreen.test.tsx's own
-	// `renderScreen()` convention exactly, avoiding any import-order hazard against the mocks.
 	// eslint-disable-next-line @typescript-eslint/no-var-requires
 	const { BulkImportSyncScreen } = require("../BulkImportSyncScreen");
 
@@ -129,7 +194,7 @@ async function renderScreen(): Promise<renderer.ReactTestRenderer> {
 	await renderer.act(async () => {
 		tr = renderer.create(<BulkImportSyncScreen />);
 	});
-	await flushTicks(2);
+	await flushTicks(4);
 	return tr;
 }
 
@@ -182,8 +247,10 @@ function serializeSubtree(node: renderer.ReactTestInstance): string {
 
 const BLOCK_TEST_IDS = [
 	"bulk-import-sync-error",
+	"rest-bridge-config-card",
 	"transport-status-card-filesystem",
 	"transport-status-card-rest",
+	"officer-intake-key-card",
 	"transport-status-card-p2p",
 	"bulk-import-sync-errors-section",
 ];
@@ -191,9 +258,7 @@ const BLOCK_TEST_IDS = [
 /** Collects, IN RENDER ORDER, every host-node testID from `BLOCK_TEST_IDS` present in the tree. */
 function orderedBlockIds(tr: renderer.ReactTestRenderer): string[] {
 	return tr.root
-		.findAll(
-			(node) => typeof node.type === "string" && BLOCK_TEST_IDS.includes(node.props.testID),
-		)
+		.findAll((node) => typeof node.type === "string" && BLOCK_TEST_IDS.includes(node.props.testID))
 		.map((n) => n.props.testID as string);
 }
 
@@ -215,14 +280,39 @@ beforeEach(() => {
 	clearSyncBindings();
 	mockRouteParams = { authorityId: "auth-1" };
 	mockScopesResult = { scopes: ["vrg"], loading: false };
+	mockGetEngine.mockClear();
+	mockResolveDeviceSigner.mockClear();
+	mockReadOfficerIntakeKeyState.mockClear();
+	mockReadOfficerIntakeKeyState.mockImplementation(async () => "not-enabled");
+	mockEnableOfficerEncryptedIntake.mockClear();
+	mockEnableOfficerEncryptedIntake.mockImplementation(async () => "enabled");
+	mockHandleDeviceSigningError.mockClear();
+	mockHandleDeviceSigningError.mockImplementation(() => ({ handled: false, message: undefined }));
+	mockReadRegistrationBridgeConfig.mockClear();
+	mockReadRegistrationBridgeConfig.mockImplementation(async () => ({
+		savedUrl: "https://bridge.example/intake",
+		revision: 1,
+	}));
+	mockSaveRegistrationBridgeUrl.mockClear();
+	mockSaveRegistrationBridgeUrl.mockImplementation(async (_deps, _authorityId, url) => ({
+		outcome: "saved",
+		config: { savedUrl: url, revision: 2 },
+	}));
+	mockCreateDeviceSigner.mockClear();
+	mockCreateDeviceSigner.mockImplementation(async () => async () => ({
+		signerUserId: "u1",
+		signerKey: "k1",
+		signature: "sig1",
+	}));
+	mockGetOrCreateDeviceUser.mockClear();
 });
 
 // ---------------------------------------------------------------------------
-// Suite A — the fixed render order (the centerpiece of the D-11 claim on this screen).
+// S1 — the fixed render order.
 // ---------------------------------------------------------------------------
 
-describe("BulkImportSyncScreen — fixed render order (D-01/D-11)", () => {
-	it("peer card renders below both proven bindings, always", async () => {
+describe("BulkImportSyncScreen — fixed render order (S1b, 62-25)", () => {
+	it("error slot, rest-bridge-config-card, filesystem, rest, officer-intake-key-card, transport-status-card-p2p — the peer card is last", async () => {
 		registerSyncBinding({
 			id: "filesystem",
 			syncNow: jest.fn(async () => report({ errorItemIds: ["req-0001"] })),
@@ -238,17 +328,36 @@ describe("BulkImportSyncScreen — fixed render order (D-01/D-11)", () => {
 		expect(orderedBlockIds(tr)).toEqual(BLOCK_TEST_IDS);
 	});
 
-	it("ordering holds even when the peer card is the only card with anything to say", async () => {
-		// Both real transports stay in their `never` state (nothing registered, nothing synced),
-		// and no errors section renders — proves ordering is not a side effect of one transport
-		// having data.
+	it("ordering holds even when nothing has anything to say yet", async () => {
 		const tr = await renderScreen();
 
 		expect(orderedBlockIds(tr)).toEqual([
 			"bulk-import-sync-error",
+			"rest-bridge-config-card",
 			"transport-status-card-filesystem",
 			"transport-status-card-rest",
+			"officer-intake-key-card",
 			"transport-status-card-p2p",
+		]);
+	});
+
+	it("the unset-bridge hint sits directly under the REST card when no URL is saved", async () => {
+		mockReadRegistrationBridgeConfig.mockImplementation(async () => ({ savedUrl: null, revision: 0 }));
+		const tr = await renderScreen();
+
+		const ids = tr.root
+			.findAll(
+				(node) =>
+					typeof node.type === "string" &&
+					["transport-status-card-rest", "registration-bridge-config-unset-hint", "officer-intake-key-card"].includes(
+						node.props.testID,
+					),
+			)
+			.map((n) => n.props.testID as string);
+		expect(ids).toEqual([
+			"transport-status-card-rest",
+			"registration-bridge-config-unset-hint",
+			"officer-intake-key-card",
 		]);
 	});
 });
@@ -284,6 +393,19 @@ describe("BulkImportSyncScreen — Filesystem/REST cards invoke a real attached 
 			expect(treeText(tr)).not.toContain("SSN-123-45-6789-LEAKED");
 		});
 
+		it(`Sync Now (${id}) renders a bridge-listing failure as the error state, never a healthy sync, and never its text (S-3)`, async () => {
+			const syncNow = jest.fn(async () => {
+				throw new Error("registration bridge listing failed (status 401)");
+			});
+			registerSyncBinding({ id, syncNow });
+			const tr = await renderScreen();
+
+			await press(tr, `transport-sync-now-${id}`);
+
+			present(tr, `transport-status-${id}-error-heading`);
+			expect(treeText(tr)).not.toContain("registration bridge listing failed");
+		});
+
 		it(`Sync Now (${id}) with no binding registered renders the error variant without throwing`, async () => {
 			const tr = await renderScreen();
 
@@ -295,16 +417,7 @@ describe("BulkImportSyncScreen — Filesystem/REST cards invoke a real attached 
 });
 
 // ---------------------------------------------------------------------------
-// Suite C — the peer card's control is wired through the seam (48-23), and its experimental
-// treatment is unchanged by that (the D-11 proof at the screen level).
-//
-// Through 48-20, this suite proved the peer control invoked NOTHING and left the tree
-// byte-identical. 48-23 wires the control through `runSync('peer')`, so that specific claim is no
-// longer true and is not silenced here — it is replaced by the narrower, still-true claims below:
-// the control never reaches the filesystem or REST bindings, an attached peer binding's rejection
-// text never reaches the tree, and the card's warning treatment survives every combination of
-// outcome. The peer-cluster leg itself remains **code-complete, unverified** throughout — none of
-// these assertions is evidence that the peer-cluster protocol works.
+// WR-16 in-flight guard — unchanged behaviour, testIDs unchanged.
 // ---------------------------------------------------------------------------
 
 describe("BulkImportSyncScreen — WR-16 in-flight guard", () => {
@@ -320,14 +433,10 @@ describe("BulkImportSyncScreen — WR-16 in-flight guard", () => {
 		const tr = await renderScreen();
 
 		await press(tr, "transport-sync-now-filesystem");
-		// The call is parked. Before WR-16 these two further presses each launched ANOTHER
-		// overlapping syncNow() against the same binding, and whichever settled last won the card
-		// state — so the displayed counts need not have described the most recent run.
 		await press(tr, "transport-sync-now-filesystem");
 		await press(tr, "transport-sync-now-filesystem");
 		expect(filesystemSyncNow).toHaveBeenCalledTimes(1);
 
-		// The visual half of the guard: `disabled` reads state, not the ref, so this is observable.
 		const card = tr.root.findByProps({ testID: "transport-status-card-filesystem" });
 		const disabledNode = card.findAll((node) => "disabled" in node.props)[0];
 		expect(disabledNode!.props.disabled).toBe(true);
@@ -337,7 +446,6 @@ describe("BulkImportSyncScreen — WR-16 in-flight guard", () => {
 		});
 		await flushTicks(4);
 
-		// Once settled, the control is live again and a fresh press starts a new run.
 		await press(tr, "transport-sync-now-filesystem");
 		expect(filesystemSyncNow).toHaveBeenCalledTimes(2);
 	});
@@ -382,8 +490,6 @@ describe("BulkImportSyncScreen — WR-16 in-flight guard", () => {
 
 	it("(WR-16) the no-binding path starts nothing and therefore must NOT latch the control", async () => {
 		const tr = await renderScreen();
-		// No binding registered: runSync returns synchronously with { failed: true }. A guard that
-		// latched on this path would make the honest-failure state unretryable.
 		await press(tr, "transport-sync-now-filesystem");
 		const card = tr.root.findByProps({ testID: "transport-status-card-filesystem" });
 		const disabledNode = card.findAll((node) => "disabled" in node.props)[0];
@@ -391,81 +497,82 @@ describe("BulkImportSyncScreen — WR-16 in-flight guard", () => {
 	});
 });
 
-describe("BulkImportSyncScreen — the peer card's control is wired, its treatment is unchanged (D-11)", () => {
-	it("transport-status-card-p2p is present when both real transports are unregistered", async () => {
+// ---------------------------------------------------------------------------
+// S2-S4 — the peer card: live counts, syncNow context, rejection handling, errors label.
+// ---------------------------------------------------------------------------
+
+function peerHandle(opts: { syncNow?: jest.Mock; readCounts?: jest.Mock }): SyncBindingHandle {
+	return {
+		id: "peer",
+		syncNow: opts.syncNow ?? jest.fn(async () => report()),
+		readCounts: opts.readCounts,
+	};
+}
+
+describe("BulkImportSyncScreen — peer card live counts and sync (S2-S4, D-31)", () => {
+	it("S2: readCounts is called on mount with {authorityId}, the counts render, and a press drives syncNow + a fresh readCounts", async () => {
+		const readCounts = jest
+			.fn()
+			.mockResolvedValueOnce({ pending: 3, synced: 2, failed: 1 })
+			.mockResolvedValueOnce({ pending: 0, synced: 5, failed: 0 });
+		const syncNow = jest.fn(async () => report());
+		registerSyncBinding(peerHandle({ syncNow, readCounts }));
 		const tr = await renderScreen();
-		present(tr, "transport-status-card-p2p");
+
+		expect(readCounts).toHaveBeenCalledWith({ authorityId: "auth-1" });
+		let serialized = serializeSubtree(tr.root.findByProps({ testID: "transport-status-counts-p2p" }));
+		expect(serialized).toContain("peerSyncCardPendingLabel|count=3");
+		expect(serialized).toContain("peerSyncCardSyncedLabel|count=2");
+		expect(serialized).toContain("peerSyncCardFailedLabel|count=1");
+
+		await press(tr, "transport-try-peer-sync-p2p");
+
+		expect(syncNow).toHaveBeenCalledWith({ authorityId: "auth-1" });
+		expect(readCounts).toHaveBeenCalledTimes(2);
+		serialized = serializeSubtree(tr.root.findByProps({ testID: "transport-status-counts-p2p" }));
+		expect(serialized).toContain("peerSyncCardSyncedLabel|count=5");
 	});
 
-	it("transport-status-card-p2p is present after both real transports have synced successfully", async () => {
-		registerSyncBinding({ id: "filesystem", syncNow: jest.fn(async () => report()) });
-		registerSyncBinding({ id: "rest", syncNow: jest.fn(async () => report()) });
-		const tr = await renderScreen();
-		await press(tr, "transport-sync-now-filesystem");
-		await press(tr, "transport-sync-now-rest");
-		present(tr, "transport-status-card-p2p");
-	});
-
-	it("48-23: with no peer binding registered, pressing the peer control resolves nothing, throws nothing, and never reaches the filesystem or REST bindings", async () => {
-		const filesystemSyncNow = jest.fn(async () => report());
-		const restSyncNow = jest.fn(async () => report());
-		registerSyncBinding({ id: "filesystem", syncNow: filesystemSyncNow });
-		registerSyncBinding({ id: "rest", syncNow: restSyncNow });
-		const tr = await renderScreen();
-
-		await expect(press(tr, "transport-try-peer-sync-p2p")).resolves.not.toThrow();
-
-		// The peer control never reaches another transport's binding — the seam resolves 'peer'
-		// independently of 'filesystem'/'rest', and nothing in this repo registers a 'peer' handle.
-		expect(filesystemSyncNow).not.toHaveBeenCalled();
-		expect(restSyncNow).not.toHaveBeenCalled();
-	});
-
-	it("48-23: an attached peer binding's rejection is called exactly once and its text never reaches the tree (T-48-20-02 holds for the third binding)", async () => {
-		const peerSyncNow = jest.fn(async () => {
-			throw new Error("SSN-123-45-6789-LEAKED");
+	it("S3: a readCounts rejection leaves the counts row absent and the thrown message appears nowhere in the tree", async () => {
+		const readCounts = jest.fn(async () => {
+			throw new Error("peer-count-secret-leak");
 		});
-		registerSyncBinding({ id: "peer", syncNow: peerSyncNow });
+		registerSyncBinding(peerHandle({ readCounts }));
 		const tr = await renderScreen();
 
-		await expect(press(tr, "transport-try-peer-sync-p2p")).resolves.not.toThrow();
-
-		expect(peerSyncNow).toHaveBeenCalledTimes(1);
-		expect(treeText(tr)).not.toContain("SSN-123-45-6789-LEAKED");
+		absent(tr, "transport-status-counts-p2p");
+		expect(treeText(tr)).not.toContain("peer-count-secret-leak");
 	});
 
-	it("a real bridge succeeding, and a peer sync attempt of either outcome, do not soften the peer card's warning treatment", async () => {
+	it("S4: a peer error report renders an error row with peerSyncCardHeading and the identifier, not bulkImportSyncRestHeading", async () => {
+		registerSyncBinding(
+			peerHandle({ syncNow: jest.fn(async () => report({ errorItemIds: ["req-9"] })) }),
+		);
+		const tr = await renderScreen();
+		await press(tr, "transport-try-peer-sync-p2p");
+
+		present(tr, "bulk-import-sync-errors-section");
+		const row = serializeSubtree(tr.root.findByProps({ testID: "bulk-import-sync-error-row-0" }));
+		expect(row).toContain("peerSyncCardHeading");
+		expect(row).toContain("req-9");
+		expect(row).not.toContain("bulkImportSyncRestHeading");
+	});
+
+	it("the peer card renders when both real transports are unregistered, and its warning treatment survives a success", async () => {
 		registerSyncBinding({ id: "filesystem", syncNow: jest.fn(async () => report()) });
 		registerSyncBinding({ id: "rest", syncNow: jest.fn(async () => report()) });
 		const tr = await renderScreen();
 		await press(tr, "transport-sync-now-filesystem");
 		await press(tr, "transport-sync-now-rest");
-		// No peer binding attached here — a peer press resolves to the honest { failed: true }
-		// no-binding path, which is itself a "peer sync attempt" outcome the card must survive.
 		await press(tr, "transport-try-peer-sync-p2p");
 
 		const peerCard = tr.root.findByProps({ testID: "transport-status-card-p2p" });
 		const serialized = serializeSubtree(peerCard);
 		expect(serialized).toContain(SENTINEL_COLORS.warning);
-		expect(serialized).toContain("bulkImportSyncP2pBody");
+		expect(serialized).toContain("peerSyncCardCaveat");
 	});
 
-	it("48-23: the same warning treatment survives an ATTACHED peer binding succeeding", async () => {
-		registerSyncBinding({ id: "filesystem", syncNow: jest.fn(async () => report()) });
-		registerSyncBinding({ id: "rest", syncNow: jest.fn(async () => report()) });
-		registerSyncBinding({ id: "peer", syncNow: jest.fn(async () => report()) });
-		const tr = await renderScreen();
-		await press(tr, "transport-sync-now-filesystem");
-		await press(tr, "transport-sync-now-rest");
-		await press(tr, "transport-try-peer-sync-p2p");
-
-		const peerCard = tr.root.findByProps({ testID: "transport-status-card-p2p" });
-		const serialized = serializeSubtree(peerCard);
-		expect(serialized).toContain(SENTINEL_COLORS.warning);
-		expect(serialized).toContain("bulkImportSyncP2pBody");
-	});
-
-	it("the ordered block-testID array equality from Suite A still holds with a peer binding attached", async () => {
+	it("the ordered block-testID array equality still holds with a peer binding attached", async () => {
 		registerSyncBinding({
 			id: "filesystem",
 			syncNow: jest.fn(async () => report({ errorItemIds: ["req-0001"] })),
@@ -474,7 +581,7 @@ describe("BulkImportSyncScreen — the peer card's control is wired, its treatme
 			id: "rest",
 			syncNow: jest.fn(async () => report({ errorItemIds: ["req-0009"] })),
 		});
-		registerSyncBinding({ id: "peer", syncNow: jest.fn(async () => report()) });
+		registerSyncBinding(peerHandle({}));
 		const tr = await renderScreen();
 		await press(tr, "transport-sync-now-filesystem");
 		await press(tr, "transport-sync-now-rest");
@@ -483,8 +590,330 @@ describe("BulkImportSyncScreen — the peer card's control is wired, its treatme
 		expect(orderedBlockIds(tr)).toEqual(BLOCK_TEST_IDS);
 	});
 
-	it("INERT_PEER_SYNC itself is a no-op that returns undefined and throws nothing — retained across the widening for the assertion that documents it (48-20 Suite F still applies)", () => {
+	it("INERT_PEER_SYNC itself is a no-op that returns undefined and throws nothing", () => {
 		expect(() => expect(INERT_PEER_SYNC()).toBeUndefined()).not.toThrow();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// S5 — the officer intake-key card.
+// ---------------------------------------------------------------------------
+
+describe("BulkImportSyncScreen — officer intake-key card (S5, D-04)", () => {
+	it("a mocked 'not-enabled' state renders the enable button; pressing calls enableOfficerEncryptedIntake once with createSigner === mockResolveDeviceSigner", async () => {
+		const tr = await renderScreen();
+		present(tr, "officer-intake-key-enable");
+
+		await press(tr, "officer-intake-key-enable");
+
+		expect(mockEnableOfficerEncryptedIntake).toHaveBeenCalledTimes(1);
+		const [deps, authorityId] = mockEnableOfficerEncryptedIntake.mock.calls[0]!;
+		expect(authorityId).toBe("auth-1");
+		expect((deps as { createSigner: unknown }).createSigner).toBe(mockResolveDeviceSigner);
+		// The screen itself never calls the thunk — only the model layer does.
+		expect(mockResolveDeviceSigner).not.toHaveBeenCalled();
+	});
+
+	it("a double press in one tick calls enableOfficerEncryptedIntake once (ref guard)", async () => {
+		let resolveEnable!: (v: "enabled") => void;
+		mockEnableOfficerEncryptedIntake.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveEnable = resolve;
+				}),
+		);
+		const tr = await renderScreen();
+		const wrapper = tr.root.findByProps({ testID: "officer-intake-key-enable" });
+		const onPress = wrapper.findAll((node) => typeof node.props.onPress === "function")[0]!.props.onPress;
+		await renderer.act(async () => {
+			onPress();
+			onPress();
+		});
+		await flushTicks(2);
+		expect(mockEnableOfficerEncryptedIntake).toHaveBeenCalledTimes(1);
+		await renderer.act(async () => {
+			resolveEnable("enabled");
+		});
+		await flushTicks(4);
+	});
+
+	it("a rejection the handler marks { handled: true } shows no error", async () => {
+		mockEnableOfficerEncryptedIntake.mockRejectedValueOnce(new Error("device-signing-cancel"));
+		mockHandleDeviceSigningError.mockReturnValueOnce({ handled: true, message: undefined });
+		const tr = await renderScreen();
+		await press(tr, "officer-intake-key-enable");
+
+		absent(tr, "officer-intake-key-error");
+	});
+
+	it("a handler result { handled: false, message: 'mapped-copy' } shows 'mapped-copy' instead of officerIntakeKeyError", async () => {
+		mockEnableOfficerEncryptedIntake.mockRejectedValueOnce(new Error("raw"));
+		mockHandleDeviceSigningError.mockReturnValueOnce({ handled: false, message: "mapped-copy" });
+		const tr = await renderScreen();
+		await press(tr, "officer-intake-key-enable");
+
+		present(tr, "officer-intake-key-error");
+		const row = serializeSubtree(tr.root.findByProps({ testID: "officer-intake-key-error" }));
+		expect(row).toContain("mapped-copy");
+		expect(row).not.toContain("officerIntakeKeyError");
+	});
+
+	it("a plain Error with { handled: false } shows officerIntakeKeyError, and the raw message appears nowhere in the tree", async () => {
+		mockEnableOfficerEncryptedIntake.mockRejectedValueOnce(new Error("raw-text"));
+		mockHandleDeviceSigningError.mockReturnValueOnce({ handled: false, message: undefined });
+		const tr = await renderScreen();
+		await press(tr, "officer-intake-key-enable");
+
+		present(tr, "officer-intake-key-error");
+		const row = serializeSubtree(tr.root.findByProps({ testID: "officer-intake-key-error" }));
+		expect(row).toContain("officerIntakeKeyError");
+		expect(treeText(tr)).not.toContain("raw-text");
+	});
+
+	it("a successful resolution switches the card to 'enabled' and refreshes the peer counts", async () => {
+		const readCounts = jest
+			.fn()
+			.mockResolvedValueOnce({ pending: 0, synced: 0, failed: 0 })
+			.mockResolvedValueOnce({ pending: 1, synced: 1, failed: 0 });
+		registerSyncBinding(peerHandle({ readCounts }));
+		const tr = await renderScreen();
+		await press(tr, "officer-intake-key-enable");
+
+		present(tr, "officer-intake-key-enabled");
+		absent(tr, "officer-intake-key-enable");
+		expect(readCounts).toHaveBeenCalledTimes(2);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// S6 — gating: disabled, not hidden (D-04 any-scope enable; D-31 'vrg'-gated peer control).
+// ---------------------------------------------------------------------------
+
+describe("BulkImportSyncScreen — S6 gating (disabled, not hidden)", () => {
+	it("with scopes undefined (not an officer), both the enable button and the peer control are present and disabled", async () => {
+		mockScopesResult = { scopes: undefined, loading: false };
+		const tr = await renderScreen();
+
+		for (const id of ["officer-intake-key-enable", "transport-try-peer-sync-p2p"]) {
+			present(tr, id);
+			const wrapper = tr.root.findByProps({ testID: id });
+			const disabledNodes = wrapper.findAll((node) => node.props.disabled === true);
+			expect(disabledNodes.length).toBeGreaterThanOrEqual(1);
+		}
+	});
+
+	it("with scopes ['mel'] (an officer, no 'vrg'), the enable button is ENABLED (D-04: every current officer is a recipient) and the peer control stays disabled (needs 'vrg')", async () => {
+		mockScopesResult = { scopes: ["mel"], loading: false };
+		const tr = await renderScreen();
+
+		const enableWrapper = tr.root.findByProps({ testID: "officer-intake-key-enable" });
+		const enableDisabled = enableWrapper.findAll((node) => "disabled" in node.props)[0];
+		expect(enableDisabled!.props.disabled).toBe(false);
+
+		const peerWrapper = tr.root.findByProps({ testID: "transport-try-peer-sync-p2p" });
+		const peerDisabled = peerWrapper.findAll((node) => "disabled" in node.props)[0];
+		expect(peerDisabled!.props.disabled).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// S8-S14 — the RestBridgeConfigCard integration (62-25, D-29).
+// ---------------------------------------------------------------------------
+
+describe("BulkImportSyncScreen — RestBridgeConfigCard integration (S8-S14, D-29)", () => {
+	it("S8: while loading, the REST control is disabled and no hint renders; with savedUrl null it is present+disabled with the hint; with a saved URL and 'vrg' it is enabled and the hint is absent", async () => {
+		mockReadRegistrationBridgeConfig.mockImplementation(
+			() => new Promise(() => {}), // never resolves -> stays loading
+		);
+		let tr = await renderScreen();
+		let wrapper = tr.root.findByProps({ testID: "transport-sync-now-rest" });
+		let disabledNode = wrapper.findAll((node) => "disabled" in node.props)[0]!;
+		expect(disabledNode.props.disabled).toBe(true);
+		absent(tr, "registration-bridge-config-unset-hint");
+
+		mockReadRegistrationBridgeConfig.mockReset();
+		mockReadRegistrationBridgeConfig.mockImplementation(async () => ({ savedUrl: null, revision: 0 }));
+		tr = await renderScreen();
+		wrapper = tr.root.findByProps({ testID: "transport-sync-now-rest" });
+		disabledNode = wrapper.findAll((node) => "disabled" in node.props)[0]!;
+		expect(disabledNode.props.disabled).toBe(true);
+		present(tr, "registration-bridge-config-unset-hint");
+
+		mockReadRegistrationBridgeConfig.mockReset();
+		mockReadRegistrationBridgeConfig.mockImplementation(async () => ({
+			savedUrl: "https://bridge.example/intake",
+			revision: 1,
+		}));
+		tr = await renderScreen();
+		wrapper = tr.root.findByProps({ testID: "transport-sync-now-rest" });
+		disabledNode = wrapper.findAll((node) => "disabled" in node.props)[0]!;
+		expect(disabledNode.props.disabled).toBe(false);
+		absent(tr, "registration-bridge-config-unset-hint");
+	});
+
+	it("S9: Save resolves the device signer then calls saveRegistrationBridgeUrl({getEngine}, authorityId, url, sign, revision) exactly once; two presses in one tick call it once; 'saved' shows SavedConfirm and enables the REST control without remounting", async () => {
+		mockReadRegistrationBridgeConfig.mockImplementation(async () => ({ savedUrl: null, revision: 0 }));
+		const tr = await renderScreen();
+		const input = tr.root.findByProps({ testID: "registration-bridge-config-url" });
+		await renderer.act(async () => {
+			input.props.onChangeText("https://new-bridge.example");
+		});
+		await flushTicks(2);
+
+		const saveWrapper = tr.root.findByProps({ testID: "registration-bridge-config-save" });
+		const onPress = saveWrapper.findAll((node) => typeof node.props.onPress === "function")[0]!.props.onPress;
+		await renderer.act(async () => {
+			onPress();
+			onPress();
+		});
+		await flushTicks(4);
+
+		expect(mockCreateDeviceSigner).toHaveBeenCalledTimes(1);
+		expect(mockSaveRegistrationBridgeUrl).toHaveBeenCalledTimes(1);
+		const call = mockSaveRegistrationBridgeUrl.mock.calls[0]!;
+		expect(call[1]).toBe("auth-1");
+		expect(call[2]).toBe("https://new-bridge.example");
+		expect(typeof call[3]).toBe("function");
+		expect(call[4]).toBe(0);
+
+		present(tr, "rest-bridge-config-card");
+		expect(treeText(tr)).toContain("registrationBridgeConfigSavedConfirm");
+		const wrapper = tr.root.findByProps({ testID: "transport-sync-now-rest" });
+		const disabledNode = wrapper.findAll((node) => "disabled" in node.props)[0]!;
+		expect(disabledNode.props.disabled).toBe(false);
+	});
+
+	it("S10: 'co-sign-required' renders the co-sign line, keeps Save disabled for the rest of the mount (a second press calls nothing more), and leaves the REST control's state unchanged", async () => {
+		mockReadRegistrationBridgeConfig.mockImplementation(async () => ({ savedUrl: null, revision: 0 }));
+		mockSaveRegistrationBridgeUrl.mockImplementation(async () => ({ outcome: "co-sign-required" }));
+		const tr = await renderScreen();
+		const input = tr.root.findByProps({ testID: "registration-bridge-config-url" });
+		await renderer.act(async () => {
+			input.props.onChangeText("https://new-bridge.example");
+		});
+		await flushTicks(2);
+
+		const saveWrapper = tr.root.findByProps({ testID: "registration-bridge-config-save" });
+		let onPress = saveWrapper.findAll((node) => typeof node.props.onPress === "function")[0]!.props.onPress;
+		await renderer.act(async () => {
+			onPress();
+		});
+		await flushTicks(4);
+
+		expect(mockSaveRegistrationBridgeUrl).toHaveBeenCalledTimes(1);
+		present(tr, "registration-bridge-config-co-sign");
+
+		const saveWrapper2 = tr.root.findByProps({ testID: "registration-bridge-config-save" });
+		const button = saveWrapper2.findByType(require("react-native").TouchableOpacity);
+		expect(button.props.disabled).toBe(true);
+		onPress = button.props.onPress;
+		await renderer.act(async () => {
+			onPress();
+		});
+		await flushTicks(2);
+		expect(mockSaveRegistrationBridgeUrl).toHaveBeenCalledTimes(1);
+
+		const restWrapper = tr.root.findByProps({ testID: "transport-sync-now-rest" });
+		const restDisabled = restWrapper.findAll((node) => "disabled" in node.props)[0]!;
+		expect(restDisabled.props.disabled).toBe(true); // bridgeReady stayed false
+	});
+
+	it("S11: 'conflict' and 'failed' render SaveError and re-read the config (called twice)", async () => {
+		for (const outcome of ["conflict", "failed"] as const) {
+			mockReadRegistrationBridgeConfig.mockClear();
+			mockReadRegistrationBridgeConfig.mockImplementation(async () => ({ savedUrl: null, revision: 0 }));
+			mockSaveRegistrationBridgeUrl.mockImplementation(async () => ({ outcome }));
+			const tr = await renderScreen();
+			const input = tr.root.findByProps({ testID: "registration-bridge-config-url" });
+			await renderer.act(async () => {
+				input.props.onChangeText("https://new-bridge.example");
+			});
+			await flushTicks(2);
+			const saveWrapper = tr.root.findByProps({ testID: "registration-bridge-config-save" });
+			const onPress = saveWrapper.findAll((node) => typeof node.props.onPress === "function")[0]!.props.onPress;
+			await renderer.act(async () => {
+				onPress();
+			});
+			await flushTicks(4);
+
+			expect(treeText(tr)).toContain("registrationBridgeConfigSaveError");
+			expect(mockReadRegistrationBridgeConfig).toHaveBeenCalledTimes(2);
+		}
+	});
+
+	it("S12: signer errors route through useDeviceSigningErrorHandler — handled:true sets no notice; handled:false with a message shows it in InlineError; handled:false with no message shows SaveError; the raw message never appears", async () => {
+		mockReadRegistrationBridgeConfig.mockImplementation(async () => ({ savedUrl: null, revision: 0 }));
+
+		mockCreateDeviceSigner.mockRejectedValueOnce(new Error("device-signing-cancel-secret"));
+		mockHandleDeviceSigningError.mockReturnValueOnce({ handled: true, message: undefined });
+		let tr = await renderScreen();
+		let input = tr.root.findByProps({ testID: "registration-bridge-config-url" });
+		await renderer.act(async () => {
+			input.props.onChangeText("https://new-bridge.example");
+		});
+		await flushTicks(2);
+		let saveWrapper = tr.root.findByProps({ testID: "registration-bridge-config-save" });
+		let onPress = saveWrapper.findAll((node) => typeof node.props.onPress === "function")[0]!.props.onPress;
+		await renderer.act(async () => {
+			onPress();
+		});
+		await flushTicks(4);
+		expect(treeText(tr)).not.toContain("registrationBridgeConfigSaveError");
+		expect(treeText(tr)).not.toContain("device-signing-cancel-secret");
+
+		mockCreateDeviceSigner.mockRejectedValueOnce(new Error("raw-2"));
+		mockHandleDeviceSigningError.mockReturnValueOnce({ handled: false, message: "mapped-copy" });
+		tr = await renderScreen();
+		input = tr.root.findByProps({ testID: "registration-bridge-config-url" });
+		await renderer.act(async () => {
+			input.props.onChangeText("https://new-bridge.example");
+		});
+		await flushTicks(2);
+		saveWrapper = tr.root.findByProps({ testID: "registration-bridge-config-save" });
+		onPress = saveWrapper.findAll((node) => typeof node.props.onPress === "function")[0]!.props.onPress;
+		await renderer.act(async () => {
+			onPress();
+		});
+		await flushTicks(4);
+		expect(treeText(tr)).toContain("mapped-copy");
+		expect(treeText(tr)).not.toContain("raw-2");
+
+		mockCreateDeviceSigner.mockRejectedValueOnce(new Error("raw-3-secret"));
+		mockHandleDeviceSigningError.mockReturnValueOnce({ handled: false, message: undefined });
+		tr = await renderScreen();
+		input = tr.root.findByProps({ testID: "registration-bridge-config-url" });
+		await renderer.act(async () => {
+			input.props.onChangeText("https://new-bridge.example");
+		});
+		await flushTicks(2);
+		saveWrapper = tr.root.findByProps({ testID: "registration-bridge-config-save" });
+		onPress = saveWrapper.findAll((node) => typeof node.props.onPress === "function")[0]!.props.onPress;
+		await renderer.act(async () => {
+			onPress();
+		});
+		await flushTicks(4);
+		expect(treeText(tr)).toContain("registrationBridgeConfigSaveError");
+		expect(treeText(tr)).not.toContain("raw-3-secret");
+	});
+
+	it("S13: with scopes undefined or ['mel'], the bridge field and Save are present and disabled", async () => {
+		for (const scopes of [undefined, ["mel"]] as (string[] | undefined)[]) {
+			mockScopesResult = { scopes, loading: false };
+			const tr = await renderScreen();
+			const input = tr.root.findByProps({ testID: "registration-bridge-config-url" });
+			expect(input.props.editable).toBe(false);
+			const saveWrapper = tr.root.findByProps({ testID: "registration-bridge-config-save" });
+			const button = saveWrapper.findByType(require("react-native").TouchableOpacity);
+			expect(button.props.disabled).toBe(true);
+		}
+	});
+
+	it("S14: the bundling gate still passes, and the filesystem card still renders and dispatches runSync('filesystem') unchanged", async () => {
+		const syncNow = jest.fn(async () => report());
+		registerSyncBinding({ id: "filesystem", syncNow });
+		const tr = await renderScreen();
+		await press(tr, "transport-sync-now-filesystem");
+		expect(syncNow).toHaveBeenCalledTimes(1);
 	});
 });
 
@@ -523,14 +952,10 @@ describe("BulkImportSyncScreen — the errors section is identifier-only", () =>
 		expect(row2).toContain("req-0009");
 		expect(row2).toContain("bulkImportSyncRestHeading");
 
-		// Filesystem rows precede rest rows: neither filesystem row mentions the rest heading key,
-		// and the rest row does not mention the filesystem heading key.
 		expect(row0).not.toContain("bulkImportSyncRestHeading");
 		expect(row1).not.toContain("bulkImportSyncRestHeading");
 		expect(row2).not.toContain("bulkImportSyncFilesystemHeading");
 
-		// Identifier only: no row carries the report's syncedAt value or its imported/pending
-		// counts inside its own subtree.
 		for (const row of [row0, row1, row2]) {
 			expect(row).not.toContain("2026-08-05T12:00:00Z");
 			expect(row).not.toContain("bulkImportSyncImportedCountLabel");
@@ -539,26 +964,22 @@ describe("BulkImportSyncScreen — the errors section is identifier-only", () =>
 	});
 
 	it("(WR-15) an attached peer binding's error identifiers reach the errors section, still identifier-only", async () => {
-		registerSyncBinding({
-			id: "peer",
-			syncNow: jest.fn(async () => report({ errorItemIds: ["req-peer-0001"] })),
-		});
+		registerSyncBinding(
+			peerHandle({ syncNow: jest.fn(async () => report({ errorItemIds: ["req-peer-0001"] })) }),
+		);
 		const tr = await renderScreen();
 		await press(tr, "transport-try-peer-sync-p2p");
 
 		present(tr, "bulk-import-sync-errors-section");
 		const row0 = serializeSubtree(tr.root.findByProps({ testID: "bulk-import-sync-error-row-0" }));
 		expect(row0).toContain("req-peer-0001");
-		// Identifier + fixed heading only — no counts, no timestamp, no transport-supplied text.
 		expect(row0).not.toContain("2026-08-05T12:00:00Z");
 		expect(row0).not.toContain("bulkImportSyncImportedCountLabel");
 		expect(row0).not.toContain("bulkImportSyncPendingCountLabel");
 
-		// The peer CARD is unchanged by this: it still carries no state channel and keeps its
-		// unconditional D-11 warning treatment.
 		const peerCard = serializeSubtree(tr.root.findByProps({ testID: "transport-status-card-p2p" }));
 		expect(peerCard).toContain(SENTINEL_COLORS.warning);
-		expect(peerCard).toContain("bulkImportSyncP2pBody");
+		expect(peerCard).toContain("peerSyncCardCaveat");
 		expect(peerCard).not.toContain("req-peer-0001");
 	});
 
@@ -574,21 +995,17 @@ describe("BulkImportSyncScreen — the errors section is identifier-only", () =>
 });
 
 // ---------------------------------------------------------------------------
-// Suite E — disabled, not hidden. Legibility control, NOT a security boundary (Phase 999.1).
+// Suite E — disabled, not hidden for the proven bindings (legacy coverage, Phase 999.1).
 // ---------------------------------------------------------------------------
 
 describe("BulkImportSyncScreen — write controls render disabled, not hidden", () => {
-	it("a real officer without 'vrg' (scopes: []) sees all three controls, disabled, and the scoped banner", async () => {
+	it("a real officer without 'vrg' (scopes: []) sees the filesystem/rest/peer controls disabled, and the scoped banner", async () => {
 		mockScopesResult = { scopes: [], loading: false };
 		const filesystemSyncNow = jest.fn(async () => report());
 		registerSyncBinding({ id: "filesystem", syncNow: filesystemSyncNow });
 		const tr = await renderScreen();
 
-		for (const id of [
-			"transport-sync-now-filesystem",
-			"transport-sync-now-rest",
-			"transport-try-peer-sync-p2p",
-		]) {
+		for (const id of ["transport-sync-now-filesystem", "transport-sync-now-rest", "transport-try-peer-sync-p2p"]) {
 			present(tr, id);
 			const wrapper = tr.root.findByProps({ testID: id });
 			const disabledNodes = wrapper.findAll((node) => node.props.disabled === true);
@@ -598,8 +1015,6 @@ describe("BulkImportSyncScreen — write controls render disabled, not hidden", 
 		expect(treeText(tr)).toContain("registrationRequestScopeReadOnlyBanner");
 		expect(treeText(tr)).not.toContain("registrationRequestScopeReadOnlyNoOfficerBanner");
 
-		// This is a legibility control, not a security boundary: firing a disabled Sync Now must
-		// still invoke no binding.
 		const wrapper = tr.root.findByProps({ testID: "transport-sync-now-filesystem" });
 		const disabledNode = wrapper.findAll((node) => node.props.disabled === true)[0]!;
 		await renderer.act(async () => {
@@ -613,11 +1028,7 @@ describe("BulkImportSyncScreen — write controls render disabled, not hidden", 
 		mockScopesResult = { scopes: undefined, loading: false };
 		const tr = await renderScreen();
 
-		for (const id of [
-			"transport-sync-now-filesystem",
-			"transport-sync-now-rest",
-			"transport-try-peer-sync-p2p",
-		]) {
+		for (const id of ["transport-sync-now-filesystem", "transport-sync-now-rest", "transport-try-peer-sync-p2p"]) {
 			present(tr, id);
 			const wrapper = tr.root.findByProps({ testID: id });
 			const disabledNodes = wrapper.findAll((node) => node.props.disabled === true);
@@ -702,13 +1113,8 @@ describe("bulk-import-sync-model — pure unit", () => {
 				rest: report({ errorItemIds: ["r1"] }),
 				filesystem: report({ errorItemIds: ["f1"] }),
 			});
-			// Before WR-15 the order array was ["filesystem", "rest"], so p1/p2 were silently
-			// discarded even though 48-23 had already widened SyncBindingId and routed the peer
-			// card's press through runSync('peer') — a report with nowhere to go.
 			expect(refs.map((r) => r.transport)).toEqual(["filesystem", "rest", "peer", "peer"]);
 			expect(refs.map((r) => r.itemId)).toEqual(["f1", "r1", "p1", "p2"]);
-			// Still identifier-only for the third binding too — the runtime PII gate applies
-			// uniformly across bindings.
 			for (const ref of refs) {
 				expect(Object.keys(ref).sort()).toEqual(["itemId", "transport"]);
 			}
@@ -742,12 +1148,7 @@ describe("bulk-import-sync-model — pure unit", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Suite G — source-level bundling gates. `react-test-renderer` cannot see what a module DOESN'T
-// import, so this reads the source files at test time and asserts the forbidden strings are
-// absent. Prevents a later executor "wiring up" the screen by importing the filesystem transport
-// directly, which would drag `node:fs` into the Metro bundle — a failure class jest is
-// structurally blind to (jest runs on Node, where the import resolves fine) and that this project
-// has already paid for (Phase 44's `@peculiar` device-boot wall).
+// Suite G (S7) — source-level bundling gates.
 // ---------------------------------------------------------------------------
 
 describe("BulkImportSyncScreen / bulk-import-sync-model — source-level bundling gates", () => {
@@ -770,7 +1171,7 @@ describe("BulkImportSyncScreen / bulk-import-sync-model — source-level bundlin
 
 	it("BUNDLING-GATE-OK: neither file imports @votetorrent/vote-engine, node:, require(, or either transport module", () => {
 		for (const [, filePath] of Object.entries(FILES)) {
-			const code = stripComments(fs.readFileSync(filePath, "utf8"));
+			const code = stripComments(fs.readFileSync(filePath as string, "utf8"));
 			for (const bad of [
 				"@votetorrent/vote-engine",
 				"node:",
@@ -786,5 +1187,85 @@ describe("BulkImportSyncScreen / bulk-import-sync-model — source-level bundlin
 	it("the screen contains no console.* call (a transport error message must never reach a log)", () => {
 		const code = stripComments(fs.readFileSync(FILES.screen, "utf8"));
 		expect(code).not.toContain("console.");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// OfficerIntakeKeyCard — O1-O5, mounted directly.
+// ---------------------------------------------------------------------------
+
+describe("OfficerIntakeKeyCard (O1-O5, D-04)", () => {
+	function renderCard(props: Partial<React.ComponentProps<typeof OfficerIntakeKeyCard>> = {}) {
+		let tr!: renderer.ReactTestRenderer;
+		renderer.act(() => {
+			tr = renderer.create(
+				<OfficerIntakeKeyCard state="not-enabled" onEnable={jest.fn()} {...props} />,
+			);
+		});
+		return tr;
+	}
+
+	it("O1: 'not-enabled' renders heading/body/enable button; disabled keeps it present and disabled; pressing an enabled button calls onEnable once", () => {
+		const onEnable = jest.fn();
+		const tr = renderCard({ state: "not-enabled", onEnable });
+		present(tr, "officer-intake-key-enable");
+
+		const tr2 = renderCard({ state: "not-enabled", disabled: true, onEnable });
+		const wrapper = tr2.root.findByProps({ testID: "officer-intake-key-enable" });
+		const disabledNode = wrapper.findAll((node) => "disabled" in node.props)[0]!;
+		expect(disabledNode.props.disabled).toBe(true);
+
+		const enabledWrapper = tr.root.findByProps({ testID: "officer-intake-key-enable" });
+		const candidates = enabledWrapper.findAll((node) => typeof node.props.onPress === "function");
+		renderer.act(() => {
+			candidates[0]!.props.onPress();
+		});
+		expect(onEnable).toHaveBeenCalledTimes(1);
+	});
+
+	it("O2: 'enabled' renders officerIntakeKeyEnabledConfirm and omits the enable button", () => {
+		const tr = renderCard({ state: "enabled" });
+		present(tr, "officer-intake-key-enabled");
+		absent(tr, "officer-intake-key-enable");
+	});
+
+	it("O3: 'loading' renders heading/body, and the button is present and disabled", () => {
+		const tr = renderCard({ state: "loading" });
+		const wrapper = tr.root.findByProps({ testID: "officer-intake-key-enable" });
+		const disabledNode = wrapper.findAll((node) => "disabled" in node.props)[0]!;
+		expect(disabledNode.props.disabled).toBe(true);
+	});
+
+	it("O4: showError renders officerIntakeKeyError by default; with errorMessage it shows that instead", () => {
+		const trDefault = renderCard({ showError: true });
+		present(trDefault, "officer-intake-key-error");
+		expect(serializeSubtree(trDefault.root.findByProps({ testID: "officer-intake-key-error" }))).toContain(
+			"officerIntakeKeyError",
+		);
+
+		const trMapped = renderCard({ showError: true, errorMessage: "mapped-copy" });
+		const row = serializeSubtree(trMapped.root.findByProps({ testID: "officer-intake-key-error" }));
+		expect(row).toContain("mapped-copy");
+		expect(row).not.toContain("officerIntakeKeyError");
+	});
+
+	it("O5: no numberOfLines on the body, and no ancestor up to the card root sets height/maxHeight/overflow hidden", () => {
+		const tr = renderCard({ state: "not-enabled" });
+		const card = tr.root.findByProps({ testID: "officer-intake-key-card" });
+		const texts = card.findAll((node) => typeof node.type === "string" && (node.type as string) === "Text");
+		for (const txt of texts) {
+			expect(txt.props.numberOfLines).toBeUndefined();
+		}
+		function flatten(style: unknown): Record<string, unknown> {
+			if (Array.isArray(style)) return Object.assign({}, ...style.filter(Boolean).map(flatten));
+			return (style as Record<string, unknown>) ?? {};
+		}
+		const views = card.findAll((node) => typeof node.type === "string");
+		for (const v of views) {
+			const flat = flatten(v.props.style);
+			expect(flat.height).toBeUndefined();
+			expect(flat.maxHeight).toBeUndefined();
+			expect(flat.overflow).not.toBe("hidden");
+		}
 	});
 });

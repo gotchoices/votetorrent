@@ -77,15 +77,17 @@ describe('Optimystic plugin — composite-PK DELETE derives the wrong storage ke
 		expect(storedKey).to.contain('pubkey-abc'); // both PK parts present → correct composite key
 	});
 
-	it('BUG: DELETE key (extractPrimaryKey on compacted PK-only oldKeyValues) does NOT match the stored key', () => {
+	// Re-anchored 2026-09-28 (with the @optimystic 1.7.0 bump, but NOT caused by it — the installed
+	// 1.5.0 plugin already behaved this way, and this test and CONTROL below were two of develop's
+	// standing failures). Upstream closed this bug in two ways. The update and delete
+	// paths now derive the storage key with `createPrimaryKey(oldKeyTuple)` (installed dist, the
+	// `oldKey`/`deleteKey` sites in OptimysticVirtualTable.update), AND `extractPrimaryKey` now THROWS on
+	// a row shorter than the schema instead of silently reading `undefined` into the key. The old
+	// assertion here ("the DELETE key does not match") pinned the silent mis-derivation, which can no
+	// longer happen, so it is re-anchored to the loud failure that replaced it.
+	it('FIXED upstream: extractPrimaryKey refuses a compacted PK-only tuple instead of silently dropping PubKey', () => {
 		const codec = new RowCodec!(userKeySchema);
-		const storedKey = codec.extractPrimaryKey(FULL_ROW);
-		// extractPrimaryKey reads row[pkCol.index] → row[2] is undefined for the length-2 compacted
-		// array → the PubKey part is silently dropped.
-		const deleteKey = codec.extractPrimaryKey(COMPACTED_OLD_KEY_VALUES);
-
-		expect(deleteKey).to.not.equal(storedKey); // ← the delete tombstones a non-existent key
-		expect(deleteKey).to.not.contain('pubkey-abc'); // PubKey lost
+		expect(() => codec.extractPrimaryKey(COMPACTED_OLD_KEY_VALUES)).to.throw(/requires a full row of 4 columns, got 2/);
 	});
 
 	it('FIX: createPrimaryKey on the same compacted oldKeyValues yields the correct stored key', () => {
@@ -97,14 +99,16 @@ describe('Optimystic plugin — composite-PK DELETE derives the wrong storage ke
 		expect(fixedKey).to.equal(storedKey);
 	});
 
-	it('CONTROL: single-column PK at index 0 is unaffected (explains why only composite PKs break)', () => {
+	it('CONTROL: a single-column PK at index 0 keys identically via createPrimaryKey on the compacted tuple', () => {
 		const singlePkSchema = {
 			columns: [{ name: 'Id' }, { name: 'Name' }],
 			primaryKeyDefinition: [{ index: 0 }],
 		};
 		const codec = new RowCodec!(singlePkSchema);
 		const storedKey = codec.extractPrimaryKey(['id-1', 'Alice']);
-		const deleteKey = codec.extractPrimaryKey(['id-1']); // compacted PK-only, length 1
-		expect(deleteKey).to.equal(storedKey); // single PK at index 0 → no mismatch
+		// Before the upstream fix `extractPrimaryKey(['id-1'])` also matched here, which is why only composite PKs
+		// broke. It now throws on the short row (see the test above); the positional path is the one the
+		// plugin's delete uses.
+		expect(codec.createPrimaryKey(['id-1'])).to.equal(storedKey);
 	});
 });

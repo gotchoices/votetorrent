@@ -10,11 +10,16 @@
  *     bridge and receives back a signature. No vote-engine method, and no JS code in this app,
  *     ever sees a private-key byte.
  *
- *   WR-10 (prehash contract): the native side signs via
- *     `Signature.getInstance("SHA256withECDSA")` against the AndroidKeyStore-resident P-256 key
- *     — the Keystore/JCA equivalent of `@noble/curves` v2's `prehash: true` default (signed
- *     domain = sha256(digest)). The returned signature is already compact, low-S hex
- *     (`derToCompactLowS`, 49-04) — this module does NOT re-normalize it.
+ *   WR-10 (prehash contract): the schema verifier (`verifySigP256` / `SignatureValidP256`) checks
+ *     ECDSA(sha256(digest)) — `@noble/curves` v2's `prehash: true` default. On Android the native side
+ *     signs via `Signature.getInstance("SHA256withECDSA")`, which hashes once itself, so the digest is
+ *     passed as-is. iOS native signs its input as the FINAL ECDSA hash, so the digest must be
+ *     pre-hashed first. `nativeSignInputBase64(digest, Platform.OS)` (packages/attestation-native,
+ *     `native-sign-input.ts`) is the one definition of that platform asymmetry; both platforms
+ *     therefore produce ECDSA(sha256(digest)). A self-check failure now means a genuine key/metadata
+ *     desync on either platform (before this fix it fired for every iOS signature, which is how UAT 62
+ *     test 22 surfaced). The returned signature is already compact, low-S hex — this module does NOT
+ *     re-normalize it.
  *
  *   D-01/D-06/D-17 (key storage — MIGRATED, this is the discharge of the old "v1.3 hardening
  *     task" deferral): the device signing key is hardware-backed (StrongBox/TEE) and
@@ -33,8 +38,11 @@
  */
 
 import type { Signature } from '@votetorrent/vote-core'
+import { nativeSignInputBase64 } from '@votetorrent/attestation-native/src/native-sign-input'
+import { UserKeyType } from '@votetorrent/vote-core'
 import i18n from '../i18n'
 import { getDeviceUser, isRecoveryInProgress } from './device-user'
+import { dismissKeyboardForSystemPrompt } from '../utils/dismissKeyboardForSystemPrompt'
 // Type-only import — erased at compile time (isolatedModules requires this to be explicit), so
 // it produces NO runtime require of '@votetorrent/attestation-native/src/specs/NativeAttestation'
 // and therefore does not trigger that module's top-level `TurboModuleRegistry.getEnforcing(...)`
@@ -145,6 +153,38 @@ function assertNativeSigningAvailable(): NativeAttestationSpec {
  * why a cast, not an ambient declaration, is required under this app's `dom`-lib-free
  * `tsconfig.json`).
  */
+/**
+ * Lazy for the same reason as `getNative()`: `@votetorrent/vote-engine/rn` pulls the whole engine
+ * graph, and this file is imported transitively by suites that stub `@votetorrent/vote-core`.
+ * Resolved only when a signature is actually verified.
+ */
+function verifySigP256Lazy(digest: string, signature: string, signerKey: string): boolean {
+	// eslint-disable-next-line @typescript-eslint/no-var-requires -- deliberate lazy require, see comment above.
+	const { verifySigP256 } = require('@votetorrent/vote-engine/rn') as {
+		verifySigP256: (d: string, s: string, k: string) => boolean
+	}
+	return verifySigP256(digest, signature, signerKey)
+}
+
+function base64urlFromDigestBytes(digest: Uint8Array): string {
+	// Unpadded base64url of the digest bytes: the `Digest()` output form `verifySigP256` expects.
+	return base64FromDigestBytes(digest).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+/**
+ * Platform.OS read lazily (top level stays free of a runtime react-native import, like getNative()).
+ */
+function currentPlatformOS(): string {
+	// eslint-disable-next-line @typescript-eslint/no-var-requires -- deliberate lazy require, see getNative().
+	return (require('react-native') as { Platform: { OS: string } }).Platform.OS
+}
+
+function keyInvalidated(message: string): Error & { code: string } {
+	const err = new Error(message) as Error & { code: string }
+	err.code = 'KEY_INVALIDATED_REASSOCIATE'
+	return err
+}
+
 function base64FromDigestBytes(digest: Uint8Array): string {
 	let binary = ''
 	for (let i = 0; i < digest.length; i++) binary += String.fromCharCode(digest[i]!)
@@ -209,8 +249,29 @@ export async function createDeviceSigner (displayName: string): Promise<SignCall
 		throw err
 	}
 
+	// The hardware signer only produces P-256 signatures; any other recorded type cannot match it.
+	const recordedKeyIsP256 = user.activeKeys[0]?.type === UserKeyType.p256
+
+	/**
+	 * Deterministic desync detection (UAT 62 gap 2): every native signature is verified against the
+	 * recorded `signerKey` with the schema's own verifier before it reaches any engine write. A
+	 * mismatch is exactly the 49-14 Keystore/metadata desync (with or without the recovery marker)
+	 * and routes the officer to key replacement via KEY_INVALIDATED_REASSOCIATE. It never fires for
+	 * another party's signature (e.g. a requester's), which is why the old message-based
+	 * SignatureValid route was retired: Quereus CHECK messages carry no table name.
+	 */
 	return async (digest: Uint8Array): Promise<Signature> => {
-		const digestBase64 = base64FromDigestBytes(digest)
+		if (!recordedKeyIsP256) {
+			throw keyInvalidated(
+				'device-signer: the recorded signer key is not a P-256 key, so it cannot match the hardware signing key. Re-run key recovery.',
+			)
+		}
+		const nativeInputBase64 = nativeSignInputBase64(digest, currentPlatformOS())
+
+		// Every officer signature funnels through this closure, so this is the one place the IME is
+		// closed before the native BiometricPrompt starts. On MIUI/Android 10 a prompt started over an
+		// open keyboard is never drawn and times out ~10 min later (see the helper's doc comment).
+		await dismissKeyboardForSystemPrompt()
 
 		// Do NOT catch, wrap, or re-map native rejections here. A native rejection's typed `code`
 		// (D-13) must reach the call site UNWRAPPED so `deviceSigningError.ts`'s
@@ -218,11 +279,17 @@ export async function createDeviceSigner (displayName: string): Promise<SignCall
 		// `real-attestation-producer.ts` uses relative to `attestation-failure.ts`.
 		const result = (await native.signWithDeviceKey(
 			SIGNING_KEY_ALIAS,
-			digestBase64,
+			nativeInputBase64,
 			i18n.t('deviceSigningPromptTitle'),
 			i18n.t('deviceSigningPromptSubtitle'),
 			i18n.t('deviceSigningPromptNegativeButton'),
 		)) as { signatureHex: string }
+
+		if (!verifySigP256Lazy(base64urlFromDigestBytes(digest), result.signatureHex, signerKey)) {
+			throw keyInvalidated(
+				'device-signer: the Keystore signing key does not match the recorded signer key. Re-run key recovery.',
+			)
+		}
 
 		return {
 			signerUserId: user.id,

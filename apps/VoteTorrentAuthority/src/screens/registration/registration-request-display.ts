@@ -1,4 +1,4 @@
-import type { RegistrationRequestStatus } from "@votetorrent/vote-core";
+import type { RegistrationRequestListRow, RegistrationRequestStatus } from "@votetorrent/vote-core";
 import { truncateId } from "./registrant-display";
 
 /**
@@ -34,6 +34,27 @@ export const REGISTRATION_REQUEST_STATUS_META: Record<
 	a: { labelKey: "registrationRequestStatusApproved", colorKey: "success" },
 	r: { labelKey: "registrationRequestStatusRejected", colorKey: "error" },
 };
+
+export type RequestRowPillColorKey = "success" | "warning" | "error" | "textSecondary";
+
+/**
+ * The inbox row's pill meta. D-44 duplicate closure deliberately leaves
+ * `RegistrationRequest.Status = 'p'` (62-19) and surfaces closure only through
+ * `row.duplicateClosure`, so a status-only lookup shows a closed request as Pending.
+ * Both `'closed'` and `'closing'` render the closed pill, matching the approval
+ * screen (`closedAsDuplicate = closure !== undefined`). `textSecondary` is neutral and
+ * never collides with the warning=pending / bridge-border disambiguation rule.
+ * Returns undefined for an unknown status code with no closure, so the row keeps its
+ * raw-code fallback.
+ */
+export function resolveRequestRowStatusMeta(
+	row: Pick<RegistrationRequestListRow, "status" | "duplicateClosure">,
+): { labelKey: string; colorKey: RequestRowPillColorKey } | undefined {
+	if (row.duplicateClosure === "closed" || row.duplicateClosure === "closing") {
+		return { labelKey: "registrationRequestStatusClosedDuplicate", colorKey: "textSecondary" };
+	}
+	return REGISTRATION_REQUEST_STATUS_META[row.status];
+}
 
 /**
  * Structural source type for `registrationRequestDisplayName`. The list row
@@ -146,4 +167,43 @@ export function resolveRowTimestamps(source: { submittedAt: string; receivedAt: 
 		return { received };
 	}
 	return { received, claimed: claimedFormatted };
+}
+
+/**
+ * i18n keys for the payload field names the Voter app actually submits (public `firstName`/
+ * `lastName`, private `dob`/`email`/`phone`/`addressLine1..3`, selective `party`). Deliberately
+ * no wider: every other name falls back to `humanizeFieldName`.
+ */
+export const KNOWN_REQUEST_FIELD_LABEL_KEYS: Readonly<Record<string, string>> = {
+	firstName: "registrationRequestFieldFirstName",
+	lastName: "registrationRequestFieldLastName",
+	dob: "registrationRequestFieldDob",
+	email: "registrationRequestFieldEmail",
+	phone: "registrationRequestFieldPhone",
+	addressLine1: "registrationRequestFieldAddressLine1",
+	addressLine2: "registrationRequestFieldAddressLine2",
+	addressLine3: "registrationRequestFieldAddressLine3",
+	party: "registrationRequestFieldParty",
+};
+
+/**
+ * Readable label for an unknown/custom payload field name: camelCase, snake_case and kebab-case
+ * split into words, digits split off, first letter capitalized ("homeCounty_code2" -> "Home county
+ * code 2"). A dotted nested name humanizes each segment and joins them with " / ".
+ */
+export function humanizeFieldName(name: string): string {
+	return name
+		.split(".")
+		.map((segment) => {
+			const words = segment
+				.replace(/([a-z])([A-Z])/g, "$1 $2")
+				.replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+				.replace(/([A-Za-z])([0-9])/g, "$1 $2")
+				.replace(/([0-9])([A-Za-z])/g, "$1 $2")
+				.replace(/[_\-\s]+/g, " ")
+				.trim()
+				.toLowerCase();
+			return words.length > 0 ? words.charAt(0).toUpperCase() + words.slice(1) : segment;
+		})
+		.join(" / ");
 }

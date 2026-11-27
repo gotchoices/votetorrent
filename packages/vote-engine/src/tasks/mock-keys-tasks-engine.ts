@@ -118,13 +118,28 @@ const MOCK_ELECTION_REVISION: ElectionRevision = {
     [ElectionEvent.votingStarts]: new Date(
       '2024-10-20T00:00:00.000Z'
     ).getTime(),
+    [ElectionEvent.accruingVotes]: new Date(
+      '2024-10-26T00:00:00.000Z'
+    ).getTime(),
+    [ElectionEvent.hashingVotes]: new Date(
+      '2024-10-27T00:00:00.000Z'
+    ).getTime(),
+    [ElectionEvent.releasingKeys]: new Date(
+      '2024-10-28T00:00:00.000Z'
+    ).getTime(),
+    // W-01 (59-REVIEW.md): must fall at or before votingStarts (2024-10-20) -- PREPARATION
+    // ordering, enforced by timeline-core.js's parseTimeline. Was 2024-10-25 (after
+    // votingStarts), a pre-existing violation that predates phase 59 (git blame: 115c2117).
     [ElectionEvent.ballotsFinal]: new Date(
-      '2024-10-25T00:00:00.000Z'
+      '2024-10-18T00:00:00.000Z'
     ).getTime(),
     [ElectionEvent.tallyingStarts]: new Date(
       '2024-10-30T00:00:00.000Z'
     ).getTime(),
     [ElectionEvent.validation]: new Date('2024-11-01T00:00:00.000Z').getTime(),
+    [ElectionEvent.certificationStarts]: new Date(
+      '2024-11-05T00:00:00.000Z'
+    ).getTime(),
     [ElectionEvent.closed]: new Date('2024-11-10T00:00:00.000Z').getTime()
   } as Record<ElectionEvent, number>,
   keyholderThreshold: 1

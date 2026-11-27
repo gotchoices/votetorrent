@@ -181,7 +181,8 @@ describe('delete-check semantics (D-20 verdict, 49-03)', () => {
     const version = installedQuereusVersion()
     // eslint-disable-next-line no-console
     console.log(`[quereus-delete-check-semantics] installed @quereus/quereus version: ${version}`)
-    expect(version, 'installed @quereus/quereus must be the 4.x line this VERDICT block was written against').to.match(/^4\./)
+    // Written against 4.x; re-verified on 5.0.0 (2026-11-08), 5.4.0 (2026-11-12), 5.6.0 (2026-11-19), 5.6.1 (2026-11-21) and 5.7.1 (2026-11-27): every verdict cell below passes unchanged.
+    expect(version, 'installed @quereus/quereus must be a line this VERDICT block was verified against (4.x, 5.0.x, 5.4.x, 5.6.x, 5.7.x)').to.match(/^(4\.|5\.0\.|5\.4\.|5\.6\.|5\.7\.)/)
   })
 
   // -------------------------------------------------------------------------

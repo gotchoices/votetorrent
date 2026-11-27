@@ -1,0 +1,21 @@
+{
+  "base": "base-device",
+  "ops": [
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/network-n7-kh2r/attempt-1/join-redmi-n7/verdict.txt",
+      "content": "VERDICT: PASS\n"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/network-n7-kh2r/attempt-2/reason.txt",
+      "content": "RESTART notes-19-e86: the Redmi keyholder part redone on the fresh n7 after the full rig wipe\n"
+    },
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/network-n7-kh2r/attempt-2/join-redmi-n7/verdict.txt",
+      "content": "VERDICT: PASS\n"
+    }
+  ],
+  "expect": "PASS"
+}

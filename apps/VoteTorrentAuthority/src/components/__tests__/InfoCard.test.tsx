@@ -192,3 +192,43 @@ describe('InfoCard — additionalInfo value shrink/ellipsize + image-conditional
     expect(titleNodes[0]!.props.numberOfLines).toBe(1);
   });
 });
+
+describe('InfoCard — optional onIconPress (a Find card opens on body tap; the icon is its own 44pt button)', () => {
+  function render(props: Record<string, unknown>) {
+    let tr!: renderer.ReactTestRenderer;
+    renderer.act(() => {
+      tr = renderer.create(<InfoCard title="Card" icon="thumbtack" {...props} />);
+    });
+    return tr;
+  }
+  const { TouchableOpacity } = require('react-native');
+
+  it('7. icon press calls onIconPress and not onPress; body press calls onPress', () => {
+    const onPress = jest.fn();
+    const onIconPress = jest.fn();
+    const tr = render({ onPress, onIconPress, iconAccessibilityLabel: 'Pin' });
+    const iconBtn = tr.root.findByProps({ accessibilityLabel: 'Pin' });
+    renderer.act(() => iconBtn.props.onPress());
+    expect(onIconPress).toHaveBeenCalledTimes(1);
+    expect(onPress).not.toHaveBeenCalled();
+
+    const outer = tr.root.findAllByType(TouchableOpacity)[0]!;
+    renderer.act(() => outer.props.onPress());
+    expect(onPress).toHaveBeenCalledTimes(1);
+    expect(onIconPress).toHaveBeenCalledTimes(1);
+  });
+
+  it('8. the icon target is at least 44x44 and is a labelled button', () => {
+    const tr = render({ onPress: jest.fn(), onIconPress: jest.fn(), iconAccessibilityLabel: 'Pin' });
+    const iconBtn = tr.root.findByProps({ accessibilityLabel: 'Pin' });
+    expect(iconBtn.props.accessibilityRole).toBe('button');
+    const flat = StyleSheet.flatten(iconBtn.props.style) as Record<string, number>;
+    expect(flat.minWidth).toBeGreaterThanOrEqual(44);
+    expect(flat.minHeight).toBeGreaterThanOrEqual(44);
+  });
+
+  it('9. without onIconPress the glyph renders bare (no nested button)', () => {
+    const tr = render({ onPress: jest.fn() });
+    expect(tr.root.findAllByType(TouchableOpacity)).toHaveLength(1);
+  });
+});

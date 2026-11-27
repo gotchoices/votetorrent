@@ -1,0 +1,22 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<!-- duplicate (W-1 control): reproduces D1, the phase's flagship defect -- ONE card carrying TWO
+     "View registration" affordances. This is the shape TimelineRow.tsx's buildActions + the
+     registration panel's CTA produced together before 61-02 deleted the row's action.
+     Only the `duplicates` leg may FAIL (reason: duplicate-label). Text fits inside the card and
+     both targets are 200x100px (>=88px at 320dpi), so clipping and touch-targets must PASS --
+     leg isolation. Added because `duplicate-label` previously existed at exactly one site in the
+     repo (its own printf) and had never been observed firing against a committed artifact. -->
+<hierarchy rotation="0">
+  <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="true" long-clickable="false" password="false" selected="false" bounds="[0,0][720,1520]">
+    <node index="0" text="" resource-id="" class="android.view.ViewGroup" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[20,100][700,400]">
+      <node index="0" text="" resource-id="timeline-row-notch-registrationEnds" class="android.view.View" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[20,140][28,156]" />
+      <node index="1" text="Registration Ends" resource-id="timeline-row-title-registrationEnds" class="android.widget.TextView" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[40,110][300,140]" />
+      <node index="2" text="" resource-id="timeline-row-view-registration-registrationEnds" class="android.view.ViewGroup" package="org.votetorrent.voter" content-desc="View registration" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[40,180][240,280]">
+        <node index="0" text="View registration" resource-id="" class="android.widget.TextView" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[50,200][230,260]" />
+      </node>
+      <node index="3" text="" resource-id="timeline-row-panel-cta-registrationEnds" class="android.view.ViewGroup" package="org.votetorrent.voter" content-desc="View registration" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[40,290][240,390]">
+        <node index="0" text="View registration" resource-id="" class="android.widget.TextView" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[50,310][230,370]" />
+      </node>
+    </node>
+  </node>
+</hierarchy>

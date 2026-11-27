@@ -37,7 +37,14 @@ import renderer from "react-test-renderer";
 // timeout-flaky navigator proof is worse than a slow one: the gate can no
 // longer tell a real route regression from scheduler noise. Raised
 // deliberately rather than by shortening the render.
-jest.setTimeout(30_000);
+//
+// 2026-08-29 re-measurement (Phase 51 Nyquist audit): 30_000 was still
+// insufficient — a `yarn jest --clearCache && yarn jest` full run clocked
+// this file at 34.205s (cold), while solo cold (no other worker contention)
+// it took 23.316s. Root cause is parallel-worker CPU contention across ~98
+// suites cold-transforming Babel simultaneously, not a hang — isolated cold
+// time is stable. Raised again, with headroom above the observed worst case.
+jest.setTimeout(60_000);
 
 jest.mock("react-native-vector-icons/FontAwesome6", () => "FontAwesome6");
 

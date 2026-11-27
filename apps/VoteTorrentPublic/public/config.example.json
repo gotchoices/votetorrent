@@ -1,0 +1,6 @@
+{
+	"_comment": "Operator template for D-13's runtime bootstrap config. Copy this file to config.json (gitignored, never committed) and replace bootstrapNodes with your real gateway multiaddr(s) before deploying. The host below is under the reserved .invalid TLD on purpose: a deployment that forgets to replace it fails to dial loudly instead of quietly becoming the next stale placeholder.",
+	"bootstrapNodes": [
+		"/dns4/gateway.votetorrent.invalid/tcp/443/wss/p2p/12D3KooWReplaceThisWithYourGatewaysRealPeerId12"
+	]
+}

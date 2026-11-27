@@ -1,0 +1,2 @@
+const builder = makeBuilder();
+setX(builder.errors().map((e) => e.message).join(''));

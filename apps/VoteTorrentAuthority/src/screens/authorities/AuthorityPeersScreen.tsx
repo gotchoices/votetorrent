@@ -22,10 +22,11 @@ import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorH
 // authorities-tree consumer among two (47-17 is the other) and imports it
 // rather than forking a second confirmation card.
 import { LifecycleConfirmCard } from "../registration/components/LifecycleConfirmCard";
-import { scopeDescriptions } from "@votetorrent/vote-core";
+import { scopeLabel } from "../../utils/scopeLabel";
 import type { AuthorityPeer, IAuthorityConfigEngine } from "@votetorrent/vote-core";
 import type { RootStackParamList } from "../../navigation/types";
 import { useKeyboardInset } from "../../hooks/useKeyboardInset";
+import { errorCopy } from "../../utils/errorCopy";
 
 // A stable no-op for the (non-optional) CustomButton.onPress prop when a gate
 // is unmet — belt-and-suspenders alongside `disabled`, mirroring
@@ -127,7 +128,7 @@ export default function AuthorityPeersScreen() {
 				setErrorMessage("");
 			}
 		} catch (err) {
-			if (!unmountedRef.current) setErrorMessage(err instanceof Error ? err.message : String(err));
+			if (!unmountedRef.current) setErrorMessage(errorCopy(err, t, "read"));
 		} finally {
 			if (!unmountedRef.current) setLoading(false);
 		}
@@ -167,7 +168,7 @@ export default function AuthorityPeersScreen() {
 				// propagated so callers unwind cleanly, but no errorMessage is set.
 				const outcome = handleDeviceSigningError(err);
 				if (!unmountedRef.current && !outcome.handled) {
-					setErrorMessage(outcome.message ?? (err instanceof Error ? err.message : String(err)));
+					setErrorMessage(outcome.message ?? errorCopy(err, t, "write"));
 				}
 				throw err;
 			} finally {
@@ -236,6 +237,7 @@ export default function AuthorityPeersScreen() {
 
 	return (
 		<ScrollView
+			keyboardShouldPersistTaps="handled"
 			testID="authority-peers-screen"
 			style={styles.container}
 			contentContainerStyle={{ paddingBottom: insets.bottom + 24 + keyboardInset }}
@@ -263,7 +265,7 @@ export default function AuthorityPeersScreen() {
 					<View testID="authority-peers-readonly-banner" style={localStyles.banner}>
 						<FontAwesome6 name="lock" size={14} color={colors.textSecondary} />
 						<ThemedText type="small" style={{ color: colors.textSecondary }}>
-							{t("authorityPeerScopeReadOnlyBanner", { scope: scopeDescriptions.cap })}
+							{t("authorityPeerScopeReadOnlyBanner", { scope: scopeLabel("cap", t) })}
 						</ThemedText>
 					</View>
 				))}

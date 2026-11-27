@@ -1,8 +1,14 @@
-import { MisuseError, QuereusError } from '@quereus/quereus'
+import { findDuplicateKeyholderName } from '../election/keyholder-names.js'
+import { rethrow as rethrowHelper } from '../signing/ceremony-helpers.js'
 import { ElectionEngine } from '../election/election-engine.js'
 import { digestToBytes, fromCanonicalDatetime, nowCanonicalDatetime, parseJsonOr, toCanonicalDatetime } from '../utils.js'
 import { allocateTid } from '../database/tid-allocator.js'
 import { verifyUserKeyMembership } from '../user/verify-user-key.js'
+import {
+  adminSignatureTaskExtensionInserter,
+  computeRadProposalDigest,
+  readProposedRosterJson
+} from '../authority/rad-roster-digest.js'
 import type { Database } from '@quereus/quereus'
 import type { EngineContext } from '../types.js'
 import type {
@@ -23,6 +29,8 @@ import type {
 import { ElectionsCreateElectionBuilder } from './builders/elections-create-election-builder.js'
 import { ElectionsAdjustElectionBuilder } from './builders/elections-adjust-election-builder.js'
 import { SigningEngine } from '../signing/signing-engine.js'
+import { adminSigningKeyValidity } from '../signing/signer-validity.js'
+import { assertTimelineAcceptable } from '../election/timeline-rules.js'
 
 // Phase 999.1 D-01/D-02/D-03 — Tids for ElectionsEngine batches are allocated
 // through the shared durable, peer-safe allocator (`tid-allocator.ts`,
@@ -144,6 +152,14 @@ export class ElectionsEngine implements IElectionsEngine {
    */
   async adjustElection (election: ElectionInit): Promise<void> {
     this.requireCtx('adjustElection')
+    // A timeline the Voter would refuse is refused here, before any Tid or write
+    // (todo 2026-10-29-engine-timeline-validation; rules in election/timeline-rules.ts).
+    assertTimelineAcceptable(election.revision?.timeline, election.election, 'adjustElection')
+    // 62-104 (IN-06): a keyholder slot binds to its invitee by name, so names are unique per election.
+    // Refused before any Tid is reserved or row written.
+    if (findDuplicateKeyholderName((election.revision?.keyholders ?? []).map(k => k.name ?? '')) !== undefined) {
+      throw Object.assign(new Error('Two keyholders on one election cannot share a name'), { code: 'duplicate-keyholder-name' })
+    }
     const tid = await allocateTid(this.ctx!.db, 'elections')
     const e = election.election
     // IN-24 (17-REVIEW): the revision row belongs to THIS proposal — a
@@ -335,6 +351,14 @@ export class ElectionsEngine implements IElectionsEngine {
    */
   async createElection (election: ElectionInit, options?: { signingNonce?: string; revisionSigningNonce?: string }): Promise<void> {
     this.requireCtx('createElection')
+    // A timeline the Voter would refuse is refused here, before any Tid or write
+    // (todo 2026-10-29-engine-timeline-validation; rules in election/timeline-rules.ts).
+    if (election.revision) assertTimelineAcceptable(election.revision.timeline, election.election, 'createElection')
+    // 62-104 (IN-06): a keyholder slot binds to its invitee by name, so names are unique per election.
+    // Refused before any Tid is reserved or row written.
+    if (findDuplicateKeyholderName((election.revision?.keyholders ?? []).map(k => k.name ?? '')) !== undefined) {
+      throw Object.assign(new Error('Two keyholders on one election cannot share a name'), { code: 'duplicate-keyholder-name' })
+    }
     // D-03: consume the T/T+1 pair reserved as ONE count=2 block (either the
     // pending reservation a prior peekNextElectionTid/seedElectionSigning
     // already made — the common byte-alignment-contract path, see the deviation
@@ -697,6 +721,12 @@ export class ElectionsEngine implements IElectionsEngine {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nonce: string = (globalThis as any).crypto.randomUUID()
     const now = nowCanonicalDatetime()
+    const isSignerKeyValid = await adminSigningKeyValidity(ctx.db, {
+      userId: signature.signerUserId,
+      signerKey: signature.signerKey,
+      now,
+      isPlaceholderSignature: false
+    })
 
     await ctx.db.exec(
       `insert into AdminSigning (
@@ -709,7 +739,7 @@ export class ElectionsEngine implements IElectionsEngine {
         SignerKey,
         Signature
       )
-      with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
+      with context now = :now, IsSignerKeyValid = :isSignerKeyValid, IsPlaceholderSignature = false
       values (
         :nonce,
         :authorityId,
@@ -735,6 +765,7 @@ export class ElectionsEngine implements IElectionsEngine {
         signerKey: signature.signerKey,
         signature: signature.signature,
         now,
+        isSignerKeyValid,
       }
     )
 
@@ -848,6 +879,12 @@ export class ElectionsEngine implements IElectionsEngine {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nonce: string = (globalThis as any).crypto.randomUUID()
     const now = nowCanonicalDatetime()
+    const isSignerKeyValid = await adminSigningKeyValidity(ctx.db, {
+      userId: signature.signerUserId,
+      signerKey: signature.signerKey,
+      now,
+      isPlaceholderSignature: false
+    })
 
     await ctx.db.exec(
       `insert into AdminSigning (
@@ -860,7 +897,7 @@ export class ElectionsEngine implements IElectionsEngine {
         SignerKey,
         Signature
       )
-      with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = false
+      with context now = :now, IsSignerKeyValid = :isSignerKeyValid, IsPlaceholderSignature = false
       values (
         :nonce,
         :authorityId,
@@ -887,6 +924,7 @@ export class ElectionsEngine implements IElectionsEngine {
         signerKey: signature.signerKey,
         signature: signature.signature,
         now,
+        isSignerKeyValid,
       }
     )
 
@@ -998,17 +1036,31 @@ export class ElectionsEngine implements IElectionsEngine {
       }
 
       // 4. Insert a fresh AdminSigning row with a NEW nonce.
-      //    Digest uses the same thresholdPolicies value as AdminSignatureTaskExtension.MutationValid
-      //    will look up from ProposedAdmin — they must match byte-for-byte.
+      //    62-03 (D-33/D-34): the Digest now uses the SAME full-roster 'rad' PROPOSAL
+      //    formula AdminSignatureTaskExtension.MutationValid (Trigger B) recomputes —
+      //    Digest(AuthorityId, EffectiveAt, Officers, ThresholdPolicies), no Tid. The
+      //    ThresholdPolicies and roster are RE-READ from ProposedAdmin/ProposedOfficer
+      //    themselves (the exact source the schema CHECK reads), not assumed to match
+      //    `adminThresholdPolicies` (the live Admin table's value) — the ProposedAdmin
+      //    row may already have existed from a prior seed call.
       //    Do NOT call sign() here: AdminSigning must stay unsigned (no AdminSignature) so that
       //    MutationValid's "not exists AdminSignature for uncompleted task" gate passes.
+      const proposedAdminRow = await ctx.db
+        .prepare('select ThresholdPolicies from ProposedAdmin where AuthorityId = :authorityId and EffectiveAt = :adminEffectiveAt')
+        .get({ authorityId, adminEffectiveAt })
+      const proposedThresholdPolicies = (proposedAdminRow?.ThresholdPolicies as string | null) ?? adminThresholdPolicies
+      const rosterJson = await readProposedRosterJson(ctx.db, authorityId, adminEffectiveAt)
+      const digest = await computeRadProposalDigest(ctx.db, {
+        authorityId,
+        effectiveAt: adminEffectiveAt,
+        officers: rosterJson,
+        thresholdPolicies: proposedThresholdPolicies
+      })
       await ctx.db.exec(
         `insert into AdminSigning (Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature)
          with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = true
-         values (:nonce, :authorityId, :adminEffectiveAt, 'rad',
-                 Digest(:tid, :authorityId, :adminEffectiveAt, :thresholdPolicies),
-                 :userId, :signerKey, :signature)`,
-        { nonce, authorityId, adminEffectiveAt, thresholdPolicies: adminThresholdPolicies, tid, now, userId, signerKey: placeholderKey, signature: placeholderSig }
+         values (:nonce, :authorityId, :adminEffectiveAt, 'rad', :digest, :userId, :signerKey, :signature)`,
+        { nonce, authorityId, adminEffectiveAt, digest, now, userId, signerKey: placeholderKey, signature: placeholderSig }
       )
 
       // 5. Insert Task + AdminSignatureTaskExtension in a single atomic transaction.
@@ -1016,6 +1068,9 @@ export class ElectionsEngine implements IElectionsEngine {
       //    within-transaction state is visible to the next statement's inline checks.
       //    The deferred ExtensionExists (on Task) and TaskIdValid (on AdminSignatureTaskExtension)
       //    are both evaluated at COMMIT time when both rows are present.
+      //    62-03: the extension insert now runs through the shared
+      //    adminSignatureTaskExtensionInserter helper (same inserter fanOutSignatureTasks uses).
+      const insertExtension = adminSignatureTaskExtensionInserter(ctx.db, authorityId, adminEffectiveAt, tid)
       await ctx.db.exec('BEGIN')
       try {
         await ctx.db.exec(
@@ -1024,12 +1079,7 @@ export class ElectionsEngine implements IElectionsEngine {
            values (:id, :userId, 'signature', 'admin', :nonce, 0)`,
           { id: signatureTaskId, userId, nonce, tid }
         )
-        await ctx.db.exec(
-          `insert into AdminSignatureTaskExtension (TaskId, AuthorityId, AdminEffectiveAt)
-           with context Tid = :tid
-           values (:taskId, :authorityId, :adminEffectiveAt)`,
-          { taskId: signatureTaskId, authorityId, adminEffectiveAt, tid }
-        )
+        await insertExtension(signatureTaskId as string, userId)
         await ctx.db.exec('COMMIT')
       } catch (err) {
         await ctx.db.exec('ROLLBACK')
@@ -1120,14 +1170,6 @@ export class ElectionsEngine implements IElectionsEngine {
   }
 
   private rethrow (err: unknown, method: string): never {
-    if (err instanceof QuereusError) {
-      throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
-    } else if (err instanceof MisuseError) {
-      throw new Error(`API misuse: ${err.message}`)
-    } else if (err instanceof Error) {
-      throw new Error(`ElectionsEngine.${method}: ${err.message}`)
-    } else {
-      throw new Error(`ElectionsEngine.${method}: unknown error: ${String(err)}`)
-    }
+    return rethrowHelper(err, 'ElectionsEngine', method)
   }
 }

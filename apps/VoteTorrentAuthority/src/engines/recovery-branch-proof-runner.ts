@@ -34,6 +34,7 @@ export async function runRecoveryBranchProofRunner(): Promise<void> {
 				subtitle: 'Confirm with your device PIN, pattern or password',
 				negative: 'Cancel',
 			},
+			Platform.OS,
 		);
 	} catch (err) {
 		console.error('[d26a-local] FATAL —', err);

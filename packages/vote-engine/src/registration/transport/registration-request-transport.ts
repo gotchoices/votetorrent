@@ -47,6 +47,14 @@ export interface RegistrationDecisionNotice {
   requestId: string
   status: RegistrationRequestStatus
   reason?: string
+  /**
+   * A resume cursor, not a row identifier: forward the last value as `sinceCursor` to continue
+   * (re-delivery is permitted, loss is not). Opaque; compare for equality only. In the P2P binding
+   * a decision above the in-sequence ceiling carries the last in-sequence cursor of the read (else
+   * the caller's conforming `sinceCursor`, else the re-read sentinel `0000000000000000`), so
+   * several notices can share one value and it can differ from the cursor `publishDecision`
+   * returned. See `readDecisionRows` in `p2p-staging-seam.ts`.
+   */
   cursor: string
 }
 

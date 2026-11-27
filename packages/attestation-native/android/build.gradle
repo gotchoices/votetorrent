@@ -68,4 +68,7 @@ dependencies {
     // Standard Stack) — do not bump/guess.
     implementation "com.google.android.play:integrity:1.6.0"
     implementation "androidx.biometric:biometric:1.1.0"
+    // Plan 62-75: FileProvider for sharing a cache file as a file (androidx.biometric already pulls
+    // androidx.core transitively; declared explicitly so the dependency is not accidental).
+    implementation "androidx.core:core:${safeExtGet("androidxCoreVersion", "1.17.0")}"
 }

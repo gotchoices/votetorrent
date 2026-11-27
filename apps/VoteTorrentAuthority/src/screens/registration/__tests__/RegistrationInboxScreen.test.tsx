@@ -142,6 +142,13 @@ let mockRouteParams: { authorityId: string } = { authorityId: "fixture-authority
 // ---------------------------------------------------------------------------
 
 jest.mock("react-native-vector-icons/FontAwesome6", () => "FontAwesome6");
+// todo 2026-09-11-optimystic-commit-success-hides-unresolvable-cohort: how many decisions made on
+// this phone no other member holds yet. 0 (no banner) unless a test sets it.
+let mockWaitingDecisions = 0;
+jest.mock("../../../hooks/useCommitShare", () => ({
+	...jest.requireActual("../../../hooks/useCommitShare"),
+	useWaitingActionCount: (prefix: string) => (prefix === "decision:" ? mockWaitingDecisions : 0),
+}));
 
 jest.mock("react-native-safe-area-context", () => ({
 	useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -260,6 +267,13 @@ jest.mock("@react-navigation/native", () => ({
 
 jest.mock("../../../engines/device-user", () => ({
 	getOrCreateDeviceUser: jest.fn(async () => ({ id: "device-user-1", name: "Device User" })),
+}));
+
+// The device-change review toggle now mounts on this screen and imports the device signer; the
+// real module initialises i18next, which this suite's react-i18next mock does not provide. The
+// toggle's own behaviour is covered by RegistrationInboxScreen.reassociationReview.test.tsx.
+jest.mock("../../../engines/device-signer", () => ({
+	createDeviceSigner: jest.fn(async () => async () => ({ signature: "s", signerKey: "k", signerUserId: "u" })),
 }));
 
 jest.mock("../../../providers/AppProvider", () => ({
@@ -976,7 +990,8 @@ describe("RegistrationInboxScreen — D-03/D-09/D-12 (48-18)", () => {
 		await flushTicks(4);
 
 		present(tr, "registration-inbox-error");
-		expect(treeText(tr)).toContain("listRegistrationRequests failed");
+		expect(treeText(tr)).toContain("errorLoadFailedGeneric");
+		expect(treeText(tr)).not.toContain("listRegistrationRequests failed");
 
 		// Exactly one occurrence: the search input's own `value` prop.
 		const occurrences = treeText(tr).split(SENTINEL).length - 1;
@@ -1105,6 +1120,25 @@ describe("RegistrationInboxScreen — D-03/D-09/D-12 (48-18)", () => {
 		// fresh `renderer.create` call, which this test never makes.
 	});
 
+	it("a duplicate-closed request reads Closed under All, never Pending; Pending filter hides it (UAT 62 test 12)", async () => {
+		const A = "fixture-request-pending-duplicate-a";
+		const B = "fixture-request-pending-duplicate-b";
+		mockRegistrationEngine.markDuplicateClosure(A, "closed");
+		const tr = await renderScreen();
+		await press(tr, "registration-inbox-filter-status-all");
+
+		const closed = JSON.stringify(findJsonNodeByTestID(tr.toJSON(), "registration-request-row-status-" + A));
+		expect(closed).toContain("registrationRequestStatusClosedDuplicate");
+		expect(closed).not.toContain("registrationRequestStatusPending");
+		const open = JSON.stringify(findJsonNodeByTestID(tr.toJSON(), "registration-request-row-status-" + B));
+		expect(open).toContain("registrationRequestStatusPending");
+		expect(open).not.toContain("registrationRequestStatusClosedDuplicate");
+
+		await press(tr, "registration-inbox-filter-status-p");
+		expect(findJsonNodeByTestID(tr.toJSON(), "registration-request-row-" + A)).toBeFalsy();
+		expect(findJsonNodeByTestID(tr.toJSON(), "registration-request-row-" + B)).toBeTruthy();
+	});
+
 	it("the transparency card renders new totals on re-focus, with no filter change in between", async () => {
 		const tr = await renderScreen();
 
@@ -1112,8 +1146,19 @@ describe("RegistrationInboxScreen — D-03/D-09/D-12 (48-18)", () => {
 		void pendingBefore;
 		const pendingValueBefore = findJsonNodeByTestID(tr.toJSON(), "transparency-stats-pending-value");
 		const approvedValueBefore = findJsonNodeByTestID(tr.toJSON(), "transparency-stats-approved-value");
-		expect(JSON.stringify(pendingValueBefore)).toContain("2");
-		expect(JSON.stringify(approvedValueBefore)).toContain("1");
+		// 4 pending / 1 approved: 62-19 (D-44) added a second pending-pair fixture
+		// (`fixture-request-pending-duplicate-a`/`-b`, both status 'p', same authority) to
+		// `MockRegistrationEngine.seedRegistrationRequestFixtures`, alongside the pre-existing
+		// `fixture-request-bridge-1`/`fixture-request-pending-repeat`. The numeric assertions
+		// below read the rendered `children` text exactly (`toEqual`, not `toContain`) so a
+		// future fixture-count drift fails loudly here instead of passing on a coincidental
+		// digit substring (e.g. `fontSize":24` contains "2").
+		expect(JSON.stringify((pendingValueBefore as { children: unknown[] }).children)).toEqual(
+			JSON.stringify(["4"])
+		);
+		expect(JSON.stringify((approvedValueBefore as { children: unknown[] }).children)).toEqual(
+			JSON.stringify(["1"])
+		);
 
 		const stored = mockRegistrationEngine.registrationRequests.get("fixture-request-pending-repeat");
 		stored.status = "a";
@@ -1126,8 +1171,12 @@ describe("RegistrationInboxScreen — D-03/D-09/D-12 (48-18)", () => {
 
 		const pendingValueAfter = findJsonNodeByTestID(tr.toJSON(), "transparency-stats-pending-value");
 		const approvedValueAfter = findJsonNodeByTestID(tr.toJSON(), "transparency-stats-approved-value");
-		expect(JSON.stringify(pendingValueAfter)).toContain("1");
-		expect(JSON.stringify(approvedValueAfter)).toContain("2");
+		expect(JSON.stringify((pendingValueAfter as { children: unknown[] }).children)).toEqual(
+			JSON.stringify(["3"])
+		);
+		expect(JSON.stringify((approvedValueAfter as { children: unknown[] }).children)).toEqual(
+			JSON.stringify(["2"])
+		);
 	});
 
 	it("source gate: no plain useEffect besides the unmountedRef guard, and the false premise sentence is gone", () => {
@@ -1160,4 +1209,23 @@ describe("RegistrationInboxScreen — D-03/D-09/D-12 (48-18)", () => {
 	// unresolvable cursor yields an empty page and never page 1 — are owned by
 	// packages/vote-engine/test/registration-request-read.spec.ts, and this
 	// comment says so rather than implying the branches are covered.
+});
+
+describe("RegistrationInboxScreen — decisions not shared yet", () => {
+	afterEach(() => {
+		mockWaitingDecisions = 0;
+	});
+
+	it("shows the not-shared banner with the count while decisions made here have not reached the network", async () => {
+		mockWaitingDecisions = 2;
+		const tr = await renderScreen();
+		const banners = tr.root.findAll((n) => n.props.testID === "registration-inbox-decisions-not-shared" && typeof n.type === "string");
+		expect(banners.length).toBe(1);
+		expect(JSON.stringify(tr.toJSON())).toContain("decisionsNotShared|count=2");
+	});
+
+	it("control: no banner when every decision is shared", async () => {
+		const tr = await renderScreen();
+		expect(JSON.stringify(tr.toJSON())).not.toContain("registration-inbox-decisions-not-shared");
+	});
 });

@@ -80,7 +80,7 @@ jest.mock("@react-navigation/native", () => ({
 			// eslint-disable-next-line react-hooks/exhaustive-deps
 		}, []);
 	},
-	useRoute: () => ({ params: { electionEngine: mockElectionEngine } }),
+	useRoute: () => ({ params: { electionEngine: mockElectionEngine, authorityName: "Lab Auth" } }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -187,5 +187,12 @@ describe("ElectionDetailsScreen — Registration Policy entry calls navigate() c
 			electionId: "election-1",
 			authorityId: "authority-1",
 		});
+	});
+});
+
+describe("ElectionDetailsScreen — authority header (UAT 62 N2)", () => {
+	it("renders the route's authorityName instead of the raw authority id", async () => {
+		const tree = await renderScreen();
+		expect(tree.root.findByProps({ testID: "election-details-authority" }).props.children).toBe("Lab Auth");
 	});
 });

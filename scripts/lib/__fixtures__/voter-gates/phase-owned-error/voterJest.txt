@@ -1,0 +1,15 @@
+Test Suites: 1 failed, 41 passed, 42 total
+Tests:       2 failed, 321 passed, 323 total
+Snapshots:   0 total
+Time:        12.34 s
+Ran all test suites.
+
+FAIL src/providers/__tests__/VoterAppProvider.test.tsx
+  ● VoterAppProvider — real composition root (D-02/D-04/D-07) › boots to isInitialized after the mocked seed resolves, and calls hideSplash
+
+    Error: synthetic failure for selftest
+
+  ● VoterAppProvider — real composition root (D-02/D-04/D-07) › useVoterApp() exposes a real getEngine accessor plus seededElectionId (not the removed isRegistered mock boolean, and NOT a sign field — 51-12/D-09/D-20)
+
+    Error: synthetic failure for selftest
+

@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<!-- undersized (W-1 control): one clickable target measuring 80x40px, below the 88px floor
+     (44dp at 320dpi). Only the `touch-targets` leg may FAIL (reason: undersized-target).
+     Text fits inside the card and no label repeats, so clipping and duplicates must PASS --
+     leg isolation. Added because `undersized-target` previously existed at exactly one site in
+     the repo (its own printf) and had never been observed firing against a committed artifact. -->
+<hierarchy rotation="0">
+  <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="true" long-clickable="false" password="false" selected="false" bounds="[0,0][720,1520]">
+    <node index="0" text="" resource-id="" class="android.view.ViewGroup" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[20,100][700,400]">
+      <node index="0" text="" resource-id="timeline-row-notch-votingStarts" class="android.view.View" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[20,140][28,156]" />
+      <node index="1" text="Voting Period" resource-id="timeline-row-title-votingStarts" class="android.widget.TextView" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[40,110][300,140]" />
+      <node index="2" text="" resource-id="timeline-row-vote-now-votingStarts" class="android.view.ViewGroup" package="org.votetorrent.voter" content-desc="Vote now" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[40,180][120,220]">
+        <node index="0" text="Vote now" resource-id="" class="android.widget.TextView" package="org.votetorrent.voter" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[45,185][115,215]" />
+      </node>
+    </node>
+  </node>
+</hierarchy>

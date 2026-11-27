@@ -139,6 +139,44 @@ to pass** before returning `{ ok: true }`:
    yields `{ ok: false, reason: "attestation key revoked/suspended — certificate serial '<serial>' is on the Google attestation-status revoked/suspended snapshot" }`.
    This check is fully offline — `revokedSerials` is a bundled, committed
    snapshot (see `SETUP.md` §4), never fetched at verify-time (D-04).
+7. **Leaf-pubkey-IS-deviceKey binding (51-02, check `4b-2` in
+   `key-attestation.ts`):** the LEAF certificate's own SubjectPublicKeyInfo
+   (`leaf.publicKey.rawData`, already-parsed DER — never re-parsed by hand)
+   must equal `challenge.deviceKey`, decoded from Android's stored encoding
+   (SPKI DER, base64) via `decodeAndroidDeviceKeySpki`, compared in constant
+   time (`timingSafeEqual`). A `challenge.deviceKey` that cannot be decoded
+   as SPKI DER base64 REJECTS — `decodeAndroidDeviceKeySpki` returns
+   `undefined` and the caller treats that as a hard reject, never as "no
+   check applies" (fail-closed, T-51-02-02). See §4a below for why rule 5
+   (the `attestationChallenge` digest binding) alone was not sufficient.
+
+### 4a. Why the digest binding (rule 5) does not already prove this
+
+Rule 5 proves `attestationChallenge == Digest(challenge.nonce, challenge.deviceKey)`
+— i.e. that *the challenge was answered naming `challenge.deviceKey`*. It says
+nothing about which key the leaf certificate itself attests. Before rule 7
+existed, an attacker holding a genuine TEE/StrongBox key `K_hw` on a real,
+unmodified device could bind the challenge digest to a **different**,
+exportable key `K_soft` (`challenge.deviceKey = K_soft`) and register `K_soft`
+as the voting key: rules 1-6 all pass, because none of them inspect the leaf's
+own public key — only its security level, its `attestationApplicationId`, its
+origin/purpose, and its serial. The resulting `Association` would appear
+hardware-backed while the actual registered voting key was exportable and
+shareable.
+
+**This gap is now CLOSED, not merely deferred.** Prior versions of this
+document and `.planning/phases/51-ios-device-attestation-apple-app-attest/51-SECURITY.md`
+(Accepted/Deferred Risk Log, "Android `verifyKeyAttestation`
+leaf-pubkey-not-bound-to-deviceKey gap") recorded this as `transfer (deferred,
+explicitly out of this phase's scope)`. Plan 51-02 folded the todo
+(`.planning/todos/pending/2026-08-25-key-attestation-leaf-pubkey-not-bound-to-devicekey.md`)
+into this phase and closed it: rule 7 above, proven by mutation — with the
+check disabled, `test/key-attestation-verifier.spec.ts`'s
+`'rejects a cryptographically-perfect chain whose LEAF public key is a
+DIFFERENT key than challenge.deviceKey'` test (under the `leaf public key
+binding (folded 2026-08-25 defect)` describe block) wrongly reports `ok:
+true`; restoring the check turns that failure into a pass, while the positive
+control in the same block keeps passing throughout both states.
 
 **Error discipline:** every failure returns a structured
 `{ ok: false, reason: <specific, named string> }` — never a silent

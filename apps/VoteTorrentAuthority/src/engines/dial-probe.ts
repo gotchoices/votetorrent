@@ -29,6 +29,7 @@ import { DIAL_PROBE_ENABLED } from './proof-flags.generated';
 // Update port and peerId after each drone restart (drone prints this on startup).
 // Example: '/ip4/10.0.2.2/tcp/52345/ws/p2p/12D3KooW...'
 const CONTROL_ADDR = '/ip4/10.0.2.2/tcp/0/ws/p2p/UPDATE_AFTER_DRONE_RESTART';
+const PROOF_STORAGE = createScopedRnStorageProvider('votetorrent-dialprobe-strand');
 
 const L = (...a: unknown[]) => console.info('[dial-probe]', ...a);
 
@@ -58,10 +59,10 @@ export async function runDialProbe(): Promise<void> {
     node = new CadreNode({
       privateKey,
       controlNetwork: { partyId: 'probe-party', bootstrapNodes: [CONTROL_ADDR] },
-      profile: 'transaction',
+      nodeClass: 'device',
       strandFilter: { mode: 'all' },
       // ISO-01 per-scope storage + persistence guardrail (aligned with the app providers).
-      storage: { provider: createScopedRnStorageProvider('votetorrent-dialprobe-strand') },
+      storage: { open: (scopeId: string) => PROOF_STORAGE.open(scopeId) },
       network: {
         transports: [webSockets(), circuitRelayTransport()],
         listenAddrs: [],

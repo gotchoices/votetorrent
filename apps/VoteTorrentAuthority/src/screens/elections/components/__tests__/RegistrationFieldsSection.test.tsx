@@ -154,8 +154,16 @@ describe('RegistrationFieldsSection — D-02/D-14/D-10', () => {
     const { tr } = renderSection({ fields: [] });
     expect(treeContainsText(tr, 'registrationPolicyKnownFieldLastName')).toBe(true);
     expect(treeContainsText(tr, 'registrationPolicyKnownFieldFirstName')).toBe(true);
-    const json = JSON.stringify(tr.toJSON()).toLowerCase();
-    const matches = json.match(/registrationpolicyknownfield/g) ?? [];
+    // Count RENDERED text only: each chip also carries its label as an accessibilityLabel prop,
+    // so a raw JSON-string count would see every chip twice.
+    const texts: string[] = [];
+    const walk = (node: unknown): void => {
+      if (typeof node === 'string') texts.push(node);
+      else if (Array.isArray(node)) node.forEach(walk);
+      else if (node && typeof node === 'object') walk((node as { children?: unknown }).children);
+    };
+    walk(tr.toJSON());
+    const matches = texts.filter((s) => s.toLowerCase().includes('registrationpolicyknownfield'));
     expect(matches.length).toBe(2);
   });
 

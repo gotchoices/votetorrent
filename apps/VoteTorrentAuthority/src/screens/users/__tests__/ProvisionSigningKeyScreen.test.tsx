@@ -105,7 +105,7 @@ jest.mock("../../../providers/AppProvider", () => ({
 	useApp: () => ({ getEngine: mockGetEngine }),
 }));
 
-const mockPersistProvisionedDeviceUser = jest.fn(async (_displayName: string, publicKeyCompressedHex: string) => ({
+const mockPersistProvisionedDeviceUser = jest.fn(async (_displayName: string, publicKeyCompressedHex: string, _options?: { userId?: string }) => ({
 	id: "user-1",
 	name: "Officer One",
 	activeKeys: [{ key: publicKeyCompressedHex, type: "P", expiration: Date.now() }],
@@ -121,8 +121,11 @@ const mockMarkRecoveryInProgress = jest.fn(async () => {});
 const mockClearRecoveryInProgress = jest.fn(async () => {});
 
 jest.mock("../../../engines/device-user", () => ({
-	persistProvisionedDeviceUser: (displayName: string, publicKeyCompressedHex: string) =>
-		mockPersistProvisionedDeviceUser(displayName, publicKeyCompressedHex),
+	persistProvisionedDeviceUser: (displayName: string, publicKeyCompressedHex: string, options?: { userId?: string }) =>
+		// Forward only the arguments actually passed, so first-run assertions stay two-argument.
+		options === undefined
+			? mockPersistProvisionedDeviceUser(displayName, publicKeyCompressedHex)
+			: mockPersistProvisionedDeviceUser(displayName, publicKeyCompressedHex, options),
 	persistDeviceProvisioningRecord: (record: unknown) => mockPersistDeviceProvisioningRecord(record),
 	getDeviceUser: () => mockGetDeviceUser(),
 	getDeviceProvisioningRecord: () => mockGetDeviceProvisioningRecord(),
@@ -142,6 +145,7 @@ jest.mock("react-native", () => {
 		produceAttestation: jest.fn(),
 		signWithDeviceKey: jest.fn(),
 		signWithRecoveryKey: jest.fn(),
+		getCurrentDeviceKey: jest.fn(),
 	};
 	const actualTurboModuleRegistry = actual.TurboModuleRegistry as { getEnforcing: (name: string) => unknown };
 	const turboModuleRegistryProxy = new Proxy(actualTurboModuleRegistry, {
@@ -152,9 +156,19 @@ jest.mock("react-native", () => {
 			return Reflect.get(target, prop, receiver);
 		},
 	});
+	// Platform.OS is set per test via __setPlatformOS (never inherited from the jest preset's "ios").
+	let platformOS = "ios";
+	const platformProxy = new Proxy(actual.Platform as Record<string, unknown>, {
+		get(target, prop, receiver) {
+			if (prop === "OS") return platformOS;
+			return Reflect.get(target, prop, receiver);
+		},
+	});
 	return new Proxy(actual, {
 		get(target, prop, receiver) {
 			if (prop === "TurboModuleRegistry") return turboModuleRegistryProxy;
+			if (prop === "Platform") return platformProxy;
+			if (prop === "__setPlatformOS") return (os: string) => { platformOS = os; };
 			if (prop === "__attestationNativeFake") return attestationNativeFake;
 			return Reflect.get(target, prop, receiver);
 		},
@@ -165,13 +179,15 @@ import React from "react";
 import renderer from "react-test-renderer";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires -- reach the fake exposed by the react-native mock above.
-const { __attestationNativeFake: nativeFake } = require("react-native") as {
+const { __attestationNativeFake: nativeFake, __setPlatformOS: setPlatformOS } = require("react-native") as {
+	__setPlatformOS: (os: string) => void;
 	__attestationNativeFake: {
 		provisionDeviceKey: jest.Mock;
 		provisionRecoveryKey: jest.Mock;
 		produceAttestation: jest.Mock;
 		signWithDeviceKey: jest.Mock;
 		signWithRecoveryKey: jest.Mock;
+		getCurrentDeviceKey: jest.Mock;
 	};
 };
 
@@ -625,10 +641,35 @@ describe("ProvisionSigningKeyScreen — 49-10 recovery variant (D-16) and D-18 t
 		expect(addedKey.key).toBe(NEW_SIGNING_KEY_HEX);
 		expect(typeof mockAddKey.mock.calls[0]![1]).toBe("function");
 
-		expect(mockPersistProvisionedDeviceUser).toHaveBeenCalledWith("Officer One", NEW_SIGNING_KEY_HEX);
+		expect(mockPersistProvisionedDeviceUser).toHaveBeenCalledWith("Officer One", NEW_SIGNING_KEY_HEX, { userId: "user-1" });
 
 		const json = JSON.stringify(tr.toJSON());
 		expect(json).toContain("signingKeyProvisioningSuccessHeading");
+	});
+
+	it("(f) R1/R2: recovery keeps the network user's id and name end to end (one identity)", async () => {
+		mockGetSummary.mockResolvedValue({
+			id: "net-user-1",
+			name: "Una Tester",
+			activeKeys: [
+				{ key: OLD_SIGNING_KEY_HEX, type: "P", expiration: Date.now() + 1000 },
+				{ key: RECOVERY_KEY_HEX, type: "P", expiration: Date.now() + 1000 },
+			],
+		});
+		nativeFake.provisionDeviceKey.mockResolvedValue({
+			publicKeyBase64: "NEW-SIGNING-SPKI-DER-BASE64",
+			publicKeyCompressedHex: NEW_SIGNING_KEY_HEX,
+		});
+		nativeFake.signWithRecoveryKey.mockResolvedValue({ signatureHex: "cafebabe" });
+
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+
+		expect(mockPersistProvisionedDeviceUser).toHaveBeenCalledWith("Una Tester", NEW_SIGNING_KEY_HEX, {
+			userId: "net-user-1",
+		});
+		const revokeSignature = mockRevokeKey.mock.calls[0]![1] as { signerUserId: string };
+		expect(revokeSignature.signerUserId).toBe("net-user-1");
 	});
 
 	it("(c) refreshes the provisioning record with the new attested key and an EMPTY certificateChainBase64 — no produceAttestation on this path", async () => {
@@ -858,3 +899,277 @@ describe("ProvisionSigningKeyScreen — D-14 boot invariant", () => {
 		expect(appProviderSource).not.toContain("ProvisionSigningKey");
 	});
 });
+
+describe("ProvisionSigningKeyScreen network-user-unresolved (UAT 62 Q)", () => {
+	it("explains both causes and offers Accept an Invitation alongside Try Again", async () => {
+		mockHappyPathNative();
+		mockGetCurrentUser.mockRejectedValueOnce(new Error("User not found"));
+
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+
+		const json = JSON.stringify(tr.toJSON());
+		expect(json).toContain("signingKeyProvisioningNetworkUserUnresolvedBody");
+		expect(tr.root.findByProps({ testID: "signing-key-provisioning-retry-button" })).toBeTruthy();
+
+		const inviteButton = tr.root.findByProps({ testID: "signing-key-provisioning-accept-invitation-button" });
+		const pressable = inviteButton.findAll((node) => typeof node.props.onPress === "function")[0]!;
+		await renderer.act(async () => pressable.props.onPress());
+		expect(mockNavigate).toHaveBeenCalledWith("AcceptInvitation");
+	});
+});
+
+// The digest handed to native depends on the platform (UAT 62 test 22): iOS native signs its input as the
+// final ECDSA hash, so it receives sha256(digest); Android's SHA256withECDSA hashes itself, so it receives
+// the digest. Asserted for all three native sign calls this screen makes.
+describe.each(["ios", "android"] as const)("ProvisionSigningKeyScreen native sign input on %s", (platform) => {
+	// eslint-disable-next-line @typescript-eslint/no-var-requires
+	const { createHash } = require("crypto") as typeof import("crypto");
+	const expected = (d: number[]) => {
+		const raw = Buffer.from(Uint8Array.from(d));
+		return (platform === "ios" ? createHash("sha256").update(raw).digest() : raw).toString("base64");
+	};
+
+	beforeEach(() => {
+		setPlatformOS(platform);
+	});
+	afterEach(() => {
+		setPlatformOS("ios");
+	});
+
+	it("first-run recovery-key addKey: signWithDeviceKey receives the platform input", async () => {
+		mockDeviceUserFixture = { id: "user-1", name: "Officer One", activeKeys: [{ key: POST_ATTESTATION_SIGNING_HEX }] };
+		mockProvisioningRecordFixture = { recoveryPublicKeyCompressedHex: RECOVERY_HEX };
+		mockGetSummary.mockResolvedValue({
+			id: "user-1",
+			name: "Officer One",
+			activeKeys: [{ key: POST_ATTESTATION_SIGNING_HEX, type: "P", expiration: Date.now() }],
+		});
+		nativeFake.signWithDeviceKey.mockResolvedValue({ signatureHex: "deadbeef" });
+
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+
+		expect(nativeFake.signWithDeviceKey).toHaveBeenCalledTimes(1);
+		expect(nativeFake.signWithDeviceKey.mock.calls[0]![1]).toBe(expected([1, 2, 3]));
+	});
+
+	it("recovery: revoke and replacement addKey both hand signWithRecoveryKey the platform input", async () => {
+		mockRouteParams = { reason: "invalidated" };
+		mockGetSummary.mockResolvedValue({
+			id: "user-1",
+			name: "Officer One",
+			activeKeys: [
+				{ key: OLD_SIGNING_KEY_HEX, type: "P", expiration: Date.now() + 1000 },
+				{ key: RECOVERY_KEY_HEX, type: "P", expiration: Date.now() + 1000 },
+			],
+		});
+		nativeFake.provisionDeviceKey.mockResolvedValue({
+			publicKeyBase64: "NEW-SIGNING-SPKI-DER-BASE64",
+			publicKeyCompressedHex: NEW_SIGNING_KEY_HEX,
+		});
+		nativeFake.provisionRecoveryKey.mockResolvedValue({
+			publicKeyBase64: "RECOVERY-SPKI-DER-BASE64",
+			publicKeyCompressedHex: RECOVERY_KEY_HEX,
+		});
+		nativeFake.signWithRecoveryKey.mockResolvedValue({ signatureHex: "cafebabe" });
+
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+
+		const digests = nativeFake.signWithRecoveryKey.mock.calls.map((c: unknown[]) => c[1]);
+		expect(digests).toContain(expected([9, 9, 9]));
+		expect(digests).toContain(expected([1, 2, 3]));
+		expect(digests).toHaveLength(2);
+	});
+});
+
+// 2026-08-18 todo (generic biometric error masks real faults, T-49-USER-7): on hardware the generic
+// "Couldn't verify your biometrics" copy hid three engine rejections (SignatureValid, DeleteValid)
+// that happened AFTER the biometric step had succeeded. Only a native rejection takes the signing
+// taxonomy now; an engine error shows the translated write copy.
+describe("ProvisionSigningKeyScreen — engine faults are never shown as a biometric failure", () => {
+	const engineError = () => new Error("Quereus error (code 19): CHECK constraint failed: SignatureValid");
+
+	beforeEach(() => {
+		jest.spyOn(console, "warn").mockImplementation(() => undefined);
+	});
+	afterEach(() => jest.restoreAllMocks());
+
+	it("first-run stage 2: an addKey CHECK rejection shows the write copy, not the biometric copy", async () => {
+		mockDeviceUserFixture = { id: "user-1", name: "Officer One", activeKeys: [{ key: POST_ATTESTATION_SIGNING_HEX }] };
+		mockProvisioningRecordFixture = { recoveryPublicKeyCompressedHex: RECOVERY_HEX };
+		mockGetSummary.mockResolvedValue({
+			id: "user-1",
+			name: "Officer One",
+			activeKeys: [{ key: POST_ATTESTATION_SIGNING_HEX, type: "P", expiration: Date.now() }],
+		});
+		nativeFake.signWithDeviceKey.mockResolvedValue({ signatureHex: "deadbeef" });
+		mockAddKey.mockRejectedValueOnce(engineError());
+
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+
+		expect(mockAddKey).toHaveBeenCalledTimes(1);
+		const json = JSON.stringify(tr.toJSON());
+		expect(json).toContain("errorActionFailedGeneric");
+		expect(json).not.toContain("deviceSigningErrorGeneric");
+		expect(json).not.toContain("SignatureValid");
+	});
+
+	describe("recovery", () => {
+		beforeEach(() => {
+			mockRouteParams = { reason: "invalidated" };
+			mockGetSummary.mockResolvedValue({
+				id: "user-1",
+				name: "Officer One",
+				activeKeys: [
+					{ key: OLD_SIGNING_KEY_HEX, type: "P", expiration: Date.now() + 1000 },
+					{ key: RECOVERY_KEY_HEX, type: "P", expiration: Date.now() + 1000 },
+				],
+			});
+			nativeFake.provisionRecoveryKey.mockResolvedValue({ publicKeyBase64: "R", publicKeyCompressedHex: RECOVERY_KEY_HEX });
+			nativeFake.provisionDeviceKey.mockResolvedValue({ publicKeyBase64: "N", publicKeyCompressedHex: NEW_SIGNING_KEY_HEX });
+			nativeFake.signWithRecoveryKey.mockResolvedValue({ signatureHex: "cafebabe" });
+		});
+
+		it("a revokeKey DeleteValid rejection shows the write copy, not the biometric copy", async () => {
+			mockRevokeKey.mockRejectedValueOnce(new Error("Quereus error (code 19): CHECK constraint failed: DeleteValid"));
+			const tr = await renderScreen();
+			await press(tr, primaryButton(tr));
+			expect(mockRevokeKey).toHaveBeenCalledTimes(1);
+			const json = JSON.stringify(tr.toJSON());
+			expect(json).toContain("errorActionFailedGeneric");
+			expect(json).not.toContain("deviceSigningErrorGeneric");
+			expect(json).not.toContain("DeleteValid");
+		});
+
+		it("an addKey SignatureValid rejection shows the write copy, not the biometric copy", async () => {
+			mockAddKey.mockRejectedValueOnce(engineError());
+			const tr = await renderScreen();
+			await press(tr, primaryButton(tr));
+			expect(mockAddKey).toHaveBeenCalledTimes(1);
+			const json = JSON.stringify(tr.toJSON());
+			expect(json).toContain("errorActionFailedGeneric");
+			expect(json).not.toContain("deviceSigningErrorGeneric");
+		});
+
+		it("a native BIOMETRIC_ERROR rejection still shows the biometric copy", async () => {
+			nativeFake.signWithRecoveryKey.mockRejectedValueOnce(
+				Object.assign(new Error("biometric hardware error"), { code: "BIOMETRIC_ERROR" }),
+			);
+			const tr = await renderScreen();
+			await press(tr, primaryButton(tr));
+			const json = JSON.stringify(tr.toJSON());
+			expect(json).toContain("deviceSigningErrorGeneric");
+			expect(json).not.toContain("errorActionFailedGeneric");
+		});
+
+		it("a native LOCKOUT rejection keeps its own copy", async () => {
+			nativeFake.signWithRecoveryKey.mockRejectedValueOnce(Object.assign(new Error("locked"), { code: "LOCKOUT" }));
+			const tr = await renderScreen();
+			await press(tr, primaryButton(tr));
+			const json = JSON.stringify(tr.toJSON());
+			expect(json).toContain("deviceSigningErrorLockout");
+			expect(json).not.toContain("errorActionFailedGeneric");
+		});
+	});
+});
+
+// 2026-08-18 todo (interrupted handleRecovery unrecoverable in-app): when the recovery key was never
+// registered AND the device's signing key cannot sign for this user either (invalidated, absent, or
+// no longer the registered key), nothing on this device can sign: the old copy sent the officer to a
+// Secure Signing setup whose addKey is bound to fail SignatureValid, a loop with `pm clear` as the
+// only exit. The screen now says so in a terminal state.
+describe("ProvisionSigningKeyScreen — recovery when nothing on the device can sign", () => {
+	beforeEach(() => {
+		mockRouteParams = { reason: "invalidated" };
+		mockGetSummary.mockResolvedValue({
+			id: "user-1",
+			name: "Officer One",
+			activeKeys: [{ key: OLD_SIGNING_KEY_HEX, type: "P", expiration: Date.now() + 1000 }],
+		});
+		nativeFake.provisionRecoveryKey.mockResolvedValue({ publicKeyBase64: "R", publicKeyCompressedHex: RECOVERY_KEY_HEX });
+		nativeFake.getCurrentDeviceKey.mockReset();
+		jest.spyOn(console, "warn").mockImplementation(() => undefined);
+	});
+	afterEach(() => jest.restoreAllMocks());
+
+	function expectNothingMutated() {
+		expect(nativeFake.provisionDeviceKey).not.toHaveBeenCalled();
+		expect(mockMarkRecoveryInProgress).not.toHaveBeenCalled();
+		expect(mockRevokeKey).not.toHaveBeenCalled();
+		expect(mockAddKey).not.toHaveBeenCalled();
+	}
+
+	function expectTerminal(tr: renderer.ReactTestRenderer) {
+		const json = JSON.stringify(tr.toJSON());
+		expect(json).toContain("signingKeyProvisioningIdentityUnrecoverableHeading");
+		expect(json).toContain("signingKeyProvisioningIdentityUnrecoverableBody");
+		expect(json).not.toContain("deviceSigningErrorRecoveryKeyNotRegistered");
+		expect(tr.root.findAll((n) => n.props?.testID === "signing-key-provisioning-primary-button")).toHaveLength(0);
+	}
+
+	it("signing key invalidated: terminal state, no Keystore or network write", async () => {
+		nativeFake.getCurrentDeviceKey.mockRejectedValue(Object.assign(new Error("x"), { code: "DEVICE_KEY_INVALIDATED" }));
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+		expect(nativeFake.getCurrentDeviceKey).toHaveBeenCalledWith("VOTETORRENT_AUTHORITY_SIGNING_KEY_V1");
+		expectNothingMutated();
+		expectTerminal(tr);
+	});
+
+	it("signing key absent: terminal state", async () => {
+		nativeFake.getCurrentDeviceKey.mockRejectedValue(Object.assign(new Error("x"), { code: "DEVICE_KEY_ABSENT" }));
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+		expectNothingMutated();
+		expectTerminal(tr);
+	});
+
+	it("signing key readable but not a registered key of this user (desync): terminal state", async () => {
+		nativeFake.getCurrentDeviceKey.mockResolvedValue({ publicKeyCompressedHex: NEW_SIGNING_KEY_HEX });
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+		expectNothingMutated();
+		expectTerminal(tr);
+	});
+
+	it("signing key still registered: the existing set-up-first copy, inline", async () => {
+		nativeFake.getCurrentDeviceKey.mockResolvedValue({ publicKeyCompressedHex: OLD_SIGNING_KEY_HEX });
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+		expectNothingMutated();
+		const json = JSON.stringify(tr.toJSON());
+		expect(json).toContain("deviceSigningErrorRecoveryKeyNotRegistered");
+		expect(json).not.toContain("signingKeyProvisioningIdentityUnrecoverableHeading");
+	});
+
+	it("the signing key cannot be read: no claim without evidence, the existing copy", async () => {
+		nativeFake.getCurrentDeviceKey.mockRejectedValue(Object.assign(new Error("x"), { code: "DEVICE_KEY_READ_FAILED" }));
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+		expectNothingMutated();
+		const json = JSON.stringify(tr.toJSON());
+		expect(json).toContain("deviceSigningErrorRecoveryKeyNotRegistered");
+		expect(json).not.toContain("signingKeyProvisioningIdentityUnrecoverableHeading");
+	});
+
+	it("a registered recovery key never consults the signing key", async () => {
+		mockGetSummary.mockResolvedValue({
+			id: "user-1",
+			name: "Officer One",
+			activeKeys: [
+				{ key: OLD_SIGNING_KEY_HEX, type: "P", expiration: Date.now() + 1000 },
+				{ key: RECOVERY_KEY_HEX, type: "P", expiration: Date.now() + 1000 },
+			],
+		});
+		nativeFake.provisionDeviceKey.mockResolvedValue({ publicKeyBase64: "N", publicKeyCompressedHex: NEW_SIGNING_KEY_HEX });
+		nativeFake.signWithRecoveryKey.mockResolvedValue({ signatureHex: "cafebabe" });
+		const tr = await renderScreen();
+		await press(tr, primaryButton(tr));
+		expect(nativeFake.getCurrentDeviceKey).not.toHaveBeenCalled();
+		expect(JSON.stringify(tr.toJSON())).toContain("signingKeyProvisioningSuccessHeading");
+	});
+});
+

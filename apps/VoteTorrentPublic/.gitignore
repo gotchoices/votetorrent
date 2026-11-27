@@ -1,0 +1,38 @@
+dist-gate
+
+# The root .gitignore's bare `dist` rule matches only an entry named exactly
+# `dist` — it does not match `dist-mutant-*` (53-11, D-20).
+dist-mutant-*
+
+
+# 54-15: D-27's live-read gate build output. Same reason as dist-gate
+# above — the root .gitignore's bare `dist` rule matches only an entry named
+# exactly `dist`.
+dist-live
+
+# 56-02: the RESEARCH Assumption A2 closure-probe build output. Same reason
+# as dist-gate/dist-live above — the root .gitignore's bare `dist` rule
+# matches only an entry named exactly `dist`.
+dist-closure
+
+# 56-06, D-13: the REAL runtime bootstrap config, written at deploy time
+# (56-08) from public/config.example.json. An unconfigured checkout must
+# produce the honest `missing` fault src/peer/config.js exists to report,
+# never ship a placeholder address — the exact failure class D-13 ends.
+public/config.json
+
+# 56-12: the D-17/D-13 offline gate's build output. Same reason as
+# dist-gate/dist-live above — the root .gitignore's bare `dist` rule matches
+# only an entry named exactly `dist`.
+dist-offline
+
+# 56-11: the mesh-read gate's build output. Same reason as
+# dist-gate/dist-live above — the root .gitignore's bare `dist` rule matches
+# only an entry named exactly `dist`. Also carries two runtime-written files
+# (config.json, gate-expectations.json) the driver writes after the build.
+dist-mesh-read
+
+# 56-14: the liveness/live-update-badge gate's build output. Same reason as
+# dist-gate/dist-live/dist-offline above — the root .gitignore's bare `dist`
+# rule matches only an entry named exactly `dist`.
+dist-liveness

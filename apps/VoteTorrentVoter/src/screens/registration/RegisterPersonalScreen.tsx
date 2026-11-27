@@ -20,6 +20,7 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useTranslation} from 'react-i18next';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useVoterApp} from '../../providers/VoterAppProvider';
+import {useNetworkName} from '../../hooks/useNetworkName';
 import {useRegistrationDraft} from '../../providers/RegistrationDraftProvider';
 import {useKeyboardInset} from '../../hooks/useKeyboardInset';
 import {RegisterFormHeader} from '../../components/RegisterFormHeader';
@@ -46,6 +47,7 @@ export default function RegisterPersonalScreen() {
 	const navigation = useNavigation<RegisterPersonalNavigationProp>();
 	const {colors, fonts, type: typeScale, radii} = useTheme() as ExtendedTheme;
 	const {t} = useTranslation('registration');
+	const networkName = useNetworkName();
 	const insets = useSafeAreaInsets();
 	const keyboardInset = useKeyboardInset();
 
@@ -85,7 +87,7 @@ export default function RegisterPersonalScreen() {
 			<ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
 				<RegisterFormHeader
 					title={t('formHeaderTitle')}
-					subtitle={t('form.sectionTitle')}
+					subtitle={t('form.sectionTitle', {network: networkName})}
 					step={1}
 					onBack={() => navigation.goBack()}
 					onClose={() => navigation.popToTop()}

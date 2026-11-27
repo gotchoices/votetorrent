@@ -1,0 +1,11 @@
+{
+  "base": "base-device",
+  "ops": [
+    {
+      "op": "move",
+      "from": "64-device-evidence/checks/camera-gate/attempt-2",
+      "to": "64-device-evidence/checks/camera-gate/attempt-3"
+    }
+  ],
+  "expect": "numbering-gap"
+}

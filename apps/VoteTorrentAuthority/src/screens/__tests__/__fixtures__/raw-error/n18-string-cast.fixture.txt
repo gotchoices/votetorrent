@@ -1,0 +1,2 @@
+const onFail = (error: unknown) => {
+  setLoadError(String(error as Error));

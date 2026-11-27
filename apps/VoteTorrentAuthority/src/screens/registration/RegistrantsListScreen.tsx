@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import { ExtendedTheme, useNavigation, useRoute, useTheme } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
+import { errorCopy } from "../../utils/errorCopy";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
@@ -12,7 +13,7 @@ import { InlineError } from "../../components/InlineError";
 import { globalStyles } from "../../theme/styles";
 import { useApp } from "../../providers/AppProvider";
 import { useCurrentOfficerScopes } from "../../hooks/useCurrentOfficerScopes";
-import { scopeDescriptions } from "@votetorrent/vote-core";
+import { scopeLabel } from "../../utils/scopeLabel";
 import type {
 	IRegistrationEngine,
 	RegistrantListFilter,
@@ -200,7 +201,7 @@ export default function RegistrantsListScreen() {
 			// object, the officer's typed search term and the district value are
 			// never interpolated into it and never passed to any logging call
 			// (T-47-11-01; the engine side of the same rule is 47-05's T-47-06).
-			if (!unmountedRef.current) setErrorMessage(err instanceof Error ? err.message : String(err));
+			if (!unmountedRef.current) setErrorMessage(errorCopy(err, t, "read", { log: false }));
 		} finally {
 			if (!unmountedRef.current) setLoadingInitial(false);
 		}
@@ -232,7 +233,7 @@ export default function RegistrantsListScreen() {
 			// returns `total: undefined` (47-05's contract), so assigning it
 			// would blank a perfectly good count on the second page.
 		} catch (err) {
-			if (!unmountedRef.current) setErrorMessage(err instanceof Error ? err.message : String(err));
+			if (!unmountedRef.current) setErrorMessage(errorCopy(err, t, "read", { log: false }));
 		} finally {
 			if (!unmountedRef.current) setLoadingMore(false);
 		}
@@ -260,6 +261,7 @@ export default function RegistrantsListScreen() {
 
 	return (
 		<ScrollView
+			keyboardShouldPersistTaps="handled"
 			style={styles.container}
 			contentContainerStyle={{ paddingBottom: insets.bottom + 24 + keyboardInset }}
 		>
@@ -287,7 +289,7 @@ export default function RegistrantsListScreen() {
 					<View testID="registrants-list-readonly-banner" style={localStyles.banner}>
 						<FontAwesome6 name="lock" size={14} color={colors.textSecondary} />
 						<ThemedText type="small" style={{ color: colors.textSecondary }}>
-							{t("registrantScopeReadOnlyBanner", { scope: scopeDescriptions.vrg })}
+							{t("registrantScopeReadOnlyBanner", { scope: scopeLabel("vrg", t) })}
 						</ThemedText>
 					</View>
 				))}

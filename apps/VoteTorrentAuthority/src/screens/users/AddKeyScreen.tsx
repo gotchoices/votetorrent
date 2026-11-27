@@ -18,6 +18,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { bytesToHex } from "@noble/curves/utils.js";
 import { createDeviceSigner } from "../../engines/device-signer";
 import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
+import { errorCopy } from "../../utils/errorCopy";
 
 export function AddKeyScreen() {
 	const { user, userEngine } = useRoute().params as { user: User; userEngine: IUserEngine };
@@ -69,7 +70,7 @@ export function AddKeyScreen() {
 		} catch (err) {
 			const outcome = handleDeviceSigningError(err);
 			if (outcome.handled) return;
-			setErrorMessage(outcome.message ?? (err instanceof Error ? err.message : String(err)));
+			setErrorMessage(outcome.message ?? errorCopy(err, t, "write"));
 		} finally {
 			setIsSubmitting(false);
 		}

@@ -14,6 +14,7 @@
 // The getRequestedSignatures ballot branch is also not yet materialised (31-03).
 
 import { expect } from 'chai'
+import { hexToBytes } from '@noble/curves/utils.js'
 import { nowCanonicalDatetime } from '../src/utils.js'
 import { SignatureTasksEngine } from '../src/tasks/signature-tasks-engine.js'
 import {
@@ -21,12 +22,18 @@ import {
   addTestAuthority,
   addTestElection,
   seedProposedBallot,
+  testKeyPairFor,
 } from './fixtures/test-context.js'
 import type { BallotSignatureTask, SignatureTask } from '@votetorrent/vote-core'
 
 // ---------------------------------------------------------------------------
 // Shared setup helper: create a test network/authority/election
 // ---------------------------------------------------------------------------
+
+/** The signing user's REGISTERED private key (AdminSigning/OfficerSignature.SignerKeyValid). */
+function registeredPrivKey (userId: string): Uint8Array {
+  return hexToBytes(testKeyPairFor(userId).privateHex)
+}
 
 async function setupElection () {
   const net = await createTestNetwork()
@@ -288,7 +295,7 @@ describe('confirm via completeSignature — signs, then inserts Ballot + Questio
     const task = await getBallotTask(engine, ballotId)
 
     const digest = await engine.getSignatureDigest(task)
-    const privKey = secp.utils.randomSecretKey()
+    const privKey = registeredPrivKey(elec.user.id)
     const sigBytes = secp.sign(digest, privKey) as unknown as Uint8Array
     const sigHex = bytesToHex(sigBytes)
     const pubHex = bytesToHex(secp.getPublicKey(privKey))
@@ -324,7 +331,7 @@ describe('finalize — orders Ballot before questions; promoted rows readable vi
     const task = await getBallotTask(engine, ballotId)
 
     const digest = await engine.getSignatureDigest(task)
-    const privKey = secp.utils.randomSecretKey()
+    const privKey = registeredPrivKey(elec.user.id)
     const sigBytes = secp.sign(digest, privKey) as unknown as Uint8Array
     const pubHex = bytesToHex(secp.getPublicKey(privKey))
 
@@ -358,7 +365,7 @@ describe('per-option readability — getBallotDetails returns select question wi
     const task = await getBallotTask(engine, ballotId)
 
     const digest = await engine.getSignatureDigest(task)
-    const privKey = secp.utils.randomSecretKey()
+    const privKey = registeredPrivKey(elec.user.id)
     const sigBytes = secp.sign(digest, privKey) as unknown as Uint8Array
     const pubHex = bytesToHex(secp.getPublicKey(privKey))
 
@@ -401,7 +408,7 @@ describe('D-08 — Option rows promoted into the per-row Option table after fina
     const task = await getBallotTask(engine, ballotId)
 
     const digest = await engine.getSignatureDigest(task)
-    const privKey = secp.utils.randomSecretKey()
+    const privKey = registeredPrivKey(elec.user.id)
     const sigBytes = secp.sign(digest, privKey) as unknown as Uint8Array
     const pubHex = bytesToHex(secp.getPublicKey(privKey))
 
@@ -446,7 +453,7 @@ describe('post-confirm state — ProposedBallot retained; getBallots returns fin
     const task = await getBallotTask(engine, ballotId)
 
     const digest = await engine.getSignatureDigest(task)
-    const privKey = secp.utils.randomSecretKey()
+    const privKey = registeredPrivKey(elec.user.id)
     const sigBytes = secp.sign(digest, privKey) as unknown as Uint8Array
     const pubHex = bytesToHex(secp.getPublicKey(privKey))
 
@@ -544,7 +551,7 @@ describe('self-confirm — proposer == signer succeeds (D-06)', () => {
     const task = await getBallotTask(engine, ballotId) // same user as proposer
 
     const digest = await engine.getSignatureDigest(task)
-    const privKey = secp.utils.randomSecretKey()
+    const privKey = registeredPrivKey(elec.user.id)
     const sigBytes = secp.sign(digest, privKey) as unknown as Uint8Array
     const pubHex = bytesToHex(secp.getPublicKey(privKey))
 
@@ -585,7 +592,7 @@ describe('task visibility — completed Task absent from getRequestedSignatures(
     const task = await getBallotTask(engine, ballotId)
 
     const digest = await engine.getSignatureDigest(task)
-    const privKey = secp.utils.randomSecretKey()
+    const privKey = registeredPrivKey(elec.user.id)
     const sigBytes = secp.sign(digest, privKey) as unknown as Uint8Array
     const pubHex = bytesToHex(secp.getPublicKey(privKey))
 
@@ -624,7 +631,7 @@ describe('SIGN-04: device-signer secp256k1 sign round-trip via completeSignature
     expect(digest.length, 'digest must be non-empty').to.be.greaterThan(0)
 
     // Step 2: sign with a fresh secp256k1 key (Node closure mirroring device-signer)
-    const privKey = secp.utils.randomSecretKey()
+    const privKey = registeredPrivKey(elec.user.id)
     const pubHex = bytesToHex(secp.getPublicKey(privKey))
     const sigBytes = secp.sign(digest, privKey) as unknown as Uint8Array
     const sigHex = bytesToHex(sigBytes)
@@ -730,7 +737,7 @@ it('multi-type ballot (rank/score/text) questions can be confirmed', async () =>
   const task = await getBallotTask(engine, ballotId)
 
   const digest = await engine.getSignatureDigest(task)
-  const privKey = secp.utils.randomSecretKey()
+  const privKey = registeredPrivKey(elec.user.id)
   const sigBytes = secp.sign(digest, privKey) as unknown as Uint8Array
   const pubHex = bytesToHex(secp.getPublicKey(privKey))
 
@@ -812,7 +819,7 @@ describe('CR-01 / D-05 — multi-pending-task: completeSignature and getSignatur
     // completeSignature(taskB) must finalize ballot B specifically
     const { secp256k1: secp } = await import('@noble/curves/secp256k1.js')
     const { bytesToHex } = await import('@noble/curves/utils.js')
-    const privKey = secp.utils.randomSecretKey()
+    const privKey = registeredPrivKey(elec.user.id)
     const sigBytes = secp.sign(digestB, privKey) as unknown as Uint8Array
     const pubHex = bytesToHex(secp.getPublicKey(privKey))
 

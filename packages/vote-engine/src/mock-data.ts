@@ -239,7 +239,7 @@ export const MOCK_CURRENT_USER: User = {
 
 export const MOCK_SHARED_ADMINISTRATORS: Officer[] = [
   {
-    scopes: ['rad', 'vrg', 'iad', 'rnp', 'uai'] as Scope[],
+    scopes: ['rad', 'vrg', 'iad', 'uai'] as Scope[],
     title: 'Chief Election Official',
     userId: MOCK_CURRENT_USER.id,
     authorityId: generateId('auth')
@@ -257,7 +257,7 @@ export const MOCK_SHARED_THRESHOLD_POLICIES: ThresholdPolicy[] = [
   { threshold: 1, policy: 'rad' as Scope },
   { threshold: 2, policy: 'vrg' as Scope },
   { threshold: 1, policy: 'iad' as Scope },
-  { threshold: 1, policy: 'rnp' as Scope }
+  { threshold: 1, policy: 'ik' as Scope }
 ]
 
 export const MOCK_SHARED_ADMINISTRATION: Admin = {

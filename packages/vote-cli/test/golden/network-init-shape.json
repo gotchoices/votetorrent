@@ -1,0 +1,49 @@
+{
+  "networkInit": {
+    "admin": {
+      "effectiveAt": "number",
+      "officers": [
+        {
+          "init": {
+            "name": "string",
+            "scopes": ["string"],
+            "title": "string"
+          }
+        }
+      ],
+      "thresholdPolicies": [
+        {
+          "policy": "string",
+          "threshold": "number"
+        }
+      ]
+    },
+    "name": "string",
+    "policies": {
+      "electionType": "string",
+      "numberRequiredTSAs": "number",
+      "timestampAuthorities": [
+        {
+          "url": "string"
+        }
+      ]
+    },
+    "primaryAuthority": {
+      "domainName": "string",
+      "name": "string"
+    },
+    "relays": ["string"]
+  },
+  "user": {
+    "activeKeys": [
+      {
+        "expiration": "number",
+        "key": "string",
+        "type": "string"
+      }
+    ],
+    "id": "string",
+    "name": "string"
+  },
+  "scopes": ["cap", "ceb", "iad", "ik", "mel", "rad", "rn", "uai", "vrg"]
+}

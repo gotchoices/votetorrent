@@ -129,7 +129,6 @@ beforeAll(() => {
 const REGISTRANT_ID = "registrant-1";
 const DEVICE_KEY_ALPHA = "devicekey-alpha-0000000000";
 const DEVICE_KEY_BRAVO = "devicekey-bravo-1111111111";
-const FUTURE_EXPIRATION = new Date(Date.now() + 3_600_000).toISOString();
 const SEED_SIGN = { signature: "seed-sig", signerKey: "seed-key", signerUserId: "seed-user" };
 
 // ---------------------------------------------------------------------------
@@ -252,12 +251,11 @@ function assertNoCreateLanguage(tr: renderer.ReactTestRenderer) {
 
 async function seedChallenge(
 	engine: any,
-	opts: { deviceKey: string; electionId?: string; expiration?: string; registrantId?: string }
+	opts: { deviceKey: string; electionId?: string; registrantId?: string }
 ) {
 	return engine.issueAttestationChallenge(
 		opts.registrantId ?? REGISTRANT_ID,
 		opts.deviceKey,
-		opts.expiration ?? FUTURE_EXPIRATION,
 		SEED_SIGN,
 		opts.electionId
 	);
@@ -321,7 +319,13 @@ describe("AttestationChallengesSection — D-11/D-03/D-09", () => {
 		expect(text).not.toContain(DEVICE_KEY_BRAVO);
 		expect(text).toContain("election-1");
 		expect(text).toContain("—");
-		expect(text).toMatch(/\d{4}-\d{2}-\d{2}/);
+		// D-10 (51-05, surfaced here by 51-10's vote-engine dist rebuild):
+		// `AttestationChallenge.Expiration` was removed — the component's own
+		// header now states "no expiry row to render" (:324), so no date string
+		// is ever part of this section's output. A stale dist previously masked
+		// this: it still returned the pre-51-05 challenge shape, which is why
+		// this assertion could pass before the rebuild without the component
+		// actually rendering a date.
 	});
 
 	test("3: D-03 verdict join — latest wins, and the inversion guard holds", async () => {
@@ -438,12 +442,13 @@ describe("AttestationChallengesSection — D-11/D-03/D-09", () => {
 		expect(pressableTestIDs(tr)).toEqual(["attestation-challenges-toggle"]);
 	});
 
-	test("7: error state", async () => {
+	test("7: error state (translated, no engine text)", async () => {
 		mockAssociationEngine = new ThrowingChallengesEngine();
 		const { tr } = await renderSection();
 
 		expect(() => tr.root.findByProps({ testID: "attestation-challenges-error" })).not.toThrow();
-		expect(treeText(tr)).toContain("boom-read-failed");
+		expect(treeText(tr)).toContain("errorLoadFailedGeneric");
+		expect(treeText(tr)).not.toContain("boom-read-failed");
 		expect(treeText(tr)).not.toContain("attestation-challenges-row-");
 		expect(pressableTestIDs(tr)).toEqual(["attestation-challenges-toggle"]);
 	});
@@ -717,7 +722,8 @@ describe("AttestationChallengesSection — D-11/D-03/D-09", () => {
 		press(tr, `attestation-challenges-expire-${c1.nonce}-confirm`);
 		await flush();
 
-		expect(treeText(tr)).toContain("expire-failed");
+		expect(treeText(tr)).toContain("errorActionFailedGeneric");
+		expect(treeText(tr)).not.toContain("expire-failed");
 		expect(() =>
 			tr.root.findByProps({ testID: `attestation-challenges-expire-${c1.nonce}-card` })
 		).not.toThrow();
@@ -874,7 +880,8 @@ describe("AttestationChallengesSection — D-11/D-03/D-09", () => {
 		press(tr, `attestation-challenges-expire-${c1.nonce}-confirm`);
 		await flush();
 
-		expect(treeText(tr)).toContain("Device user not initialised");
+		expect(treeText(tr)).toContain("errorActionFailedGeneric");
+		expect(treeText(tr)).not.toContain("Device user not initialised");
 		// The card must stay mounted so the officer can retry, exactly as in the
 		// removeAttestationChallenge-failure case (test 16).
 		expect(() =>
@@ -882,7 +889,7 @@ describe("AttestationChallengesSection — D-11/D-03/D-09", () => {
 		).not.toThrow();
 	});
 
-	test("22: a getEngine failure during expire surfaces InlineError too", async () => {
+	test("22: a getEngine failure during expire surfaces InlineError too (translated, no engine text)", async () => {
 		mockAssociationEngine = new MockAssociationEngine();
 		const c1 = await seedChallenge(mockAssociationEngine, { deviceKey: DEVICE_KEY_ALPHA });
 		const { tr } = await renderSection();
@@ -894,6 +901,7 @@ describe("AttestationChallengesSection — D-11/D-03/D-09", () => {
 		press(tr, `attestation-challenges-expire-${c1.nonce}-confirm`);
 		await flush();
 
-		expect(treeText(tr)).toContain("Network not established");
+		expect(treeText(tr)).toContain("errorActionFailedGeneric");
+		expect(treeText(tr)).not.toContain("Network not established");
 	});
 });

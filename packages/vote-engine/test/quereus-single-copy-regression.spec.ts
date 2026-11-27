@@ -1,7 +1,7 @@
 /**
  * quereus-single-copy-regression.spec.ts
  *
- * UPG-03 CI regression lock — single @quereus/quereus 4.x copy.
+ * UPG-03 CI regression lock — single @quereus/quereus copy (4.x until 2026-11-08, now 5.x).
  *
  * Guards the single-copy invariant that is otherwise only checked by the one-time
  * 33-01 checkpoint proof (`yarn why` + inline grep gates) and the peer-requirements
@@ -76,8 +76,8 @@ describe('@quereus/quereus single-copy regression (UPG-03)', () => {
     ).to.equal(0)
   })
 
-  // SC2 — exactly one resolved quereus version, and it is 4.x.
-  it('SC2: a single resolved @quereus/quereus version, and it is 4.x (no dual-version install)', () => {
+  // SC2 — exactly one resolved quereus version, and it is 5.x (4.x until the 2026-11-08 bump to 5.0.0).
+  it('SC2: a single resolved @quereus/quereus version, and it is 5.x (no dual-version install)', () => {
     const versions = resolvedQuereusVersions(lock)
     expect(versions.length, 'expected at least one resolved @quereus/quereus block in yarn.lock').to.be.greaterThan(0)
 
@@ -89,7 +89,7 @@ describe('@quereus/quereus single-copy regression (UPG-03)', () => {
 
     expect(
       distinct[0],
-      `Resolved @quereus/quereus version must be 4.x, got ${distinct[0]}`
-    ).to.match(/^4\./)
+      `Resolved @quereus/quereus version must be 5.x, got ${distinct[0]}`
+    ).to.match(/^5\./)
   })
 })

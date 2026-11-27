@@ -1,0 +1,2 @@
+VERDICT: FAIL page-size
+leg: android

@@ -4,12 +4,16 @@
  * no RN module mocks — nothing in the module under test touches React Native.
  */
 
+import { resources } from "../../../i18n";
 import {
 	REGISTRATION_REQUEST_STATUS_META,
 	registrationRequestDisplayName,
 	resolveBridgeLabel,
 	formatRequestTimestamp,
 	resolveRowTimestamps,
+	resolveRequestRowStatusMeta,
+	KNOWN_REQUEST_FIELD_LABEL_KEYS,
+	humanizeFieldName,
 } from "../registration-request-display";
 
 describe("REGISTRATION_REQUEST_STATUS_META", () => {
@@ -131,5 +135,74 @@ describe("resolveRowTimestamps", () => {
 		});
 		expect(result.received).toBe("2026-08-05");
 		expect(result.claimed).toBe("2026-07-06");
+	});
+});
+
+describe("resolveRequestRowStatusMeta (UAT 62 test 12)", () => {
+	const closed = { labelKey: "registrationRequestStatusClosedDuplicate", colorKey: "textSecondary" };
+
+	it("closed and closing duplicate closure override status p with the neutral closed pill", () => {
+		expect(resolveRequestRowStatusMeta({ status: "p", duplicateClosure: "closed" })).toEqual(closed);
+		expect(resolveRequestRowStatusMeta({ status: "p", duplicateClosure: "closing" })).toEqual(closed);
+	});
+
+	it("without closure it falls through to the status ladder, undefined for an unknown code", () => {
+		expect(resolveRequestRowStatusMeta({ status: "p" })).toEqual(REGISTRATION_REQUEST_STATUS_META.p);
+		expect(resolveRequestRowStatusMeta({ status: "a" })).toEqual(REGISTRATION_REQUEST_STATUS_META.a);
+		expect(resolveRequestRowStatusMeta({ status: "r" })).toEqual(REGISTRATION_REQUEST_STATUS_META.r);
+		expect(resolveRequestRowStatusMeta({ status: "z" as never })).toBeUndefined();
+	});
+
+	// Clipping PROXY only: jest cannot measure layout. The closed label is no longer than a
+	// label the pill already renders in that locale.
+	it.each(["en", "es"] as const)("%s closed label is no longer than the longest existing pill label (clipping proxy)", (lng) => {
+		const tr = (resources as Record<string, { translation: Record<string, string> }>)[lng].translation;
+		expect(tr.registrationRequestStatusClosedDuplicate).toBeTruthy();
+		const longest = Math.max(
+			tr.registrationRequestStatusPending.length,
+			tr.registrationRequestStatusApproved.length,
+			tr.registrationRequestStatusRejected.length,
+		);
+		expect(tr.registrationRequestStatusClosedDuplicate.length).toBeLessThanOrEqual(longest);
+	});
+});
+
+describe("KNOWN_REQUEST_FIELD_LABEL_KEYS", () => {
+	it("covers exactly the field names the Voter app submits — no invented label table", () => {
+		expect(Object.keys(KNOWN_REQUEST_FIELD_LABEL_KEYS).sort()).toEqual(
+			["addressLine1", "addressLine2", "addressLine3", "dob", "email", "firstName", "lastName", "party", "phone"].sort()
+		);
+	});
+
+	it("every key resolves in both EN and ES, with a Spanish value that is not the English one", () => {
+		const en = resources.en.translation as Record<string, string>;
+		const es = resources.es.translation as Record<string, string>;
+		for (const key of Object.values(KNOWN_REQUEST_FIELD_LABEL_KEYS)) {
+			expect(typeof en[key]).toBe("string");
+			expect(typeof es[key]).toBe("string");
+			expect(es[key]).not.toBe(en[key]);
+		}
+		expect(en[KNOWN_REQUEST_FIELD_LABEL_KEYS.lastName]).toBe("Last name");
+		expect(es[KNOWN_REQUEST_FIELD_LABEL_KEYS.lastName]).toBe("Apellido");
+		expect(en[KNOWN_REQUEST_FIELD_LABEL_KEYS.firstName]).toBe("First name");
+		expect(es[KNOWN_REQUEST_FIELD_LABEL_KEYS.firstName]).toBe("Nombre");
+		expect(en[KNOWN_REQUEST_FIELD_LABEL_KEYS.dob]).toBe("Date of birth");
+		expect(es[KNOWN_REQUEST_FIELD_LABEL_KEYS.dob]).toBe("Fecha de nacimiento");
+	});
+});
+
+describe("humanizeFieldName — fallback for unknown/custom field names", () => {
+	it.each([
+		["district", "District"],
+		["ssn", "Ssn"],
+		["homeCounty", "Home county"],
+		["home_county", "Home county"],
+		["home-county", "Home county"],
+		["precinctId2", "Precinct id 2"],
+		["homeCounty_code2", "Home county code 2"],
+		["voterIDNumber", "Voter id number"],
+		["address.lineTwo", "Address / Line two"],
+	])("%s -> %s", (raw, expected) => {
+		expect(humanizeFieldName(raw)).toBe(expected);
 	});
 });

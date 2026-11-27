@@ -90,6 +90,10 @@
  * no other signal changing. NO new patch/resolution assertion is added (no fix landed this plan);
  * all prior db-p2p-patch + p2p-fret-^0.6.0-no-patch + app-parity assertions above stay unchanged.
  *
+ *
+ * Both apps' CadreNodeProvider.tsx now build their node options through @votetorrent/workflows
+ * common/cadre-node-options.ts, so this gate reads that one file (it also closes the old gap where the
+ * Voter provider was covered by neither lock).
  * 2026-08-05 DB-P2P PATCH RETIREMENT (supersedes the "UNAFFECTED and stays locked exactly as
  * before" clause in the 260715-keg paragraph above): the `@optimystic/db-p2p` patch has now
  * followed p2p-fret's path. Both hunks it carried were upstreamed — identifyPush in >= 0.16.3 (the
@@ -122,8 +126,8 @@ function findRepoRoot (): string {
 }
 
 const REPO_ROOT = findRepoRoot()
-const CADRE_PROVIDER_PATH = join(
-  REPO_ROOT, 'apps', 'VoteTorrentAuthority', 'src', 'providers', 'CadreNodeProvider.tsx'
+const NODE_OPTIONS_PATH = join(
+  REPO_ROOT, 'packages', 'workflows', 'src', 'common', 'cadre-node-options.ts'
 )
 const PROOF_RUNNER_PATH = join(
   REPO_ROOT, 'apps', 'VoteTorrentAuthority', 'src', 'engines', 'replication-proof-runner.ts'
@@ -145,7 +149,9 @@ const QUALIFIED_ADDR_TEMPLATE_MARKER = '${addr}' + '/p2p' + '-circuit'
 // Repointed for cadre-core 0.10.0: the 41-11 two-relay split is retired (upstream gave
 // each strand node its OWN derived transport peerId, so one relay is correct), and the
 // surviving single relay-qualified constant is the CONTROL one.
-const LISTEN_ADDRS_BY_IDENTIFIER_MARKER = 'listenAddrs' + ': ' + 'CONTROL_RELAY_LISTEN_ADDRS'
+// Repointed for cadre-core 0.12.0: relays moved from `listenAddrs` to `relayAddrs`, and the
+// constant no longer pre-qualifies its entries (cadre-core appends `/p2p-circuit` itself).
+const RELAY_ADDRS_BY_IDENTIFIER_MARKER = 'relay' + 'Addrs' + ': ' + 'CONTROL_RELAY_ADDRS'
 // The retired per-node-type override. Must NOT reappear: `strandNetwork` is dead config on
 // cadre-core 0.10.0 (zero occurrences in the published types/dist), so re-adding it would
 // silently do nothing while looking load-bearing.
@@ -163,6 +169,13 @@ const DIRECT_ONLY_LISTEN_MARKER = 'listenAddrs' + ": ['/ip4/0.0.0.0/tcp/0/ws']"
 const IDENTIFY_PUSH_IMPORT_MARKER = 'identify, identify' + 'Push'
 const IDENTIFY_PUSH_SERVICE_MARKER = 'identifyPush' + ': identifyPush('
 const DB_P2P_PATCH_PREFIX = '@optimystic-db-p2p-npm-'
+// The one deliberate db-p2p yarn-patch (outer 94857f7b, 2026-10-28): it memoizes commit-proof claim
+// verification so a node stops re-verifying the same Ed25519 signatures on every read-repair. Any
+// OTHER db-p2p patch file is still a silent re-add and fails the assertions below.
+const ALLOWED_DB_P2P_PATCH = '@optimystic-db-p2p-npm-1.30.0-votetorrent.patch'
+const ALLOWED_DB_P2P_PATCH_MARKER = 'VoteTorrent patch: ' + 'memoize'
+// A GSD phase-plan number as it would appear in an emitted string (e.g. 41-04).
+const GSD_PLAN_NUMBER = /\b\d{2,3}-\d{2,3}\b/
 const DB_P2P_RESOLUTION_KEY_FRAGMENT = '@optimystic/db-p2p'
 const PATCH_PROTOCOL_MARKER = 'patch' + ':'
 
@@ -253,13 +266,16 @@ function assertStrandRelayRoutingIntact (path: string, label: string): void {
 
   expect(
     strippedFullSrc.includes(QUALIFIED_ADDR_TEMPLATE_MARKER),
-    `Expected ${label} to still construct a relay-qualified per-drone listenAddrs entry ` +
-    '(the `${addr}/p2p-circuit` template literal) — not merely a comment reference'
-  ).to.equal(true)
+    `Expected the relay-qualified per-drone template literal to be GONE from ${label}. ` +
+    'cadre-core 0.12.0 rejects a `<relay>/p2p-circuit` entry in network.listenAddrs on a ' +
+    'control node — libp2p dials that relay from inside libp2p.start(), during the bring-up ' +
+    'quiet period that denies exactly that dial. network.relayAddrs takes the BARE relay ' +
+    'addr and appends the suffix itself.'
+  ).to.equal(false)
   expect(
-    body.includes(LISTEN_ADDRS_BY_IDENTIFIER_MARKER),
-    `Expected ${label} network.listenAddrs to still be assigned the qualified-addrs constant by ` +
-    'identifier (STRAND_RELAY_LISTEN_ADDRS), not a bare/direct array literal'
+    body.includes(RELAY_ADDRS_BY_IDENTIFIER_MARKER),
+    `Expected ${label} network.relayAddrs to be assigned the relay-addrs constant by ` +
+    'identifier (CONTROL_RELAY_ADDRS), not a bare/direct array literal'
   ).to.equal(true)
   expect(
     body.includes(DIRECT_ONLY_LISTEN_MARKER),
@@ -273,6 +289,14 @@ function findDbP2pPatchFile (): string | undefined {
   if (!existsSync(YARN_PATCHES_DIR)) return undefined
   const entries = readdirSync(YARN_PATCHES_DIR)
   return entries.find((f) => f.startsWith(DB_P2P_PATCH_PREFIX) && f.endsWith('.patch'))
+}
+
+/** Every committed @optimystic/db-p2p yarn-patch file except the one allowed patch. */
+function findUnexpectedDbP2pPatchFiles (): string[] {
+  if (!existsSync(YARN_PATCHES_DIR)) return []
+  return readdirSync(YARN_PATCHES_DIR).filter(
+    (f) => f.startsWith(DB_P2P_PATCH_PREFIX) && f.endsWith('.patch') && f !== ALLOWED_DB_P2P_PATCH
+  )
 }
 
 /**
@@ -366,12 +390,12 @@ function addedNonCommentLines (patchSrc: string): string[] {
 
 describe('P2P-11/41-04: strand-cohort NoValidAddressesError fix — app-side parity intact + identifyPush yarn-patch present', () => {
   it('both apps/ source files exist at the expected paths', () => {
-    expect(existsSync(CADRE_PROVIDER_PATH), `Expected ${CADRE_PROVIDER_PATH}`).to.equal(true)
+    expect(existsSync(NODE_OPTIONS_PATH), `Expected ${NODE_OPTIONS_PATH}`).to.equal(true)
     expect(existsSync(PROOF_RUNNER_PATH), `Expected ${PROOF_RUNNER_PATH}`).to.equal(true)
   })
 
-  it('CadreNodeProvider.tsx: D-05 relay-qualified strand-routing posture intact (unchanged since 41-02)', () => {
-    assertStrandRelayRoutingIntact(CADRE_PROVIDER_PATH, 'CadreNodeProvider.tsx')
+  it('cadre-node-options.ts: D-05 relay-qualified strand-routing posture intact (unchanged since 41-02)', () => {
+    assertStrandRelayRoutingIntact(NODE_OPTIONS_PATH, 'cadre-node-options.ts')
   })
 
   it('replication-proof-runner.ts: D-05 relay-qualified strand-routing posture intact (unchanged since 41-02)', () => {
@@ -382,7 +406,7 @@ describe('P2P-11/41-04: strand-cohort NoValidAddressesError fix — app-side par
     // If either file's addressing posture had regressed (a one-file drift), the corresponding
     // call would throw — reproducible by reasoning: temporarily reverting either file's
     // listenAddrs assignment to a direct-only literal fails that file's own assertion above.
-    expect(() => assertStrandRelayRoutingIntact(CADRE_PROVIDER_PATH, 'CadreNodeProvider.tsx')).to.not.throw()
+    expect(() => assertStrandRelayRoutingIntact(NODE_OPTIONS_PATH, 'cadre-node-options.ts')).to.not.throw()
     expect(() => assertStrandRelayRoutingIntact(PROOF_RUNNER_PATH, 'replication-proof-runner.ts')).to.not.throw()
   })
 
@@ -436,16 +460,19 @@ describe('P2P-11/41-04: strand-cohort NoValidAddressesError fix — app-side par
       `Expected a root package.json resolutions entry for ${DB_P2P_RESOLUTION_KEY_FRAGMENT}`
     ).to.not.equal(undefined)
     const [, target] = dbP2pEntry as [string, string]
-    const minor = /^\^?0\.(\d+)\./.exec(target)
+    const version = /(\d+)\.(\d+)\.(\d+)/.exec(target)
+    const atLeast0163 = version !== null && (
+      Number(version[1]) > 0 || (Number(version[1]) === 0 && Number(version[2]) >= 16)
+    )
     expect(
-      minor !== null && Number(minor[1]) >= 16,
+      atLeast0163,
       `Expected the ${DB_P2P_RESOLUTION_KEY_FRAGMENT} resolution to target >= 0.16.x (found: ${target}) — ` +
       'earlier lines predate the upstreamed identifyPush/protocolPrefix fixes and would need the retired yarn-patch'
     ).to.equal(true)
   })
 
   it('no GSD phase number appears on a runtime (non-comment) line of either app file or this spec\'s own assertions', () => {
-    const providerLines = runtimeLines(readFileSync(CADRE_PROVIDER_PATH, 'utf8'))
+    const providerLines = runtimeLines(readFileSync(NODE_OPTIONS_PATH, 'utf8'))
     const runnerLines = runtimeLines(readFileSync(PROOF_RUNNER_PATH, 'utf8'))
     const isOffender = (l: string): boolean => l.includes(PHASE_41_04_MARKER)
     const offenders = [...providerLines, ...runnerLines].filter(isOffender)
@@ -457,7 +484,7 @@ describe('P2P-11/41-04: strand-cohort NoValidAddressesError fix — app-side par
 })
 
 describe('P2P-11/41-06: FRET strand-discovery negotiation gap — malformed // id double-slash fix present; p2p-fret patch dropped for bare ^0.6.0 (260715-keg)', () => {
-  it('the db-p2p yarn-patch is RETIRED — its fixes now ship upstream, and no patch may silently re-appear', () => {
+  it('only the commit-proof memo db-p2p yarn-patch exists — the 41-04/41-06 fixes ship upstream, and no other patch may silently re-appear', () => {
     // RETIRED 2026-08-05 (was: "the committed @optimystic/db-p2p patch corrects the malformed //
     // id double-slash for BOTH identify and identifyPush").
     //
@@ -474,13 +501,22 @@ describe('P2P-11/41-06: FRET strand-discovery negotiation gap — malformed // i
     //
     // What remains here is the direction that can still regress: a silent RE-ADD. This mirrors the
     // p2p-fret assertion immediately below, which has guarded exactly that since 260715-keg.
+    // Since 2026-10-28 one deliberate patch is allowed (ALLOWED_DB_P2P_PATCH, an unrelated
+    // commit-proof memo); it must still carry its own marker, so a different hunk under its name fails.
     expect(
-      findDbP2pPatchFile(),
-      `Expected NO ${DB_P2P_PATCH_PREFIX}*.patch file under ${YARN_PATCHES_DIR} — the db-p2p ` +
-      'fixes are upstream as of >= 0.16.3 (identifyPush) and the repo consumes 0.18.0 unpatched. ' +
+      findUnexpectedDbP2pPatchFiles(),
+      `Expected NO ${DB_P2P_PATCH_PREFIX}*.patch file under ${YARN_PATCHES_DIR} other than ` +
+      `${ALLOWED_DB_P2P_PATCH} — the identifyPush/protocolPrefix fixes are upstream as of >= 0.16.3. ` +
       'A re-added patch means someone re-pinned an older db-p2p or re-introduced a local hunk: ' +
       'verify against the installed dist assertion in this file before restoring any patch-content check.'
-    ).to.equal(undefined)
+    ).to.deep.equal([])
+    const allowed = findDbP2pPatchFile()
+    if (allowed !== undefined) {
+      expect(
+        readFileSync(join(YARN_PATCHES_DIR, allowed), 'utf8').includes(ALLOWED_DB_P2P_PATCH_MARKER),
+        `Expected ${allowed} to be the commit-proof memo patch (marker "${ALLOWED_DB_P2P_PATCH_MARKER}")`
+      ).to.equal(true)
+    }
   })
 
   it('260715-keg: NO p2p-fret yarn-patch exists under .yarn/patches/ (patch dropped in favor of ^0.6.0)', () => {
@@ -532,28 +568,36 @@ describe('P2P-11/41-06: FRET strand-discovery negotiation gap — malformed // i
     // 'no runtime line carries a GSD phase number' assertion earlier in this file scans
     // CadreNodeProvider.tsx and replication-proof-runner.ts directly. This assertion now guards the
     // only remaining way a patch could re-introduce one — the patch coming back at all.
+    // A patch WAS deliberately re-added (ALLOWED_DB_P2P_PATCH, 2026-10-28), so the added-code-line
+    // scan is restored: patch comments may carry phase markers by convention, but an added CODE line
+    // must never put one in a string a node would log or throw.
+    expect(findUnexpectedDbP2pPatchFiles(), 'Expected no db-p2p patch beyond the allowed one').to.deep.equal([])
     const dbP2pPatchFile = findDbP2pPatchFile()
+    if (dbP2pPatchFile === undefined) return
+    const addedCode = readFileSync(join(YARN_PATCHES_DIR, dbP2pPatchFile), 'utf8')
+      .split('\n')
+      .filter((l) => l.startsWith('+') && !l.startsWith('+++'))
+      .map((l) => l.slice(1))
+    const offenders = runtimeLines(addedCode.join('\n')).filter((l) => GSD_PLAN_NUMBER.test(l))
     expect(
-      dbP2pPatchFile,
-      `Expected NO ${DB_P2P_PATCH_PREFIX}*.patch file. If a patch is deliberately re-added, restore ` +
-      'the added-code-line phase-number scan along with it — patch comments may carry phase markers ' +
-      'by convention, but an added CODE line must never put one in a string a node would log or throw.'
-    ).to.equal(undefined)
+      offenders,
+      `Expected no added code line of ${dbP2pPatchFile} to carry a GSD phase number; found: ${JSON.stringify(offenders)}`
+    ).to.have.length(0)
   })
 })
 
 describe('P2P-11/41-08: FRET strand registrar-skew — runOnLimitedConnection fix carried by p2p-fret ^0.6.0 upstream; db-p2p patch also retired (260715-keg)', () => {
-  it('260715-keg: NO yarn-patch survives for either db-p2p or p2p-fret — both fixes are upstream', () => {
+  it('260715-keg: no p2p-fret yarn-patch and no db-p2p patch beyond the commit-proof memo — both fixes are upstream', () => {
     // RETIRED 2026-08-05 (was: 'the db-p2p half ... is the only surviving "prior patch present"
     // assertion'). It is no longer surviving: the db-p2p patch was dropped alongside the move to
     // an unpatched 0.18.0, so both halves of this pair are now upstream-carried. See the retirement
     // note on the first test in this describe block.
     expect(
-      findDbP2pPatchFile(),
-      `Expected NO ${DB_P2P_PATCH_PREFIX}*.patch file — the 41-04 identifyPush and 41-06 ` +
-      'single-slash protocolPrefix fixes ship in db-p2p >= 0.16.3; the installed-dist assertion ' +
-      'in this file is what verifies they are actually present'
-    ).to.equal(undefined)
+      findUnexpectedDbP2pPatchFiles(),
+      `Expected NO ${DB_P2P_PATCH_PREFIX}*.patch file other than ${ALLOWED_DB_P2P_PATCH} — the 41-04 ` +
+      'identifyPush and 41-06 single-slash protocolPrefix fixes ship in db-p2p >= 0.16.3; the ' +
+      'installed-dist assertion in this file is what verifies they are actually present'
+    ).to.deep.equal([])
 
     // The p2p-fret patch (41-06 async-completeness + 41-08 runOnLimitedConnection) is RETIRED —
     // that fix now lives upstream in p2p-fret ^0.6.0's openRpcStream(), not in a local patch file.
@@ -664,11 +708,20 @@ describe('P2P-11/41-10: strand-relay-routing diagnosis — Node D-02 gate probe 
     }
   })
 
-  it('the diagnosis doc is present and cites the key installed-dist + app-source file:line anchors', () => {
+  it('the diagnosis doc is present and cites the key installed-dist + app-source file:line anchors', function () {
     const diagnosisPath = join(
       REPO_ROOT, '.planning', 'phases', '41-multi-peer-relay-close-published-substrate',
       '41-10-STRAND-RELAY-ROUTING-DIAGNOSIS.md'
     )
+    // `.planning` is a nested git repo the outer repo gitignores (zero tracked files in the outer
+    // tree). On a developer machine that has cloned/initialized it, this assertion runs for real.
+    // On a fresh CI checkout (or any clone without the nested repo) `.planning` does not exist at
+    // all, so this test is un-runnable there rather than false — skip it VISIBLY (mocha reports it
+    // as pending) instead of letting it silently pass or hard-fail a machine that was never in a
+    // position to have the doc.
+    if (!existsSync(diagnosisPath)) {
+      this.skip()
+    }
     expect(existsSync(diagnosisPath), `Expected ${diagnosisPath}`).to.equal(true)
     const doc = readFileSync(diagnosisPath, 'utf8')
     for (const anchor of [

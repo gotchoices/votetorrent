@@ -79,6 +79,10 @@ export function FieldRow({
 					fontSize: typeScale.body.fontSize,
 					lineHeight: typeScale.body.lineHeight,
 					padding: 0, // strip the platform default padding — the card row owns the spacing
+					// The INPUT itself is the touch target, so it — not the row padding — must be
+					// >= 44dp (a padding-only row left an 18dp-tall tappable input on device). Text
+					// stays vertically centred, so the row's visual rhythm is unchanged.
+					minHeight: INPUT_MIN_HEIGHT,
 				}}
 			/>
 			{error ? (
@@ -103,6 +107,9 @@ export function FieldRow({
 
 export default FieldGroupCard;
 
+/** Minimum tappable input height (44dp touch-target floor). */
+const INPUT_MIN_HEIGHT = 44;
+
 const styles = StyleSheet.create({
 	card: {
 		borderWidth: 1,
@@ -112,9 +119,13 @@ const styles = StyleSheet.create({
 		height: StyleSheet.hairlineWidth,
 	},
 	row: {
-		paddingVertical: 16, // md — >=44px effective row height
+		// The input's own 44dp min height now supplies most of the old 16dp (md) top/bottom
+		// inset around an ~18dp text line; 3dp + 13dp centring keeps the same ~50dp row.
+		paddingVertical: 3,
 	},
 	error: {
-		marginTop: 4, // xs
+		// The input's centring space below the text already separates the message from it;
+		// marginBottom restores the 16dp (md) inset under the message.
+		marginBottom: 13,
 	},
 });

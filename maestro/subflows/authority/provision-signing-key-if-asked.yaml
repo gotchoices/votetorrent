@@ -1,0 +1,24 @@
+# If the app has routed to "Secure Signing Setup" (ProvisionSigningKey), set the key up:
+# SET UP SECURE SIGNING > fingerprint (answered by scripts/biometric-autotouch.sh on the host) >
+# CONTINUE. Does nothing when that screen is not showing.
+#
+# AddNetwork routes here twice on a fresh install: once for the first CREATE
+# (NO_KEY_PROVISIONED), and once after the network commits (the recovery-key gate).
+# env: APP_ID
+appId: ${APP_ID}
+---
+- runFlow:
+    when:
+      visible:
+        id: "signing-key-provisioning-primary-button"
+    commands:
+      - tapOn:
+          id: "signing-key-provisioning-primary-button"
+      - extendedWaitUntil:
+          visible:
+            id: "signing-key-provisioning-continue-button|signing-key-provisioning-retry-button"
+          timeout: 90000
+      - assertVisible:
+          id: "signing-key-provisioning-continue-button"
+      - tapOn:
+          id: "signing-key-provisioning-continue-button"

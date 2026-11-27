@@ -5,16 +5,46 @@
 
 <div class="news-container">
     <article class="news-item">
+        <h3>Hardware-Backed Device Verification</h3>
+        <p class="news-date">July 27, 2026</p>
+        <p>Registration can now carry cryptographic proof that it came from a genuine, unmodified phone. The Voter app generates a signing key inside the device's own secure hardware, and the Authority app verifies both that key and the device behind it &mdash; entirely offline, with no call home to any server. This is a direct defense against someone scripting thousands of fake registrations. The mechanism is built and integrated; it will be switched on as elections move toward real use.</p>
+    </article>
+    
+    <article class="news-item">
+        <h3>The Voter App Takes Shape</h3>
+        <p class="news-date">July 23, 2026</p>
+        <p>VoteTorrent now has two apps: the Authority app for the officials who run an election, and the new Voter app for everyone else. The Voter app covers registration, ballots, and QR scanning, and it now runs against the real voting engine rather than stand-in data &mdash; signing with a device identity that never leaves the phone.</p>
+    </article>
+    
+    <article class="news-item">
+        <h3>Authority App Reaches Design Parity, in English and Spanish</h3>
+        <p class="news-date">June 1, 2026</p>
+        <p>Every screen in the Authority app now matches its design, including several built from scratch: creating elections and ballots, proposing revisions to an existing election, and inviting keyholders. The whole app is available in English and Spanish, with an in-app language switch that remembers your choice. These screens run on sample data while the voting engine is wired in behind them.</p>
+    </article>
+    
+    <article class="news-item">
+        <h3>VoteTorrent Runs on the Sereus Fabric</h3>
+        <p class="news-date">May 29, 2026</p>
+        <p>Optimystic and Quereus have been assembled into <a href="https://sereus.org" target="_blank">Sereus</a>, a general-purpose fabric for applications whose data lives on participants' own devices instead of a central server &mdash; and VoteTorrent now runs on it. Each VoteTorrent network is a "strand": an invitation-only shared database, distributed across the phones and machines of the people taking part.</p>
+    </article>
+    
+    <article class="news-item">
+        <h3>The Election Rulebook Becomes Code</h3>
+        <p class="news-date">November 5, 2025</p>
+        <p>The rules governing an election are now written directly into the data model: how networks, authorities and officers relate to one another, how invitations are issued and accepted, and how many signatures an action requires before it takes effect. Threshold signing means no single official can act alone &mdash; signing authority is split among keyholders, building on the <a href="https://github.com/gotchoices/vinz" target="_blank">Vinz</a> distributed threshold key library. The database checks these rules itself, so an invalid record cannot be written in the first place.</p>
+    </article>
+    
+    <article class="news-item">
         <h3>Distributed Election Network</h3>
         <p class="news-date">Apr 30, 2025</p>
-        <p>Gotchoices announces <a href="https://github.com/gotchoices/Optimystic">Optimystic</a> and <a href="https://github.com/gotchoices/sqliter">SQLiter</a>, which together form the data substrate for the VoteTorrent Distributed Election Network.</p>
+        <p>Gotchoices announces <a href="https://github.com/gotchoices/Optimystic">Optimystic</a> and <a href="https://github.com/gotchoices/quereus">Quereus</a>, which together form the data substrate for the VoteTorrent Distributed Election Network.</p>
     </article>
     
     <article class="news-item">
         <h3>Founder Appears on The Crypto Podcast</h3>
         <p class="news-date">March 6, 2025</p>
         <p>GotChoices' founder is featured on Roy Coughlan's Crypto Podcast.  This discussion includes the future of secure voting systems and how distributed ledger technology can revolutionize how we hold elections.</p>
-        <p><a href="https://www.youtube.com/watch?v=FDbeEVxlbWo&t=50m3s" target="_blank">Watch on YouTube</a> <span class="alt-link">or <a href="https://open.spotify.com/episode/7DzNvJkMsYeUA4OmpAKTKF?t=3003" target="_blank">listen on Spotify</a> (starts at 50:03), or visit the <a href="https://thecryptopodcast.com/" target="_blank">Crypto Podcast Home Page</a></span></p>
+        <p><a href="https://www.youtube.com/watch?v=FDbeEVxlbWo&t=50m3s" target="_blank">Watch on YouTube</a> <span class="alt-link">or <a href="https://open.spotify.com/episode/7DzNvJkMsYeUA4OmpAKTKF?t=3003" target="_blank">listen on Spotify</a> (starts at 50:03)</span></p>
     </article>
     
     <article class="news-item">

@@ -1,0 +1,58 @@
+# VoteTorrent Voter — iOS build lanes
+#
+# App Store Connect env:
+#   APPLE_ID                                    Apple ID email, consumed by the Appfile
+#   TEAM_ID                                      the paid team 6849Q7KVP5, consumed by the Appfile
+#   FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD ASSUMED — this variable name appears nowhere
+#     else in this repo today and was not verified against current fastlane documentation;
+#     the admin confirms it before first real use. It is an app-specific password generated
+#     at appleid.apple.com, never the Apple ID account password, and should be exported from
+#     the admin's password manager rather than typed into an interactive shell where it lands
+#     in history.
+#
+# Prerequisites:
+#   - The workspace packages must be built first: `yarn prepare:workspace` (the Android
+#     `prepare` lane; it is platform-agnostic).
+#   - The project must have been opened once in Xcode with the paid Apple ID added, so
+#     automatic signing can resolve a profile.
+#
+# Lanes:
+#   fastlane ios beta     — build and upload to TestFlight
+#   fastlane ios release  — build and submit to the App Store
+#
+# Signing identity: both lanes are guarded by scripts/fastlane/vt_team_gate.rb, which
+# asserts the project's DEVELOPMENT_TEAM is the paid team in both build configurations.
+
+default_platform(:ios)
+
+FASTLANE_DIR = __dir__
+REPO_ROOT    = File.expand_path("../../../..", FASTLANE_DIR)
+require File.join(REPO_ROOT, "scripts", "fastlane", "vt_team_gate")
+
+platform :ios do
+  desc "Push a new beta build to TestFlight"
+  lane :beta do
+    VtTeamGate.assert_team!(REPO_ROOT)
+    increment_build_number
+    build_ios_app(
+      scheme: "VoteTorrentVoter",
+      export_method: "app-store",
+      configuration: "Release",
+      clean: true
+    )
+    upload_to_testflight(skip_waiting_for_build_processing: true)
+  end
+
+  desc "Push a new release build to the App Store"
+  lane :release do
+    VtTeamGate.assert_team!(REPO_ROOT)
+    increment_build_number
+    build_ios_app(
+      scheme: "VoteTorrentVoter",
+      export_method: "app-store",
+      configuration: "Release",
+      clean: true
+    )
+    upload_to_app_store(force: true, submit_for_review: true, automatic_release: true)
+  end
+end

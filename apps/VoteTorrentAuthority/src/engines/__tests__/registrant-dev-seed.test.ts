@@ -84,10 +84,20 @@ jest.mock('@votetorrent/vote-engine/rn', () => {
 			registrantId,
 			deviceKey,
 			electionId: 'election-1',
-			expiration: '2999-01-01T00:00:00.000Z',
 		}),
 	)
 	const associateMock = jest.fn(async () => undefined)
+	// D-49 (62-31): seedRegistrantFixtures now provisions an intake recipient before its first
+	// register() call. These two tests exercise the completion-marker resume logic, not D-49
+	// sealing, so listIntakeRecipients reports a NON-EMPTY set — the provisioning branch (which
+	// would otherwise call the real, unmocked resolveAuthorityKeyVault()) never runs here.
+	const listIntakeRecipientsMock = jest.fn(async () => ({
+		authorityId: 'authority-1',
+		recipients: [{ userId: 'mock-officer', publicKey: 'a'.repeat(66) }],
+		officersWithoutKey: [],
+		droppedKeys: [],
+	}))
+	const registerOfficerEncryptionKeyMock = jest.fn(async () => undefined)
 
 	return {
 		__esModule: true,
@@ -101,6 +111,10 @@ jest.mock('@votetorrent/vote-engine/rn', () => {
 			issueAttestationChallenge: issueAttestationChallengeMock,
 			associate: associateMock,
 		})),
+		IntakeEngine: jest.fn().mockImplementation(() => ({
+			listIntakeRecipients: listIntakeRecipientsMock,
+			registerOfficerEncryptionKey: registerOfficerEncryptionKeyMock,
+		})),
 		NetworksEngine: class {},
 		__mock: {
 			registerMock,
@@ -109,6 +123,8 @@ jest.mock('@votetorrent/vote-engine/rn', () => {
 			setElectionAttestationPolicyMock,
 			issueAttestationChallengeMock,
 			associateMock,
+			listIntakeRecipientsMock,
+			registerOfficerEncryptionKeyMock,
 		},
 	}
 })
@@ -122,6 +138,8 @@ const { __mock } = require('@votetorrent/vote-engine/rn') as {
 		setElectionAttestationPolicyMock: jest.Mock
 		issueAttestationChallengeMock: jest.Mock
 		associateMock: jest.Mock
+		listIntakeRecipientsMock: jest.Mock
+		registerOfficerEncryptionKeyMock: jest.Mock
 	}
 }
 

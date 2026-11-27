@@ -88,7 +88,14 @@ export const parseKeyholdersAsInviteStatus = (
  * Parsing rules:
  *   - `null` / `undefined`  → `undefined`
  *   - `{min, max}`          → `{ min: number, max: number }`
+ *   - legacy JSON object    → `{ min, max }` (integer min/max only; see below)
  *   - anything else         → throws (field name included for diagnostics)
+ *
+ * Legacy read: `finalizeBallot` wrote these columns as a JSON object from
+ * 31-03 until the UAT 62 gap 1 fix. Those Question rows are signed by
+ * Question.MutationValid and cannot be rewritten, so the reader tolerates
+ * exactly that shape: a plain object whose `min` and `max` are integers
+ * (an integer `step` may ride along and is ignored).
  */
 export const parsePgRange = (
   value: unknown,
@@ -97,8 +104,24 @@ export const parsePgRange = (
   if (value === null || value === undefined) return undefined
   const s = value.toString().trim()
   const m = /^\{(\s*-?\d+)\s*,\s*(-?\d+\s*)\}$/.exec(s)
-  if (!m) throw new Error(`${field} has invalid range format: ${s}`)
-  return { min: Number(m[1]), max: Number(m[2]) }
+  if (m) return { min: Number(m[1]), max: Number(m[2]) }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(s)
+  } catch {
+    parsed = undefined
+  }
+  if (
+    parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) &&
+    Number.isInteger((parsed as Record<string, unknown>).min) &&
+    Number.isInteger((parsed as Record<string, unknown>).max) &&
+    ((parsed as Record<string, unknown>).step === undefined ||
+      Number.isInteger((parsed as Record<string, unknown>).step))
+  ) {
+    const o = parsed as { min: number; max: number }
+    return { min: o.min, max: o.max }
+  }
+  throw new Error(`${field} has invalid range format: ${s}`)
 }
 
 /**
@@ -113,6 +136,58 @@ export const parsePgRange = (
  */
 export const formatPgRange = (range: { min: number; max: number }): string =>
   `{${range.min}, ${range.max}}`
+
+/**
+ * Format a score range for `Question.ScoreRange`. Two values `{min, max}` when `step` is absent or 1,
+ * three values `{min, max, step}` otherwise. Wire decision (O-07): the two-value form is kept for step 1
+ * so a mixed-version cohort keeps reading every existing row and every step-1 row; only a step other
+ * than 1 (never persisted before this change) uses the three-value form.
+ */
+export const formatScoreRange = (range: { min: number; max: number; step?: number }): string => {
+  const { min, max, step } = range
+  if (!Number.isInteger(min) || !Number.isInteger(max)) {
+    throw new Error(`formatScoreRange: min and max must be integers (got ${min}, ${max})`)
+  }
+  if (step === undefined || step === 1) return `{${min}, ${max}}`
+  if (!Number.isInteger(step) || step < 1) {
+    throw new Error(`formatScoreRange: step must be a positive integer (got ${step})`)
+  }
+  return `{${min}, ${max}, ${step}}`
+}
+
+/**
+ * Parse `Question.ScoreRange` (inverse of `formatScoreRange`): the two- or three-value pg form, or the
+ * legacy JSON object (`step` optional). A missing step is the implicit unit step 1. `step` must be a
+ * positive integer; anything else throws with the field name. `OptionRange` keeps `parsePgRange`,
+ * which never accepts a step.
+ */
+export const parseScoreRange = (
+  value: unknown,
+  field: string
+): { min: number; max: number; step: number } | undefined => {
+  if (value === null || value === undefined) return undefined
+  const s = value.toString().trim()
+  const invalid = (): never => { throw new Error(`${field} has invalid range format: ${s}`) }
+  const m = /^\{\s*(-?\d+)\s*,\s*(-?\d+)\s*(?:,\s*(-?\d+)\s*)?\}$/.exec(s)
+  if (m) {
+    const step = m[3] === undefined ? 1 : Number(m[3])
+    if (step < 1) return invalid()
+    return { min: Number(m[1]), max: Number(m[2]), step }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(s)
+  } catch {
+    parsed = undefined
+  }
+  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const o = parsed as Record<string, unknown>
+    if (Number.isInteger(o.min) && Number.isInteger(o.max) && (o.step === undefined || (Number.isInteger(o.step) && (o.step as number) >= 1))) {
+      return { min: o.min as number, max: o.max as number, step: (o.step as number | undefined) ?? 1 }
+    }
+  }
+  return invalid()
+}
 
 /**
  * Convert `Digest()` output to bytes for the app-layer sign callback (WR-01, 17-REVIEW).

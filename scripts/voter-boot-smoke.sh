@@ -125,13 +125,16 @@ deadline=$((SECONDS + BOOT_TIMEOUT))
 verdict=""
 while [ "$SECONDS" -lt "$deadline" ]; do
   dump="$($ADB logcat -d 2>/dev/null || true)"
+  # Here-strings, not `printf | grep -q`: under pipefail, grep -q exits on the
+  # first match, printf takes SIGPIPE on a large dump, and the pipeline reports
+  # failure -- so a token that IS present read as missed.
   for sig in "${FAILURE_SIGNALS[@]}"; do
-    if printf '%s' "$dump" | grep -qF "$sig"; then
+    if grep -qF "$sig" <<<"$dump"; then
       verdict="FAIL"; log "failure signal seen: $sig"; break
     fi
   done
   [ "$verdict" = "FAIL" ] && break
-  if printf '%s' "$dump" | grep -qF "$BOOT_TOKEN"; then
+  if grep -qF "$BOOT_TOKEN" <<<"$dump"; then
     verdict="PASS"; break
   fi
   sleep 3

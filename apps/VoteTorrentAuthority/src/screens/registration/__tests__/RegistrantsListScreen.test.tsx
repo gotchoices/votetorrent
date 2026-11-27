@@ -853,7 +853,8 @@ describe("RegistrantsListScreen — D-04/D-05/D-07/D-13 (47-11)", () => {
 		await flushTicks(4);
 
 		present(tr, "registrants-list-error");
-		expect(treeText(tr)).toContain("listRegistrants failed");
+		expect(treeText(tr)).toContain("errorLoadFailedGeneric");
+		expect(treeText(tr)).not.toContain("listRegistrants failed");
 
 		// Exactly one occurrence: the search input's own `value` prop.
 		const occurrences = treeText(tr).split(SENTINEL).length - 1;

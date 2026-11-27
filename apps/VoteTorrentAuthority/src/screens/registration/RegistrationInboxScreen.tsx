@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
 import {
 	ExtendedTheme,
@@ -9,6 +9,7 @@ import {
 } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
+import { errorCopy } from "../../utils/errorCopy";
 import FontAwesome6 from "react-native-vector-icons/FontAwesome6";
 import { ThemedText } from "../../components/ThemedText";
 import { ChipButton } from "../../components/ChipButton";
@@ -17,7 +18,7 @@ import { InlineError } from "../../components/InlineError";
 import { globalStyles } from "../../theme/styles";
 import { useApp } from "../../providers/AppProvider";
 import { useCurrentOfficerScopes } from "../../hooks/useCurrentOfficerScopes";
-import { scopeDescriptions } from "@votetorrent/vote-core";
+import { scopeLabel } from "../../utils/scopeLabel";
 import type {
 	IRegistrationEngine,
 	ISignatureTasksEngine,
@@ -28,10 +29,15 @@ import type {
 	RegistrationTransparencyStats,
 } from "@votetorrent/vote-core";
 import { RegistrationRequestRow } from "./components/RegistrationRequestRow";
+import { ReassociationQueueSection } from "./components/ReassociationQueueSection";
+import { ReassociationReviewToggle } from "../elections/components/ReassociationReviewToggle";
+import { registrationContentUnreadKey } from "./continuity-review";
 import { TransparencyStatsCard } from "./components/TransparencyStatsCard";
 import type { RootStackParamList } from "../../navigation/types";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useKeyboardInset } from "../../hooks/useKeyboardInset";
+import { useStrandChanges } from "../../hooks/useStrandChanges";
+import { useWaitingActionCount } from "../../hooks/useCommitShare";
 
 // D-12: this screen previously carried a screen-local loosely-typed
 // navigation widening because RootStackParamList did not yet carry
@@ -62,6 +68,9 @@ export default function RegistrationInboxScreen() {
 	const { t } = useTranslation();
 	const keyboardInset = useKeyboardInset();
 	const { colors } = useTheme() as ExtendedTheme;
+	// Decisions made on this phone (approval screens track them as "decision:<requestId>") that no
+	// other member holds yet (todo 2026-09-11-optimystic-commit-success-hides-unresolvable-cohort).
+	const unsharedDecisions = useWaitingActionCount("decision:");
 	const insets = useSafeAreaInsets();
 	const { getEngine } = useApp();
 	const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -177,7 +186,7 @@ export default function RegistrationInboxScreen() {
 			// The caught error's message is rendered as-is; the filter object,
 			// the officer's typed search term, and any row value are NEVER
 			// interpolated into it and never passed to any logging call.
-			if (!unmountedRef.current) setErrorMessage(err instanceof Error ? err.message : String(err));
+			if (!unmountedRef.current) setErrorMessage(errorCopy(err, t, "read", { log: false }));
 		} finally {
 			if (!unmountedRef.current) setLoadingInitial(false);
 		}
@@ -207,6 +216,11 @@ export default function RegistrationInboxScreen() {
 			loadFirstPage();
 		}, [loadFirstPage])
 	);
+
+	// A request that arrives (or another officer's decision) while the inbox is on screen re-reads the first page.
+	useStrandChanges(["App.RegistrationRequest", "App.RegistrationDecision"], () => {
+		loadFirstPage();
+	}, "authority-registration-inbox");
 
 	const loadStats = useCallback(async () => {
 		try {
@@ -283,7 +297,7 @@ export default function RegistrationInboxScreen() {
 			// returns `total: undefined` (48-08's contract), so assigning it
 			// would blank a perfectly good count on the second page.
 		} catch (err) {
-			if (!unmountedRef.current) setErrorMessage(err instanceof Error ? err.message : String(err));
+			if (!unmountedRef.current) setErrorMessage(errorCopy(err, t, "read", { log: false }));
 		} finally {
 			if (!unmountedRef.current) setLoadingMore(false);
 		}
@@ -313,12 +327,24 @@ export default function RegistrationInboxScreen() {
 
 	return (
 		<ScrollView
+			keyboardShouldPersistTaps="handled"
 			style={styles.container}
 			contentContainerStyle={{ paddingBottom: insets.bottom + 24 + keyboardInset }}
 		>
 			<View style={styles.section} testID="registration-inbox-error">
 				<InlineError message={errorMessage} />
 			</View>
+
+			{unsharedDecisions > 0 ? (
+				<View style={styles.section}>
+					<View testID="registration-inbox-decisions-not-shared" style={localStyles.banner} accessibilityLiveRegion="polite">
+						<FontAwesome6 name="cloud-arrow-up" size={14} color={colors.warning} />
+						<ThemedText type="small" style={{ color: colors.warningText ?? colors.text, flexShrink: 1 }}>
+							{t("decisionsNotShared", { count: unsharedDecisions })}
+						</ThemedText>
+					</View>
+				</View>
+			) : null}
 
 			{/* Two-branch scope-gate banner — a UI legibility affordance ONLY,
 			    NEVER a security boundary (AdminSigning.SignerKeyValid /
@@ -341,7 +367,7 @@ export default function RegistrationInboxScreen() {
 					<View testID="registration-inbox-readonly-banner" style={localStyles.banner}>
 						<FontAwesome6 name="lock" size={14} color={colors.textSecondary} />
 						<ThemedText type="small" style={{ color: colors.textSecondary }}>
-							{t("registrationRequestScopeReadOnlyBanner", { scope: scopeDescriptions.vrg })}
+							{t("registrationRequestScopeReadOnlyBanner", { scope: scopeLabel("vrg", t) })}
 						</ThemedText>
 					</View>
 				))}
@@ -368,6 +394,38 @@ export default function RegistrationInboxScreen() {
 					label={t("registrationRequestBulkImportSyncButton")}
 					onPress={() => navigation.navigate("BulkImportSync", { authorityId })}
 				/>
+			</View>
+
+			{/* Phase 51 plan 51-10 (D-06/D-19) — the concrete tap sequence into
+			    AssociationRequestStatusScreen, the read-only association-request
+			    status screen: Registration Requests (this screen) -> this chip ->
+			    AssociationRequestStatus. Placed beside
+			    the Bulk Import / Sync chip above (both authority-wide, both reached
+			    from here) rather than adding a new menu location. Unconditional on
+			    canWrite/scope, matching the Bulk Import / Sync chip's own posture:
+			    this screen is read-only regardless of scope. */}
+			<View style={styles.section} testID="registration-inbox-association-request-status">
+				<ChipButton
+					label={t("associationRequestStatusInboxButton")}
+					onPress={() => navigation.navigate("AssociationRequestStatus", { authorityId })}
+				/>
+			</View>
+
+			{/* D-46: the per-authority device-change review setting, beside the queue it governs.
+			    Moved here from the election's Registration Policy screen by the user ruling of
+			    2026-10-07; same component, same 'vrg' scope (canWrite), same signed write. */}
+			<View style={styles.section} testID="registration-inbox-reassociation-review">
+				<ReassociationReviewToggle authorityId={authorityId} canWrite={canWrite} />
+				<ThemedText type="small" style={{ color: colors.textSecondary }}>
+					{t("reassociationReviewAuthorityWide")}
+				</ThemedText>
+			</View>
+
+			{/* D-41/D-46 (62-27): device-change requests awaiting officer review are reached from
+			    here, and AssociationRequestStatusScreen stays control-free (Phase 51). The section
+			    renders nothing without a peer network or with an empty queue. */}
+			<View style={styles.section} testID="registration-inbox-reassociation-queue">
+				<ReassociationQueueSection authorityId={authorityId} />
 			</View>
 
 			<View style={styles.section} testID="registration-inbox-filters">
@@ -507,22 +565,37 @@ export default function RegistrationInboxScreen() {
 				// .map()-in-ScrollView is deliberate: this app has zero
 				// virtualized-list-component precedent, and pages are bounded by
 				// REGISTRATION_REQUESTS_PAGE_SIZE.
-				rows.map((row) => (
-					<RegistrationRequestRow
-						key={row.requestId}
-						row={row}
-						// Identifiers only — never the row object, never the display
-						// name, never any payload value. React Navigation params are
-						// persisted into navigation state and can surface in
-						// crash/debug payloads.
-						onPress={() =>
-							navigation.navigate("RegistrationRequestApproval", {
-								requestId: row.requestId,
-								authorityId,
-							})
-						}
-					/>
-				))
+				rows.map((row) => {
+					// D-49 (62-31): an unread sealed request is listed honestly instead of as a nameless
+					// row. The line carries a key name only, never a payload value.
+					const unreadKey = registrationContentUnreadKey(row.payloadAccess);
+					return (
+						<Fragment key={row.requestId}>
+							<RegistrationRequestRow
+								row={row}
+								// Identifiers only — never the row object, never the display
+								// name, never any payload value. React Navigation params are
+								// persisted into navigation state and can surface in
+								// crash/debug payloads.
+								onPress={() =>
+									navigation.navigate("RegistrationRequestApproval", {
+										requestId: row.requestId,
+										authorityId,
+									})
+								}
+							/>
+							{unreadKey ? (
+								<ThemedText
+									type="small"
+									style={{ color: colors.textSecondary }}
+									testID={"registration-inbox-row-content-" + row.requestId}
+								>
+									{t(unreadKey)}
+								</ThemedText>
+							) : null}
+						</Fragment>
+					);
+				})
 			)}
 
 			{rows.length > 0 &&

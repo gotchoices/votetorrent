@@ -1,0 +1,5 @@
+/* Purpose shown with the Face ID prompt before a biometric-protected key signs. */
+"NSFaceIDUsageDescription" = "VoteTorrent Authority uses Face ID to confirm it's you before it signs with your officer key. The key is kept in the Secure Enclave and never leaves this device.";
+
+/* Purpose shown with the camera permission prompt when the officer opens the QR join-code scanner. */
+"NSCameraUsageDescription" = "VoteTorrent Authority uses the camera only to scan the QR join code from the election office. It does not take photos or record video.";

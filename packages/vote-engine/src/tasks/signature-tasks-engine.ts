@@ -1,11 +1,18 @@
-import { MisuseError, QuereusError } from '@quereus/quereus'
 import type { SqlValue, Database } from '@quereus/quereus'
 import { SigningEngine } from '../signing/signing-engine.js'
 import { seedSignedMutation } from '../signing/signed-mutation.js'
-import { toIsoZDatetime, toDeferredCheckDatetime, restoreCanonicalDatetime, reZuluDatetime } from '../signing/ceremony-helpers.js'
-import { digestToBytes, nowCanonicalDatetime, parseJsonOr } from '../utils.js'
+import { adminSigningKeyValidity } from '../signing/signer-validity.js'
+import { readSessionThreshold } from '../signing/threshold.js'
+import { fanOutSignatureTasks } from '../signing/fan-out.js'
+import { drainDeferredChecks } from '../database/drain-deferred-checks.js'
+import { findPendingAdminTaskRow, findPendingTaskNonce, findPendingTaskRowByNonce, findRegistrantSessionNonce, taskSigningNonce } from './task-signing-status.js'
+import { applyReachedIntakePolicyProposal, readIntakePolicyProposalByNonce } from '../intake/cosign.js'
+import { resolveSignedSubmittedAt } from '../signing/signed-submitted-at.js'
+import { toIsoZDatetime, toDeferredCheckDatetime, restoreCanonicalDatetime, reZuluDatetime, rethrow as rethrowHelper } from '../signing/ceremony-helpers.js'
+import { digestToBytes, formatPgRange, formatScoreRange, nowCanonicalDatetime, parseJsonOr } from '../utils.js'
 import type { EngineContext } from '../types.js'
-import { verificationCid, isChecklistGateMet } from '@votetorrent/vote-core'
+import { verificationCid, isChecklistGateMet, RegistrantAlreadyExistsError, AdminPromotionError, RegistrationDuplicateError, RegistrationContentAccessError, RequesterSignatureUnverifiableError } from '@votetorrent/vote-core'
+import { openRegistrationPayload } from '../registration/sealed-registration-content.js'
 import type {
   ISigningEngine,
   ISignatureTasksEngine,
@@ -16,6 +23,8 @@ import type {
   AdminSignatureTask,
   BallotSignatureTask,
   RegistrantSignatureTask,
+  IntakePolicySignatureTask,
+  AssociationSignatureTask,
   Authority,
   ThresholdPolicy,
   AdminInit,
@@ -25,11 +34,16 @@ import type {
   RegisterInit,
   RegistrationRequestDecision,
   Signature,
+  SignOutcome,
+  SigningStatus,
 } from '@votetorrent/vote-core'
 import { BALLOT_HEADER_TID } from '../election/election-engine.js'
 import { CompleteSignatureBuilder } from './builders/index.js'
 import { allocateTid } from '../database/tid-allocator.js'
 import { RegistrationEngine } from '../registration/registration-engine.js'
+import { registrationRequestNotClosedSql, readDuplicateClosure } from '../registration/duplicate-closure.js'
+import { resolveRecordValidity } from '../association/record-validity.js'
+import { AuthorityEngine } from '../authority/authority-engine.js'
 
 /**
  * CR-04 (T-48-33-02/03) — the identifier-free tally a registrant seed pass returns and the
@@ -261,6 +275,51 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
             // Extension or ProposedBallot row missing — fall back to base task
             out.push(base)
           }
+        } else if (signatureType === 'association') {
+          // Schema version 2: a co-signed decision on a pending association request.
+          const aExtRow = await this.ctx.db
+            .prepare(
+              `select E.RequestId, E.RegistrantId, E.Decision, R.AuthorityId, R.DeviceKey
+                 from AssociationSignatureTaskExtension E
+                   join AssociationRequest R on R.Id = E.RequestId
+                 where E.TaskId = :taskId`
+            )
+            .get({ taskId: row.Id })
+          if (aExtRow) {
+            const associationTask: AssociationSignatureTask = {
+              ...base,
+              signatureType: 'association',
+              signingNonce: row.SigningNonce,
+              requestId: aExtRow.RequestId as string,
+              authorityId: aExtRow.AuthorityId as string,
+              deviceKey: aExtRow.DeviceKey as string,
+              decision: aExtRow.Decision === 'a' ? 'a' : 'r',
+              ...(aExtRow.RegistrantId == null ? {} : { registrantId: aExtRow.RegistrantId as string }),
+            }
+            out.push(associationTask)
+          } else {
+            out.push(base)
+          }
+        } else if (signatureType === 'intake-policy') {
+          // Schema version 2: the proposal row is the task's extension (joined by SigningNonce).
+          const proposal = await readIntakePolicyProposalByNonce(this.ctx.db, row.SigningNonce)
+          if (proposal) {
+            const intakeTask: IntakePolicySignatureTask = {
+              ...base,
+              signatureType: 'intake-policy',
+              authorityId: proposal.authorityId,
+              signingNonce: row.SigningNonce,
+              proposal: {
+                revision: proposal.revision,
+                restBridgeUrl: proposal.restBridgeUrl,
+                reassociationMode: proposal.reassociationMode,
+                setAt: proposal.setAt,
+              },
+            }
+            out.push(intakeTask)
+          } else {
+            out.push(base)
+          }
         } else if (signatureType === 'registrant') {
           // D-05: materialise the RegistrantSignatureTask. LEFT join RegistrationBridgeKey
           // deliberately — a registrant-issued row has a null BridgeId and must still
@@ -269,7 +328,7 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
           // consumer must never infer "registrant-submitted" from a missing label.
           const rExtRow = await this.ctx.db
             .prepare(
-              `select E.RequestId, R.AuthorityId, R.IssuerType, R.BridgeId, R.Payload, R.SubmittedAt,
+              `select E.RequestId, R.AuthorityId, R.IssuerType, R.BridgeId, R.Payload, R.PayloadCid, R.SubmittedAt,
                       B.Label as BridgeLabel
                  from RegistrantSignatureTaskExtension E
                    join RegistrationRequest R on R.Id = E.RequestId
@@ -278,8 +337,16 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
             )
             .get({ taskId: row.Id })
 
+          // D-49: open through the one seal/open module (the tier-2 PayloadCid recheck included).
+          // Any access other than 'opened'/'unsealed' takes the EXISTING base-task fallback below —
+          // the same discipline this branch already had for a missing extension row, a missing
+          // joined request, or an unparseable payload.
           const payload = rExtRow
-            ? parseJsonOr<RegisterInit | undefined>(rExtRow.Payload as string, undefined, 'RegistrationRequest.Payload')
+            ? (await openRegistrationPayload(this.ctx.db, this.ctx.intakeOpener, {
+                requestId: rExtRow.RequestId as string,
+                payloadCid: rExtRow.PayloadCid as string,
+                stored: rExtRow.Payload
+              })).payload
             : undefined
 
           if (rExtRow && payload) {
@@ -453,7 +520,10 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
                  join CurrentAdmin CA on CA.AuthorityId = O.AuthorityId and CA.EffectiveAt = O.AdminEffectiveAt
                  where O.AuthorityId = R.AuthorityId and O.UserId = :userId
                    and exists (select 1 from json_each(O.Scopes) where value = 'vrg')
-             )`,
+             )
+             -- D-44 (62-19): a request closed or closing as a duplicate is undecidable, so it must
+             -- never be seeded. The single shared definition — never a locally re-derived predicate.
+             and ${registrationRequestNotClosedSql('R')}`,
         { userId }
       )) {
         pendingRows.push({
@@ -565,18 +635,53 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
               now,
             }
           )
-          await ctx.db.exec(
-            `insert into Task (Id, UserId, Type, SignatureType, SigningNonce, IsCompleted)
-             with context IsMutationValid = true, Tid = :tid
-             values (:id, :userId, 'signature', 'registrant', :nonce, 0)`,
-            { id: taskId, userId, nonce, tid }
-          )
-          await ctx.db.exec(
-            `insert into RegistrantSignatureTaskExtension (TaskId, RequestId)
-             with context Tid = :tid
-             values (:taskId, :requestId)`,
-            { taskId, requestId: row.Id, tid }
-          )
+          // 62-11 (D-08, assumption A5): above the vrg threshold, the whole sibling set is
+          // seeded HERE, inside this SAME per-request envelope — one open registrant Task per
+          // CURRENT vrg holder, the seeding officer included (initiatorUserId null, A5), rather
+          // than only the legacy single Task. readSessionThreshold reads the AdminSigning('vrg')
+          // row just inserted above — visible on this SAME handle before COMMIT (62-07 PROBE-A11).
+          const threshold = await readSessionThreshold(ctx.db, nonce, 'vrg')
+          if (threshold <= 1) {
+            // Threshold-1 path: byte-for-byte unchanged (the legacy single seeded Task).
+            await ctx.db.exec(
+              `insert into Task (Id, UserId, Type, SignatureType, SigningNonce, IsCompleted)
+               with context IsMutationValid = true, Tid = :tid
+               values (:id, :userId, 'signature', 'registrant', :nonce, 0)`,
+              { id: taskId, userId, nonce, tid }
+            )
+            await ctx.db.exec(
+              `insert into RegistrantSignatureTaskExtension (TaskId, RequestId)
+               with context Tid = :tid
+               values (:taskId, :requestId)`,
+              { taskId, requestId: row.Id, tid }
+            )
+          } else {
+            // Threshold > 1 (D-08/D-12): fan out through the ONE shared helper. A FanOutError
+            // (e.g. 'unreachable-at-birth') falls into the existing CR-04 catch below: ROLLBACK,
+            // skipped++, nothing logged — the request stays 'p' and unseeded, retried on the
+            // next pull. Do NOT change the `not exists` work-set predicate or the tally fields.
+            await drainDeferredChecks(ctx.db)
+            await fanOutSignatureTasks(
+              ctx,
+              {
+                authorityId: row.AuthorityId,
+                scope: 'vrg',
+                nonce,
+                initiatorUserId: null,
+                signatureType: 'registrant',
+                taskTid: tid,
+                insertExtension: async (fanOutTaskId: string) => {
+                  await ctx.db.exec(
+                    `insert into RegistrantSignatureTaskExtension (TaskId, RequestId)
+                     with context Tid = :tid
+                     values (:taskId, :requestId)`,
+                    { taskId: fanOutTaskId, requestId: row.Id, tid }
+                  )
+                },
+              },
+              { ownsTransaction: false }
+            )
+          }
           await ctx.db.exec('COMMIT')
           seeded++
         } catch (err) {
@@ -647,7 +752,16 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
     // tasks the correct task row (and therefore the correct AdminSigning
     // digest) is resolved — not an arbitrary LIMIT-1 row.
     let taskRow: { Id: string; SigningNonce: string } | undefined
-    if (task.signatureType === 'ballot') {
+    if (task.signatureType === 'intake-policy' || task.signatureType === 'association') {
+      // Schema version 2: these tasks name their session; one officer may hold several.
+      const signingNonce = taskSigningNonce(task)
+      taskRow = signingNonce === undefined ? undefined : await findPendingTaskRowByNonce(this.ctx!.db, task.userId, task.signatureType, signingNonce)
+      if (!taskRow) {
+        throw new Error(
+          `SignatureTasksEngine.completeSignature: no pending ${task.signatureType} task for user=${task.userId}`
+        )
+      }
+    } else if (task.signatureType === 'ballot') {
       const ballotId = (task as BallotSignatureTask).ballot.proposed.id
       taskRow = await this.ctx!.db
         .prepare(
@@ -695,6 +809,22 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
       if (!taskRow) {
         throw new Error(
           `SignatureTasksEngine.completeSignature: no pending registrant task for user=${task.userId} requestId=${requestId}`
+        )
+      }
+    } else if (
+      task.signatureType === 'admin' &&
+      (task as AdminSignatureTask).authority?.id !== undefined &&
+      (task as AdminSignatureTask).administration?.proposed?.effectiveAt !== undefined
+    ) {
+      // 62-13 (D-09, T-62-13-04): disambiguate by (AuthorityId, proposed AdminEffectiveAt) —
+      // D-09 keeps every reached sibling open, so one officer can hold several pending admin
+      // tasks for DIFFERENT proposals at once. An arbitrary LIMIT-1 row here would let an
+      // officer sign the WRONG proposal. A join-miss base task (no `authority`) falls through
+      // to the generic branch below, unchanged (WR-01).
+      taskRow = await findPendingAdminTaskRow(this.ctx!.db, task as AdminSignatureTask)
+      if (!taskRow) {
+        throw new Error(
+          `SignatureTasksEngine.completeSignature: no pending admin task for user=${task.userId} authorityId=${(task as AdminSignatureTask).authority?.id}`
         )
       }
     } else {
@@ -780,31 +910,160 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
           'SignatureTasksEngine.completeSignature: registrant decision checklist does not satisfy the D-07 gate (empty, or "none" combined with a substantive item)'
         )
       }
-      try {
-        await this.resolveAcceptableRegistrantApproval(taskRow.Id as string)
-      } catch (err) {
-        this.rethrow(err, 'completeSignature (registrant pre-check)')
+
+      // 62-11 (D-10): the late-signature path. When this session has ALREADY reached its
+      // threshold AND the request is already decided ('a'), the pre-check below is skipped —
+      // the crossing officer's accept already proved the payload acceptable, and no mint can
+      // follow this accept because the finalize gate (further down) is off for this shape. Every
+      // OTHER accept (including the FIRST, below-threshold ones, and any accept against a request
+      // that is not yet 'a') still runs the FULL pre-check — WR-19, WR-22, CR-02, CR-03 and
+      // WR-20 stay in force for every accept that could possibly mint.
+      const preStatus = await this.signingEngine.getSigningStatus(nonce)
+      const preRequestStatus = await this.readRegistrantRequestStatus(taskRow.Id as string)
+      const isLateSignature = preStatus?.reached === true && preRequestStatus === 'a'
+      if (!isLateSignature) {
+        try {
+          await this.resolveAcceptableRegistrantApproval(taskRow.Id as string)
+        } catch (err) {
+          // R2/D-04/D-05 (57-02), and D-44 (62-19): let RegistrantAlreadyExistsError and
+          // RegistrationDuplicateError through undecorated — this.rethrow() below wraps any plain
+          // Error into a fresh `new Error(...)` and would destroy the instanceof check each typed
+          // error exists to provide.
+          if (err instanceof RegistrantAlreadyExistsError || err instanceof RegistrationDuplicateError || err instanceof RegistrationContentAccessError || err instanceof RequesterSignatureUnverifiableError) {
+            throw err
+          }
+          this.rethrow(err, 'completeSignature (registrant pre-check)')
+        }
       }
+    }
+
+    // 57-08 (Trigger B pre-check), explanation updated 62-03/62-13: the admin accept path
+    // REQUIRES the reusable per-digest callback — promotion (applyAdminProposal) mints its OWN
+    // promotion digest (62-03's single full-roster promotion session), which a single
+    // pre-computed Signature cannot cover. Checked BEFORE sign() below, alongside the
+    // registrant guard above, so a refusable accept never spends the officer's header
+    // signature.
+    if (result.isAccepted && task.signatureType === 'admin' && !result.sign) {
+      throw new Error(
+        'SignatureTasksEngine.completeSignature: admin accept requires result.sign (a reusable per-digest signing callback) — promotion mints its own promotion digest, which a single pre-computed Signature cannot cover'
+      )
     }
 
     // D-12: Branch on result.isAccepted.
     // Accept path only — call sign() to insert OfficerSignature and (at threshold=1)
     // auto-complete AdminSignature. Do NOT call sign() on reject: a rejection that
     // advances the signing session is a critical integrity hole (D-12 threat).
+    let thresholdReached = false
+    // 62-11 (D-10): the full {thresholdReached, crossedNow} outcome, needed by the ballot and
+    // registrant finalize gates below. Only set on the non-admin path (the admin branch keeps
+    // its own P7-composed sign() call, unchanged and untouched by this plan — 62-13 owns it).
+    let signOutcome: SignOutcome | undefined
     if (result.isAccepted) {
-      await this.signingEngine.sign(nonce, result.signature)
+      if (task.signatureType === 'admin') {
+        // 57-08 (Trigger B, P7-composed transaction): sign() and the
+        // promotion attempt share ONE explicit transaction. Task 1's P7
+        // probe (57-08-SUMMARY.md) proved an uncommitted AdminSignature row
+        // IS visible on the same handle before COMMIT, so this composition
+        // closes the "threshold reached but administration not applied"
+        // window rather than leaving it open — every OTHER signature type
+        // keeps sign()'s unwrapped, self-owned-transaction shape byte-for-
+        // byte (the `else` branch below is the exact prior call, unchanged).
+        await this.ctx!.db.exec('BEGIN')
+        try {
+          const adminOutcome = await this.signingEngine.signWithOutcome(nonce, result.signature, { ownsTransaction: false })
+          thresholdReached = adminOutcome.thresholdReached
+          // 62-13 (D-10): promote once — on the call that CROSSED the threshold (crossedNow), or
+          // on a LATER accept when the threshold is reached but the Admin row is still missing.
+          // The resume case: a crossing whose promotion was refused with AdminPromotionError (or
+          // whose composed transaction rolled back on a plain error, below) committed the
+          // signature without an Admin row, so the next accept re-attempts. A late co-signature
+          // after a COMPLETE promotion is recorded only — never re-invokes applyAdminProposal.
+          // Mirrors 62-11's ceb/vrg gates (crossedNow, or thresholdReached with an incomplete
+          // artifact) verbatim, per 62-11-SUMMARY.md's handoff.
+          if (adminOutcome.crossedNow || (adminOutcome.thresholdReached && !(await this.isAdminPromotionComplete(taskRow.Id)))) {
+            try {
+              // WR-01: the task-listing path above deliberately pushes a BASE
+              // SignatureTask — no `authority` — when the
+              // AdminSignatureTaskExtension → Authority join misses, and that base
+              // still carries signatureType 'admin'. Feeding that `undefined`
+              // straight into AuthorityEngine made applyAdminProposal throw a bare
+              // TypeError on `this.authority.id`; because a TypeError is not an
+              // AdminPromotionError it fell to the `throw` below and rolled the
+              // whole composed transaction back, DESTROYING the officer's real,
+              // just-produced signature. Treat a join-miss exactly as T-57-08-06
+              // treats a refused promotion: record it, never silently, never
+              // thrown, so the signature still commits.
+              const adminAuthority = (task as AdminSignatureTask).authority
+              if (adminAuthority?.id === undefined) {
+                console.warn(
+                  `SignatureTasksEngine.completeSignature (finalize admin): promotion skipped for nonce ${nonce}: this task carries no authority, so the AdminSignatureTaskExtension → Authority join must have missed when the task was listed. The officer's signature itself was NOT affected.`,
+                )
+              } else {
+                await new AuthorityEngine(adminAuthority, this.ctx!).applyAdminProposal(
+                  nonce,
+                  result.sign!,
+                  { ownsTransaction: false }
+                )
+              }
+            } catch (promotionErr) {
+              if (promotionErr instanceof AdminPromotionError) {
+                // 57-08 (Trigger B): mirrors Trigger A's (proposeAdmin) discipline
+                // exactly (T-57-08-06) — a co-signer's real, valid signature must
+                // not be destroyed by a promotion that legitimately cannot apply
+                // (e.g. the D-03 .init-officer case). Recorded via console.warn,
+                // never silent, never thrown; the officer's OfficerSignature and
+                // (at threshold) AdminSignature rows still commit below.
+                console.warn(
+                  `SignatureTasksEngine.completeSignature (finalize admin): promotion refused for nonce ${nonce}: ${promotionErr.reason}. The officer's signature itself was NOT affected.`,
+                )
+              } else {
+                throw promotionErr
+              }
+            }
+          }
+          await this.ctx!.db.exec('COMMIT')
+        } catch (err) {
+          await this.ctx!.db.exec('ROLLBACK')
+          this.rethrow(err, 'completeSignature (finalize admin)')
+        }
+      } else {
+        // 62-11 (D-10): signWithOutcome, not sign() — the ballot/registrant finalize gates
+        // below need crossedNow, not just the boolean. sign()'s own Promise<boolean> contract
+        // (thresholdReached) is preserved via signOutcome.thresholdReached below.
+        signOutcome = await this.signingEngine.signWithOutcome(nonce, result.signature)
+        thresholdReached = signOutcome.thresholdReached
+      }
     }
 
-    // Ballot finalize branch (D-01, D-08): after sign() succeeds (AdminSignature inserted at
-    // threshold=1), INSERT Ballot first then per-row signed Questions and Options.
+    // Ballot finalize branch (D-01, D-08, 62-11 D-09/D-10/D-12): after sign() succeeds, INSERT
+    // Ballot first then per-row signed Questions and Options.
     // This runs BEFORE the Task-complete update so options are promoted before the Task closes.
+    //
+    // Gate (D-10): finalize runs ONLY on `crossedNow` (THIS call inserted the AdminSignature —
+    // the normal path, every threshold), OR on `thresholdReached` with the artifact still
+    // incomplete (WR-05: a retry after a failed finalize returns crossedNow=false because the
+    // AdminSignature already exists from the FIRST attempt — `isBallotFinalizeComplete` is what
+    // keeps that retry retryable rather than silently skipped). A below-threshold accept
+    // (`thresholdReached === false`) only records the vote and completes the Task below — this
+    // is exactly the CONTEXT "Specific Ideas" defect this plan fixes: the first accept at
+    // threshold 2 used to run finalize unconditionally and throw on Ballot.MutationValid.
     if (result.isAccepted && task.signatureType === 'ballot') {
       try {
-        // 39-03 (DEBT-11, D-06): thread the caller's optional reusable
-        // per-digest signing callback into finalizeBallot so per-row
-        // Question/Option AdminSigning rows can carry a REAL signature
-        // instead of the legacy placeholder (see SignatureResult.sign doc).
-        await this.finalizeBallot(taskRow.Id as string, nonce, result.sign)
+        const ballotExtRow = await this.ctx!.db
+          .prepare('select BallotId from BallotSignatureTaskExtension where TaskId = :taskId')
+          .get({ taskId: taskRow.Id })
+        const ballotId = ballotExtRow?.BallotId as string | undefined
+        const shouldFinalize = ballotId !== undefined && (
+          signOutcome?.crossedNow === true ||
+          (signOutcome?.thresholdReached === true && !(await this.isBallotFinalizeComplete(ballotId)))
+        )
+        if (shouldFinalize) {
+          // 39-03 (DEBT-11, D-06): thread the caller's optional reusable
+          // per-digest signing callback into finalizeBallot so per-row
+          // Question/Option AdminSigning rows can carry a REAL signature
+          // instead of the legacy placeholder (see SignatureResult.sign doc).
+          await this.finalizeBallot(taskRow.Id as string, nonce, result.sign)
+        }
       } catch (err) {
         this.rethrow(err, 'completeSignature (finalize)')
       }
@@ -828,11 +1087,43 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
     //
     // result.sign/result.decision were already validated above, before sign() — do not re-check
     // them here.
+    //
+    // 62-11 (D-10): the SAME crossedNow-or-incomplete gate as the ballot branch above, and the
+    // SAME WR-05 retry guarantee. A below-threshold accept (the CONTEXT "Specific Ideas" defect
+    // for vrg) only records the vote and completes the Task below — it never reaches finalize.
+    // Also 62-11 note: at threshold above 1, only the CROSSING officer's D-07 checklist is
+    // digested into VerificationCid — earlier accepters' checklists are recorded as votes
+    // (OfficerSignature rows) but are not themselves persisted into the decision record (open
+    // question 2).
     if (result.isAccepted && task.signatureType === 'registrant') {
+      const shouldFinalizeRegistrant = signOutcome?.crossedNow === true ||
+        (signOutcome?.thresholdReached === true && (await this.readRegistrantRequestStatus(taskRow.Id as string)) !== 'a')
+      // Below threshold, or an already-finalized late signature: nothing more to do here — the
+      // unconditional Task-complete update below still runs either way.
+      if (shouldFinalizeRegistrant) {
+        try {
+          await this.finalizeRegistrantApproval(taskRow.Id as string, result.decision!, result.sign!, nonce)
+        } catch (err) {
+          // R2/D-04/D-05 (57-02), and D-44 (62-19): see the matching note on the pre-check call
+          // site above — finalizeRegistrantApproval's own defence-in-depth guard, and register()
+          // itself, can both throw RegistrantAlreadyExistsError; resolveAcceptableRegistrantApproval
+          // (called internally) can throw RegistrationDuplicateError. Neither may be re-wrapped.
+          if (err instanceof RegistrantAlreadyExistsError || err instanceof RegistrationDuplicateError || err instanceof RegistrationContentAccessError || err instanceof RequesterSignatureUnverifiableError) {
+            throw err
+          }
+          this.rethrow(err, 'completeSignature (finalize registrant)')
+        }
+      }
+    }
+
+    // Schema version 2: a co-signed intake-policy change takes effect once its session has reached
+    // the threshold. Applied on the crossing accept, and again (idempotently) on any later accept,
+    // so a crash between the two is repaired by the next co-signer. Never on a rejection.
+    if (result.isAccepted && task.signatureType === 'intake-policy' && signOutcome?.thresholdReached === true) {
       try {
-        await this.finalizeRegistrantApproval(taskRow.Id as string, result.decision!, result.sign!)
+        await applyReachedIntakePolicyProposal(this.ctx!.db, nonce)
       } catch (err) {
-        this.rethrow(err, 'completeSignature (finalize registrant)')
+        this.rethrow(err, 'completeSignature (apply intake policy)')
       }
     }
 
@@ -905,21 +1196,31 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
     // Digest(context.Tid, …) matches the AdminSigning.Digest baked in at submitBallotForConfirmation
     // (Pitfall 2). The same nonce (headerNonce) + same Description/Districts from ProposedBallot
     // reproduces the byte-identical digest tuple.
-    await this.ctx!.db.exec(
-      `insert into Ballot (Id, ElectionId, AuthorityId, Description, Districts)
-       with context SigningNonce = :nonce, Tid = :headerTid, now = :now
-       values (:id, :electionId, :authorityId, :description, :districts)`,
-      {
-        nonce: headerNonce,
-        headerTid: BALLOT_HEADER_TID,
-        id: pbRow.Id,
-        electionId: pbRow.ElectionId,
-        authorityId: pbRow.AuthorityId,
-        description: pbRow.Description,
-        districts: pbRow.Districts,
-        now,
-      }
-    )
+    //
+    // 62-11 (D-10, resumable/idempotent second defence): skip the insert when the Ballot row
+    // already exists — a retry after a failed finalize (WR-05), a second crosser racing the
+    // first, or a direct re-invocation (C11) must never re-attempt an INSERT that would collide
+    // on the primary key or re-spend AdminSigning/OfficerSignature rows this call does not own.
+    const existingBallot = await this.ctx!.db
+      .prepare('select 1 as x from Ballot where Id = :id')
+      .get({ id: pbRow.Id })
+    if (!existingBallot) {
+      await this.ctx!.db.exec(
+        `insert into Ballot (Id, ElectionId, AuthorityId, Description, Districts)
+         with context SigningNonce = :nonce, Tid = :headerTid, now = :now
+         values (:id, :electionId, :authorityId, :description, :districts)`,
+        {
+          nonce: headerNonce,
+          headerTid: BALLOT_HEADER_TID,
+          id: pbRow.Id,
+          electionId: pbRow.ElectionId,
+          authorityId: pbRow.AuthorityId,
+          description: pbRow.Description,
+          districts: pbRow.Districts,
+          now,
+        }
+      )
+    }
 
     // Resolve AdminEffectiveAt for per-question/option AdminSigning inserts.
     const adminRow = await this.ctx!.db
@@ -937,8 +1238,11 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
       // Resolve defaults JS-side (mirrors seedQuestion's Pitfall 4 fix — avoids binding NULL into
       // default-valued columns, which trips the Quereus 3.3.0 NULL-bug):
       const dependsOn = q.dependsOn ? JSON.stringify(q.dependsOn) : null
-      const optionRange = q.optionRange ? JSON.stringify(q.optionRange) : '{1, 1}'
-      const scoreRange = q.scoreRange ? JSON.stringify(q.scoreRange) : null
+      // Ranges are written in pg range notation via formatPgRange, never JSON (UAT gap 1):
+      // getBallotDetails reads them with parsePgRange. The Digest and the INSERT bind
+      // these same variables (Question.MutationValid recompute).
+      const optionRange = q.optionRange ? formatPgRange(q.optionRange) : '{1, 1}'
+      const scoreRange = q.scoreRange ? formatScoreRange(q.scoreRange) : null
       const grouping = q.group ?? null
       const sequence = q.sequence ?? null
       // Required is now `integer default 1` (37-04 / D-05b re-attach fix — was
@@ -975,80 +1279,98 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
         sequence,
         required,
       }
-      const {
-        userId: qUserId,
-        signerKey: qSignerKey,
-        signature: qSignature,
-        isPlaceholder: qIsPlaceholder,
-      } = await this.resolveRowSignature(
-        'select Digest(1, :ballotId, :code, :title, :instructions, :dependsOn, :type, :optionRange, :scoreRange, :grouping, :sequence, :required) as d',
-        qDigestArgs,
-        'Question',
-        sign
-      )
-      const qNonce = (globalThis as { crypto: { randomUUID: () => string } }).crypto.randomUUID()
-      await this.ctx!.db.exec(
-        `insert into AdminSigning (
-          Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
-        )
-        with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = :isPlaceholderSignature
-        values (
-          :nonce, :authorityId, :adminEffectiveAt, 'ceb',
-          Digest(1, :ballotId, :code, :title, :instructions, :dependsOn, :type, :optionRange, :scoreRange, :grouping, :sequence, :required),
-          :userId, :signerKey, :signature
-        )`,
-        {
-          nonce: qNonce,
-          authorityId: pbRow.AuthorityId,
-          adminEffectiveAt,
-          ...qDigestArgs,
+
+      // 62-11 (D-10, resumable/idempotent): skip the whole AdminSigning+signDerived+insert trio
+      // when this Question row already exists — a retry (WR-05) or a direct re-invocation (C11)
+      // must not re-spend a signature or collide on (BallotId, Code).
+      const existingQuestion = await this.ctx!.db
+        .prepare('select 1 as x from Question where BallotId = :ballotId and Code = :code')
+        .get({ ballotId, code: q.code })
+      if (!existingQuestion) {
+        const {
           userId: qUserId,
           signerKey: qSignerKey,
           signature: qSignature,
-          isPlaceholderSignature: qIsPlaceholder,
-          now,
-        }
-      )
-
-      // Step 3b: sign to create AdminSignature (threshold=1 auto-completes)
-      // 999.1 R-02/R-04 (DEBT-11): same real-vs-placeholder branch as above — the
-      // OfficerSignature counter-signature verifies against this SAME AdminSigning
-      // Digest (OfficerSignature.SignatureValid), so reuse the identical signature
-      // bytes when real-signed.
-      const qSig = {
-        signerUserId: qUserId ?? '',
-        signerKey: qSignerKey,
-        signature: qSignature,
-      }
-      await this.signingEngine!.sign(qNonce, qSig, { isPlaceholderSignature: qIsPlaceholder })
-
-      // Step 3c: INSERT Question row (Ballot must already exist — BallotIdValid constraint, D-08)
-      await this.ctx!.db.exec(
-        `insert into Question (
-          BallotId, Code, Title, Instructions, DependsOn, Type,
-          OptionRange, ScoreRange, Grouping, Sequence, Required
+          isPlaceholder: qIsPlaceholder,
+        } = await this.resolveRowSignature(
+          'select Digest(1, :ballotId, :code, :title, :instructions, :dependsOn, :type, :optionRange, :scoreRange, :grouping, :sequence, :required) as d',
+          qDigestArgs,
+          'Question',
+          sign
         )
-        with context SigningNonce = :nonce, Tid = 1, now = :now
-        values (
-          :ballotId, :code, :title, :instructions, :dependsOn, :type,
-          :optionRange, :scoreRange, :grouping, :sequence, :required
-        )`,
-        {
-          nonce: qNonce,
-          ballotId,
-          code: q.code,
-          title: q.title,
-          instructions: q.instructions,
-          dependsOn,
-          type: questionType,
-          optionRange,
-          scoreRange,
-          grouping,
-          sequence,
-          required,
+        const qNonce = (globalThis as { crypto: { randomUUID: () => string } }).crypto.randomUUID()
+        const qIsSignerKeyValid = await adminSigningKeyValidity(this.ctx!.db, {
+          userId: qUserId ?? '',
+          signerKey: qSignerKey,
           now,
+          isPlaceholderSignature: qIsPlaceholder,
+        })
+        await this.ctx!.db.exec(
+          `insert into AdminSigning (
+            Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
+          )
+          with context now = :now, IsSignerKeyValid = :isSignerKeyValid, IsPlaceholderSignature = :isPlaceholderSignature
+          values (
+            :nonce, :authorityId, :adminEffectiveAt, 'ceb',
+            Digest(1, :ballotId, :code, :title, :instructions, :dependsOn, :type, :optionRange, :scoreRange, :grouping, :sequence, :required),
+            :userId, :signerKey, :signature
+          )`,
+          {
+            nonce: qNonce,
+            authorityId: pbRow.AuthorityId,
+            adminEffectiveAt,
+            ...qDigestArgs,
+            userId: qUserId,
+            signerKey: qSignerKey,
+            signature: qSignature,
+            isPlaceholderSignature: qIsPlaceholder,
+            now,
+            isSignerKeyValid: qIsSignerKeyValid,
+          }
+        )
+
+        // Step 3b: signDerived to create AdminSignature (62-07 Finding 4.1 / 62-11 handoff (a)) —
+        // this row inherits satisfaction from the ALREADY-reached header (headerNonce), rather
+        // than recounting this derived session's own (typically threshold-1, non-holder) signer
+        // set. 999.1 R-02/R-04 (DEBT-11): same real-vs-placeholder branch as above — the
+        // OfficerSignature counter-signature verifies against this SAME AdminSigning Digest
+        // (OfficerSignature.SignatureValid), so reuse the identical signature bytes when
+        // real-signed.
+        const qSig = {
+          signerUserId: qUserId ?? '',
+          signerKey: qSignerKey,
+          signature: qSignature,
         }
-      )
+        await this.signingEngine!.signDerived(qNonce, qSig, headerNonce, { isPlaceholderSignature: qIsPlaceholder })
+
+        // Step 3c: INSERT Question row (Ballot must already exist — BallotIdValid constraint, D-08)
+        await this.ctx!.db.exec(
+          `insert into Question (
+            BallotId, Code, Title, Instructions, DependsOn, Type,
+            OptionRange, ScoreRange, Grouping, Sequence, Required
+          )
+          with context SigningNonce = :nonce, Tid = 1, now = :now
+          values (
+            :ballotId, :code, :title, :instructions, :dependsOn, :type,
+            :optionRange, :scoreRange, :grouping, :sequence, :required
+          )`,
+          {
+            nonce: qNonce,
+            ballotId,
+            code: q.code,
+            title: q.title,
+            instructions: q.instructions,
+            dependsOn,
+            type: questionType,
+            optionRange,
+            scoreRange,
+            grouping,
+            sequence,
+            required,
+            now,
+          }
+        )
+      }
 
       // Step 4: per-option promotion — INSERT AFTER the parent Question (D-08, CLOSED).
       //
@@ -1090,6 +1412,14 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
           image: oImage,
           video: oVideo,
         }
+
+        // 62-11 (D-10, resumable/idempotent): skip the whole trio when this Option row already
+        // exists — same reasoning as the Question skip above.
+        const existingOption = await this.ctx!.db
+          .prepare('select 1 as x from Option where BallotId = :ballotId and QuestionCode = :questionCode and Code = :code')
+          .get({ ballotId, questionCode: q.code, code: o.code })
+        if (existingOption) continue
+
         const {
           userId: oUserId,
           signerKey: oSignerKey,
@@ -1102,12 +1432,18 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
           sign
         )
         const oNonce = (globalThis as { crypto: { randomUUID: () => string } }).crypto.randomUUID()
+        const oIsSignerKeyValid = await adminSigningKeyValidity(this.ctx!.db, {
+          userId: oUserId ?? '',
+          signerKey: oSignerKey,
+          now,
+          isPlaceholderSignature: oIsPlaceholder,
+        })
         try {
           await this.ctx!.db.exec(
             `insert into AdminSigning (
               Nonce, AuthorityId, AdminEffectiveAt, Scope, Digest, UserId, SignerKey, Signature
             )
-            with context now = :now, IsSignerKeyValid = true, IsPlaceholderSignature = :isPlaceholderSignature
+            with context now = :now, IsSignerKeyValid = :isSignerKeyValid, IsPlaceholderSignature = :isPlaceholderSignature
             values (
               :nonce, :authorityId, :adminEffectiveAt, 'ceb',
               Digest(1, :ballotId, :questionCode, :code, :sequence, :title, :details, :infoURL, :image, :video),
@@ -1123,21 +1459,23 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
               signature: oSignature,
               isPlaceholderSignature: oIsPlaceholder,
               now,
+              isSignerKeyValid: oIsSignerKeyValid,
             }
           )
         } catch (err) {
           this.rethrow(err, 'finalizeBallot (option AdminSigning)')
         }
 
-        // Step 4b: sign to create AdminSignature (threshold=1 auto-completes)
-        // 999.1 R-02/R-04 (DEBT-11): reuse the same real signature bytes as the
-        // AdminSigning row above (OfficerSignature verifies against that same Digest).
+        // Step 4b: signDerived to create AdminSignature (62-07 Finding 4.1 / 62-11 handoff (a)) —
+        // same header-inheritance reasoning as the Question path above. 999.1 R-02/R-04
+        // (DEBT-11): reuse the same real signature bytes as the AdminSigning row above
+        // (OfficerSignature verifies against that same Digest).
         const oSig = {
           signerUserId: oUserId ?? '',
           signerKey: oSignerKey,
           signature: oSignature,
         }
-        await this.signingEngine!.sign(oNonce, oSig, { isPlaceholderSignature: oIsPlaceholder })
+        await this.signingEngine!.signDerived(oNonce, oSig, headerNonce, { isPlaceholderSignature: oIsPlaceholder })
 
         // Step 4c: INSERT Option row (Ballot + parent Question already exist — constraints satisfied)
         try {
@@ -1169,6 +1507,62 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
       }
     }
     // D-04: ProposedBallot is NOT deleted — retained for history.
+  }
+
+  /**
+   * 62-11 (D-10) — true only when `finalizeBallot`'s entire artifact already exists for
+   * `ballotId`: the Ballot row, every ProposedBallot question code has a Question row, and every
+   * one of that question's options has an Option row. Used by `completeSignature`'s finalize
+   * gate so a `thresholdReached` (but not `crossedNow`) accept — the WR-05 retry shape — still
+   * finalizes when the PRIOR attempt left the artifact incomplete, while a genuinely late
+   * signature (artifact already complete) takes the recorded, non-finalizing path (D-10).
+   */
+  private async isBallotFinalizeComplete (ballotId: string): Promise<boolean> {
+    const ballotRow = await this.ctx!.db.prepare('select 1 as x from Ballot where Id = :id').get({ id: ballotId })
+    if (!ballotRow) return false
+
+    const pbRow = await this.ctx!.db
+      .prepare('select Questions from ProposedBallot where Id = :ballotId')
+      .get({ ballotId }) as { Questions: string | null } | undefined
+    const questions = parseJsonOr<Question[]>(pbRow?.Questions, [], 'ProposedBallot.Questions')
+
+    for (const q of questions) {
+      const questionCount = await this.ctx!.db
+        .prepare('select count(*) as n from Question where BallotId = :ballotId and Code = :code')
+        .get({ ballotId, code: q.code })
+      if (Number(questionCount?.n ?? 0) === 0) return false
+
+      const expectedOptions = q.options?.length ?? 0
+      if (expectedOptions > 0) {
+        const optionCount = await this.ctx!.db
+          .prepare('select count(*) as n from Option where BallotId = :ballotId and QuestionCode = :code')
+          .get({ ballotId, code: q.code })
+        if (Number(optionCount?.n ?? 0) < expectedOptions) return false
+      }
+    }
+    return true
+  }
+
+  /**
+   * 62-13 (D-10) — true only when the admin promotion artifact already exists for `taskId`'s
+   * proposal: both the `AdminSignatureTaskExtension` row (AuthorityId, AdminEffectiveAt) and a
+   * live `Admin` row at that key. Mirrors `isBallotFinalizeComplete`'s shape exactly (a
+   * `count(*)`/`select 1` probe against the artifact table, not a shared cross-scope helper).
+   * Used by `completeSignature`'s admin gate so a `thresholdReached` (but not `crossedNow`)
+   * accept — the resume shape, after a refused or failed promotion — still re-attempts
+   * promotion, while a genuinely late signature (the Admin row already exists) takes the
+   * recorded, non-promoting path (D-10). Returns `false` (never promoted) when either row is
+   * missing.
+   */
+  private async isAdminPromotionComplete (taskId: string): Promise<boolean> {
+    const extRow = await this.ctx!.db
+      .prepare('select AuthorityId, AdminEffectiveAt from AdminSignatureTaskExtension where TaskId = :taskId')
+      .get({ taskId }) as { AuthorityId: string; AdminEffectiveAt: string } | undefined
+    if (!extRow) return false
+    const adminRow = await this.ctx!.db
+      .prepare('select 1 as x from Admin where AuthorityId = :authorityId and EffectiveAt = :adminEffectiveAt')
+      .get({ authorityId: extRow.AuthorityId, adminEffectiveAt: extRow.AdminEffectiveAt })
+    return !!adminRow
   }
 
   /**
@@ -1246,7 +1640,7 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
     }
     const extRow = await ctx.db
       .prepare(
-        `select E.RequestId, R.AuthorityId, R.Payload, R.Status, R.SubmittedAt, R.ReceivedAt
+        `select E.RequestId, R.AuthorityId, R.Payload, R.PayloadCid, R.Status, R.SubmittedAt, R.ReceivedAt
            from RegistrantSignatureTaskExtension E
              join RegistrationRequest R on R.Id = E.RequestId
            where E.TaskId = :taskId`
@@ -1255,6 +1649,7 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
         RequestId: string
         AuthorityId: string
         Payload: string
+        PayloadCid: string
         Status: string
         SubmittedAt: string
         ReceivedAt: string
@@ -1263,7 +1658,8 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
       throw new Error(`SignatureTasksEngine.resolveAcceptableRegistrantApproval: no RegistrantSignatureTaskExtension for taskId=${taskId}`)
     }
     const requestId = extRow.RequestId
-    const submittedAt = restoreCanonicalDatetime(extRow.SubmittedAt)
+    // The exact spelling the requester signed (resolveSignedSubmittedAt); ReceivedAt is engine-written.
+    const submittedAt = await resolveSignedSubmittedAt(this.ctx!.db, 'RegistrationRequest', requestId, extRow.SubmittedAt)
     const receivedAt = restoreCanonicalDatetime(extRow.ReceivedAt)
 
     // A decided request is not re-decidable — DecisionValid enforces this too; this engine-side
@@ -1274,9 +1670,25 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
       )
     }
 
-    const init = parseJsonOr<RegisterInit | undefined>(extRow.Payload, undefined, 'RegistrationRequest.Payload')
-    if (!init) {
-      throw new Error(`SignatureTasksEngine.resolveAcceptableRegistrantApproval: RegistrationRequest ${requestId} Payload failed to parse`)
+    // D-49 (62-31): open BEFORE every other gate below, including the D-44 closure check — an
+    // officer who cannot read this request's payload must never be told anything MORE specific
+    // about it (closed-as-duplicate, authority mismatch, ...) than "cannot be approved here".
+    const payloadRead = await openRegistrationPayload(ctx.db, ctx.intakeOpener, { requestId, payloadCid: extRow.PayloadCid, stored: extRow.Payload })
+    if (payloadRead.access !== 'opened' && payloadRead.access !== 'unsealed') {
+      throw new RegistrationContentAccessError(payloadRead.access, requestId)
+    }
+    const init = payloadRead.payload
+
+    // D-44 (62-19): a request closed or closing as a duplicate cannot be decided — checked BEFORE
+    // sign() (this is called from completeSignature's pre-check, ahead of any signature spend).
+    const duplicateClosure = await readDuplicateClosure(ctx.db, requestId, extRow.AuthorityId)
+    if (duplicateClosure) {
+      throw new RegistrationDuplicateError(
+        'closed-as-duplicate',
+        requestId,
+        'This request was closed as a duplicate of another request and can no longer be decided.',
+        duplicateClosure.closedByRequestId ?? undefined
+      )
     }
 
     if (init.registrant?.authorityId !== extRow.AuthorityId) {
@@ -1369,32 +1781,68 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
       }
     }
 
+    // R2/D-04/D-05 (57-02): kept as defence-in-depth, NOT redundant — this call runs
+    // BEFORE the header AdminSigning/officer signature is spent (completeSignature calls
+    // this SAME gate ahead of signingEngine.sign(), T-48-34-01/02), so a colliding
+    // registrantId is refused before the officer's signature is consumed. register()'s
+    // OWN pre-BEGIN guard (registration-engine.ts) fires later — only once
+    // finalizeRegistrantApproval actually calls register(), which is after the signature
+    // has already been spent. Throws the SAME typed error register() throws so both
+    // paths are instanceof-identical and there is exactly one message for this condition
+    // (must_haves: "Only ONE error message exists for the already-registered condition").
     const existingRegistrant = await ctx.db
       .prepare('select 1 from Registrant where Id = :id')
       .get({ id: init.registrant.id })
     if (existingRegistrant) {
-      throw new Error(
-        `SignatureTasksEngine.resolveAcceptableRegistrantApproval: RegistrationRequest ${requestId} payload names an already-existing Registrant record that this approval did not create`
-      )
+      throw new RegistrantAlreadyExistsError(init.registrant.id, requestId)
     }
 
     return { requestId, authorityId: extRow.AuthorityId, init, submittedAt, receivedAt, decidingOfficerUserId }
   }
 
   /**
+   * 62-11 (D-10) — the RegistrationRequest.Status of the request a Task's
+   * RegistrantSignatureTaskExtension points to, or `undefined` if the extension row is missing.
+   * Used by `completeSignature`'s late-signature detection and finalize gate, and by
+   * `finalizeRegistrantApproval`'s own idempotency guard below.
+   */
+  private async readRegistrantRequestStatus (taskId: string): Promise<string | undefined> {
+    const row = await this.ctx!.db
+      .prepare(
+        `select R.Status from RegistrantSignatureTaskExtension E
+           join RegistrationRequest R on R.Id = E.RequestId
+           where E.TaskId = :taskId`
+      )
+      .get({ taskId })
+    return row?.Status as string | undefined
+  }
+
+  /**
    * D-05/D-07 — the registrant accept ceremony. `RegistrationEngine.register()` is reused
-   * COMPLETELY UNCHANGED — it was always correct, and the defect this phase corrects was only
+   * UNCHANGED except for the optional `headerNonce` passthrough (derived-session inheritance,
+   * research Finding 4.1) — it was always correct, and the defect this phase corrects was only
    * ever that the voter app supplied a founding-officer key it held. This method changes WHO
    * DRIVES `register()`, not what `register()` does. A second `register()`-shaped write path
    * (an inline `insert into Registrant`, a copy of `register()`'s body, etc.) must never be
    * created here.
+   *
+   * 62-11 (D-10) — idempotent: if the request is ALREADY decided ('a'), this is a no-op. Every
+   * other status ('p', 'r') flows into the unchanged pre-check below, which still refuses a
+   * rejected ('r') request and the CR-03 id collision.
    */
   private async finalizeRegistrantApproval (
     taskId: string,
     decision: RegistrationRequestDecision,
-    sign: (digest: Uint8Array) => Promise<Signature>
+    sign: (digest: Uint8Array) => Promise<Signature>,
+    headerNonce: string
   ): Promise<void> {
     const ctx = this.ctx!
+
+    // 62-11 (D-10, second defence against concurrent crossers/retries): if the decision already
+    // landed, there is nothing left to finalize.
+    if ((await this.readRegistrantRequestStatus(taskId)) === 'a') {
+      return
+    }
 
     // T-48-34-05: defence in depth — completeSignature already calls this SAME gate BEFORE
     // signingEngine.sign() (T-48-34-01/02), so by the time execution reaches here the payload has
@@ -1457,7 +1905,23 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
     // transitively covers the checklist. This runs under a 'vrg'-scoped AdminSigning ceremony —
     // AdminSigning.UserIdValid requires merely that the signer be some officer at that authority —
     // it does not require a 'vrg'-scoped officer specifically (Phase 999.1).
-    const decisionNonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, sign)
+    const decisionNonce = await seedSignedMutation(ctx, authorityId, 'vrg', tid, digestExpr, digestParams, sign, { headerNonce })
+
+    // D-12 (51-09): the authority OWNS the validity of a record it signs — a submitter-proposed
+    // expiration (e.g. `ConfirmationScreen.tsx:150`'s ten-year "dev posture" window) is IGNORED
+    // here, never trusted. Read through the SAME `ElectionRecordValidityPolicy`-backed helper
+    // `AssociationEngine.associate()` reads for the Association/AssociationPrivate expiration
+    // (`../association/record-validity.js`) so both record-validity sites agree, then override
+    // ALL THREE `RegisterInit` expiration fields BEFORE `register()` runs below — `register()`'s
+    // own digests are computed from `init` at call time, so overriding here (rather than after)
+    // keeps the digest and the stored row in agreement by construction; no separate re-signing
+    // step is needed.
+    const { registrantExpiration } = await resolveRecordValidity(ctx, init.electionId)
+    init.registrant.expiration = registrantExpiration
+    init.private.expiration = registrantExpiration
+    if (init.selective) {
+      init.selective.expiration = registrantExpiration
+    }
 
     // register()-then-decide ordering: register() opens its own BEGIN/COMMIT envelope and cannot
     // share a transaction with the decision UPDATE below, so the two are ordered register()-then-
@@ -1484,9 +1948,10 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
     // rather than dying at sign() — and it must, because that retryability is the entire point of
     // the WR-05 fix. The CR-03 refusal is what stops the retry from silently adopting a
     // pre-existing Registrant; it does not rely on sign() throwing.
-    // RegistrationEngine.register() — reused COMPLETELY UNCHANGED, with the reviewing officer's
-    // own device-signer callback. No wrapper, no reimplementation, no inline Registrant insert.
-    await new RegistrationEngine(ctx).register(init, sign)
+    // RegistrationEngine.register() — reused with the reviewing officer's own device-signer
+    // callback, unchanged except for the optional headerNonce passthrough (62-11, research
+    // Finding 4.1). No wrapper, no reimplementation, no inline Registrant insert.
+    await new RegistrationEngine(ctx).register(init, sign, { headerNonce })
 
     await ctx.db.exec(
       // SubmittedAt/ReceivedAt are explicitly rebound (restoreCanonicalDatetime, above) rather than
@@ -1531,7 +1996,16 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
     // tasks the correct AdminSigning.Digest is returned — not an arbitrary
     // LIMIT-1 row.
     let taskRow: { Id: string; SigningNonce: string } | undefined
-    if (task.signatureType === 'ballot') {
+    if (task.signatureType === 'intake-policy' || task.signatureType === 'association') {
+      // Schema version 2: these tasks name their session; one officer may hold several.
+      const signingNonce = taskSigningNonce(task)
+      taskRow = signingNonce === undefined ? undefined : await findPendingTaskRowByNonce(this.ctx!.db, task.userId, task.signatureType, signingNonce)
+      if (!taskRow) {
+        throw new Error(
+          `SignatureTasksEngine.getSignatureDigest: no pending ${task.signatureType} task for user=${task.userId}`
+        )
+      }
+    } else if (task.signatureType === 'ballot') {
       const ballotId = (task as BallotSignatureTask).ballot.proposed.id
       taskRow = await this.ctx!.db
         .prepare(
@@ -1580,6 +2054,20 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
           `SignatureTasksEngine.getSignatureDigest: no pending registrant task for user=${task.userId} requestId=${requestId}`
         )
       }
+    } else if (
+      task.signatureType === 'admin' &&
+      (task as AdminSignatureTask).authority?.id !== undefined &&
+      (task as AdminSignatureTask).administration?.proposed?.effectiveAt !== undefined
+    ) {
+      // 62-13 (D-09, T-62-13-04): the SAME disambiguated admin lookup completeSignature uses —
+      // an officer with several open admin tasks must be shown, and must sign, the digest of
+      // the EXACT proposal its task names.
+      taskRow = await findPendingAdminTaskRow(this.ctx!.db, task as AdminSignatureTask)
+      if (!taskRow) {
+        throw new Error(
+          `SignatureTasksEngine.getSignatureDigest: no pending admin task for user=${task.userId} authorityId=${(task as AdminSignatureTask).authority?.id}`
+        )
+      }
     } else {
       taskRow = await this.ctx!.db
         .prepare(
@@ -1614,6 +2102,34 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
     } catch (err) {
       this.rethrow(err, 'getSignatureDigest')
     }
+  }
+
+  /**
+   * 62-12 (Surface 5, D-09/D-10/D-11) — read-only co-signing status for the session behind the
+   * caller's OWN PENDING task. The nonce lookup is `findPendingTaskNonce`, deliberately the SAME
+   * lookup `getSignatureDigest` above uses, so the returned status always describes exactly the
+   * session the officer would sign. Returns `null` (never throws) when there is no ctx, no
+   * signing engine, no pending task row, or no `AdminSigning` session for the resolved nonce.
+   * Writes nothing; display-only (never an authorization input — see the interface doc comment).
+   */
+  async getTaskSigningStatus (task: SignatureTask): Promise<SigningStatus | null> {
+    if (!this.ctx || !this.signingEngine) return null
+    const nonce = await findPendingTaskNonce(this.ctx.db, task)
+    if (nonce === undefined) return null
+    return this.signingEngine.getSigningStatus(nonce)
+  }
+
+  /**
+   * 62-27 (D-11 vrg) — read-only status of the registrant vrg session behind `requestId`,
+   * independent of the caller's own task (which `getTaskSigningStatus` cannot see once it is
+   * completed). Null when there is no ctx/signing engine or the session nonce is missing or
+   * ambiguous. Writes nothing; display-only.
+   */
+  async getRegistrantSigningStatus (requestId: string): Promise<SigningStatus | null> {
+    if (!this.ctx || !this.signingEngine) return null
+    const nonce = await findRegistrantSessionNonce(this.ctx.db, requestId)
+    if (nonce === undefined) return null
+    return this.signingEngine.getSigningStatus(nonce)
   }
 
   buildCompleteSignature (): ISignatureTasksCompleteSignatureBuilder {
@@ -1669,16 +2185,6 @@ export class SignatureTasksEngine implements ISignatureTasksEngine {
   }
 
   private rethrow (err: unknown, method: string): never {
-    if (err instanceof QuereusError) {
-      throw new Error(`Quereus error (code ${err.code}): ${err.message}`)
-    } else if (err instanceof MisuseError) {
-      throw new Error(`API misuse: ${err.message}`)
-    } else if (err instanceof Error) {
-      throw new Error(`SignatureTasksEngine.${method}: ${err.message}`)
-    } else {
-      throw new Error(
-				`SignatureTasksEngine.${method}: unknown error: ${String(err)}`
-      )
-    }
+    return rethrowHelper(err, 'SignatureTasksEngine', method)
   }
 }

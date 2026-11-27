@@ -1,0 +1,280 @@
+import React, {useEffect, useRef, useState} from 'react';
+import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {useTheme} from '@react-navigation/native';
+import type {ExtendedTheme} from '@react-navigation/native';
+import {useTranslation} from 'react-i18next';
+import type {ElectionResults} from '@votetorrent/vote-engine/rn';
+import {readElectionResults} from '@votetorrent/workflows/voter';
+import type {ElectionResultsPublication} from '@votetorrent/workflows/voter';
+import {useVoterApp} from '../../providers/VoterAppProvider';
+import {globalStyles} from '../../theme/styles';
+import {strandChanges} from '../../engines/strand-changes';
+import {vtDebug} from '../../engines/vt-debug';
+import {unavailableCopyKey} from './results-unavailable';
+
+/**
+ * ResultsScreen — the election's results, counted on this phone. After enough keyholders release their key
+ * shares, vote-engine's ElectionResultsEngine rebuilds the election key from the PUBLIC shares, decrypts and
+ * validates every published vote block, and tallies it. Nothing is written and the key is wiped inside the call.
+ * Picks the same election as the other Timeline screens (pickElectionId).
+ *
+ * Also shows the tally an election officer published (the signed ElectionTally row): whether its signature and
+ * tree check out and whether it equals this phone's own count. Counts again, without the loading state, when a
+ * key share is released or a vote block or the published tally reaches this phone.
+ *
+ * The read itself (election pick, results engine, published tally) is the shared `readElectionResults`
+ * (`packages/workflows/src/voter/election-results.ts`, phase 67 plan 19); this screen keeps the state, the
+ * strand-change subscription, the dev-only fallback choice, the debug log and the presentation.
+ */
+
+/** 'unknown': the published tally could not be read; nothing is shown for it. */
+type Publication = ElectionResultsPublication;
+type ScreenState = {kind: 'loading'} | {kind: 'ready'; results: ElectionResults; publication: Publication} | {kind: 'failed'};
+
+/** The tables a recount depends on (qualified, as the strand reports them). */
+const RESULTS_TABLES = ['App.KeyholderShareRelease', 'App.ElectionKey', 'App.VoteBlock', 'App.VoteBlockVoter', 'App.ElectionTally'];
+
+const percent = (count: number, of: number): number => (of > 0 ? Math.round((count / of) * 100) : 0);
+
+/** The published-tally time in the app's language, not the phone's locale (a phone set to English shows a Spanish date when the app is in Spanish). */
+export function formatPublishedAt(iso: string, language: string): string {
+	const ms = Date.parse(iso);
+	if (Number.isNaN(ms)) return iso;
+	return new Intl.DateTimeFormat(language, {dateStyle: 'long', timeStyle: 'short'}).format(new Date(ms));
+}
+
+export default function ResultsScreen() {
+	const {getEngine, seededElectionId} = useVoterApp();
+	const {colors, fonts, type: typeScale} = useTheme() as ExtendedTheme;
+	const {t, i18n} = useTranslation('timeline');
+	const [state, setState] = useState<ScreenState>({kind: 'loading'});
+	const [reloadNonce, setReloadNonce] = useState(0);
+	// A recount after a strand change keeps the current results on screen until the new ones are ready.
+	const quiet = useRef(false);
+
+	useEffect(
+		() =>
+			strandChanges.subscribe(
+				RESULTS_TABLES,
+				() => {
+					quiet.current = true;
+					setReloadNonce(n => n + 1);
+				},
+				{label: 'voter-results'},
+			),
+		[],
+	);
+
+	useEffect(() => {
+		let live = true;
+		if (!quiet.current) setState({kind: 'loading'});
+		quiet.current = false;
+		(async () => {
+			try {
+				const read = await readElectionResults({
+					getEngine,
+					fallbackElectionId: __DEV__ ? seededElectionId : undefined,
+					// The engine's reason code goes to the log only; the screen shows plain copy for it.
+					onUnavailable: reason => vtDebug('results', 'unavailable', {reason}),
+				});
+				if (live) setState({kind: 'ready', results: read.results, publication: read.publication});
+			} catch {
+				if (live) setState({kind: 'failed'});
+			}
+		})();
+		return () => {
+			live = false;
+		};
+	}, [getEngine, seededElectionId, reloadNonce]);
+
+	const body = {color: colors.text, fontFamily: fonts.regular.fontFamily, fontWeight: fonts.regular.fontWeight, fontSize: typeScale.body.fontSize, lineHeight: typeScale.body.lineHeight};
+	const secondary = {...body, color: colors.textSecondary};
+	const heading = {...body, fontSize: typeScale.h4.fontSize, lineHeight: typeScale.h4.lineHeight};
+	const results = state.kind === 'ready' ? state.results : null;
+	const publication = state.kind === 'ready' ? state.publication : 'unknown';
+	const publishedChecksOut = publication !== null && publication !== 'unknown' && publication.signatureValid && publication.treeCheck.ok;
+
+	return (
+		<ScrollView testID="results-scroll" style={[styles.screen, {backgroundColor: colors.background}]} contentContainerStyle={styles.content}>
+			{state.kind === 'loading' ? (
+				<Text testID="results-loading" style={secondary}>
+					{t('results.computing')}
+				</Text>
+			) : null}
+
+			{state.kind === 'failed' ? (
+				<Text testID="results-failed" style={{...body, color: colors.error}}>
+					{t('results.loadFailed')}
+				</Text>
+			) : null}
+
+			{results?.status === 'no-election' ? (
+				<Text testID="results-no-election" style={body}>
+					{t('results.noElection')}
+				</Text>
+			) : null}
+
+			{results?.status === 'awaiting-keys' ? (
+				<View testID="results-awaiting-keys" style={[styles.card, {backgroundColor: colors.card, borderColor: colors.border}]}>
+					<Text style={heading}>{t('results.lockedTitle')}</Text>
+					<Text style={body}>{t('results.lockedBody')}</Text>
+					{results.threshold !== null ? (
+						<Text testID="results-released-count" style={body}>
+							{t('results.releasedCount', {released: results.releasedCount, needed: results.threshold})}
+						</Text>
+					) : (
+						<Text testID="results-no-key" style={secondary}>
+							{t('results.noKey')}
+						</Text>
+					)}
+				</View>
+			) : null}
+
+			{results?.status === 'unavailable' ? (
+				<View testID="results-unavailable" style={[styles.card, {backgroundColor: colors.card, borderColor: colors.border}]}>
+					<Text style={{...heading, color: colors.error}}>{t('results.unavailableTitle')}</Text>
+					<Text testID="results-unavailable-reason" style={secondary}>
+						{t(unavailableCopyKey(results.reason))}
+					</Text>
+				</View>
+			) : null}
+
+			{results?.status === 'tallied' && results.blockCount === 0 ? (
+				<View testID="results-no-blocks" style={[styles.card, {backgroundColor: colors.card, borderColor: colors.border}]}>
+					<Text style={{...body, color: colors.warning}}>{t('results.noBlocksYet')}</Text>
+				</View>
+			) : null}
+
+			{results?.status === 'tallied' && results.blockCount > 0 ? (
+				<>
+					<View testID="results-summary" style={[styles.card, {backgroundColor: colors.card, borderColor: colors.border}]}>
+						<Text testID="results-valid-total" style={heading}>
+							{t('results.validVotes', {count: results.totals.valid})}
+						</Text>
+						{results.totals.invalid + results.totals.excluded > 0 ? (
+							<Text testID="results-not-counted" style={{...body, color: colors.warning}}>
+								{t('results.notCountedVotes', {count: results.totals.invalid + results.totals.excluded})}
+							</Text>
+						) : null}
+						<Text style={secondary}>{t('results.checkedNote')}</Text>
+					</View>
+					{results.ballots.length === 0 ? (
+						<Text testID="results-no-ballots" style={body}>
+							{t('results.noBallots')}
+						</Text>
+					) : null}
+					{results.ballots.map(b => (
+						<View key={b.ballotId} testID={`results-ballot-${b.ballotId}`} style={[styles.card, {backgroundColor: colors.card, borderColor: colors.border}]}>
+							{b.description ? <Text style={heading}>{b.description}</Text> : null}
+							{b.questions.map(q => {
+								const total = q.options.reduce((n, o) => n + o.count, 0);
+								return (
+									<View key={q.code} testID={`results-question-${q.code}`} style={styles.question}>
+										<Text style={{...body, fontFamily: fonts.bold.fontFamily, fontWeight: fonts.bold.fontWeight}}>{q.title}</Text>
+										{q.counted ? (
+											q.options.map(o => (
+												<View key={o.code} style={styles.option}>
+													<View style={styles.optionLabel}>
+														<Text style={[body, styles.shrink]}>{o.title}</Text>
+														<Text testID={`results-count-${q.code}-${o.code}`} style={body}>
+															{t('results.optionCount', {count: o.count, percent: percent(o.count, total)})}
+														</Text>
+													</View>
+													<View style={[styles.barTrack, {backgroundColor: colors.progressTrack}]}>
+														<View style={[styles.barFill, {backgroundColor: colors.progressFill, width: `${percent(o.count, total)}%`}]} />
+													</View>
+												</View>
+											))
+										) : (
+											<Text style={secondary}>{t('results.questionNotCounted')}</Text>
+										)}
+										{q.counted && q.blank > 0 ? <Text style={secondary}>{t('results.blank', {count: q.blank})}</Text> : null}
+									</View>
+								);
+							})}
+						</View>
+					))}
+				</>
+			) : null}
+
+			{results?.status === 'tallied' && publication === null ? (
+				<Text testID="results-not-published" style={secondary}>
+					{t('results.notPublished')}
+				</Text>
+			) : null}
+
+			{results?.status === 'tallied' && publication !== null && publication !== 'unknown' ? (
+				<View testID="results-published" style={[styles.card, {backgroundColor: colors.card, borderColor: colors.border}]}>
+					{!publishedChecksOut ? (
+						<Text testID="results-published-invalid" style={{...body, color: colors.error}}>
+							{t('results.publishedInvalid')}
+						</Text>
+					) : publication.matchesRecomputed === true ? (
+						<Text testID="results-published-matches" style={body}>
+							{t('results.publishedMatches', {date: formatPublishedAt(publication.publishedAt, i18n.language)})}
+						</Text>
+					) : (
+						<Text testID="results-published-differs" style={{...body, color: colors.warning}}>
+							{t('results.publishedDiffers', {published: publication.blockCount, local: results.blockCount})}
+						</Text>
+					)}
+				</View>
+			) : null}
+
+			<Pressable
+				testID="results-refresh"
+				accessibilityRole="button"
+				style={styles.refresh}
+				disabled={state.kind === 'loading'}
+				onPress={() => setReloadNonce(n => n + 1)}>
+				<Text style={{...body, color: colors.link}}>{t('results.refreshCta')}</Text>
+			</Pressable>
+		</ScrollView>
+	);
+}
+
+const styles = StyleSheet.create({
+	screen: {
+		flex: 1,
+	},
+	content: {
+		...globalStyles.container,
+		padding: 16,
+		gap: 16,
+	},
+	card: {
+		borderWidth: 1,
+		borderRadius: 8,
+		padding: 16,
+		gap: 8,
+	},
+	question: {
+		marginTop: 8,
+		gap: 6,
+	},
+	option: {
+		gap: 4,
+	},
+	optionLabel: {
+		flexDirection: 'row',
+		justifyContent: 'space-between',
+		gap: 8,
+	},
+	shrink: {
+		flexShrink: 1,
+	},
+	barTrack: {
+		height: 8,
+		borderRadius: 4,
+		overflow: 'hidden',
+	},
+	barFill: {
+		height: 8,
+		borderRadius: 4,
+	},
+	refresh: {
+		minHeight: 44,
+		justifyContent: 'center',
+		alignItems: 'center',
+	},
+});

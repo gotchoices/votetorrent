@@ -95,8 +95,10 @@ export const USE_LOCAL_DB_FACTORY = false;
 export const SIGNING_PROOF_ENABLED = false;
 export const STRAND_PERSISTENCE_PROOF_ENABLED = false;
 export const USE_STUB_ATTESTATION_VERIFIER = false;
+export const SKIP_PLAY_INTEGRITY_HALF = false;
 export const REGISTRANT_SEED_ENABLED = false;
 export const RECOVERY_BRANCH_PROOF_ENABLED = false;
+export const SEALED_PAYLOAD_PROOF_ENABLED = false;
 EOF
 }
 
@@ -138,8 +140,10 @@ export const USE_LOCAL_DB_FACTORY = false;
 export const SIGNING_PROOF_ENABLED = false;
 export const STRAND_PERSISTENCE_PROOF_ENABLED = false;
 export const USE_STUB_ATTESTATION_VERIFIER = false;
+export const SKIP_PLAY_INTEGRITY_HALF = false;
 export const REGISTRANT_SEED_ENABLED = false;
 export const RECOVERY_BRANCH_PROOF_ENABLED = false;
+export const SEALED_PAYLOAD_PROOF_ENABLED = false;
 EOF
 
 echo "[run-dial-probe] Flag file updated: DIAL_PROBE_ENABLED=true"

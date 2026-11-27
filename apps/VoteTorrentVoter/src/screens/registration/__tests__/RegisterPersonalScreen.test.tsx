@@ -5,7 +5,7 @@
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
-import {Keyboard, Platform, ScrollView, View} from 'react-native';
+import {Keyboard, Platform, ScrollView, TextInput, View} from 'react-native';
 import '../../../i18n'; // initializes the global i18next instance useTranslation() reads from
 
 const mockNavigate = jest.fn();
@@ -94,6 +94,26 @@ describe('RegisterPersonalScreen (REG-03, Step 1)', () => {
 		expect(tr.root.findByProps({testID: 'register-dob'})).toBeDefined();
 		expect(tr.root.findByProps({testID: 'register-email'})).toBeDefined();
 		expect(tr.root.findByProps({testID: 'register-phone'})).toBeDefined();
+	});
+
+	it('every text input and both header icons resolve to a >= 44dp touch target', () => {
+		const tr = renderScreen();
+		for (const testID of ['register-first-name', 'register-last-name', 'register-dob', 'register-email', 'register-phone']) {
+			// The host TextInput itself (not the FieldRow wrapper that forwards the testID).
+			const input = tr.root.findAllByType(TextInput).find(n => n.props.testID === testID);
+			const style = Object.assign({}, ...[].concat(input?.props.style ?? []));
+			expect(style.minHeight).toBeGreaterThanOrEqual(44);
+		}
+		for (const testID of ['register-back', 'register-close']) {
+			const style = Object.assign({}, ...[].concat(tr.root.findByProps({testID}).props.style ?? []));
+			expect(style.minHeight).toBeGreaterThanOrEqual(44);
+			expect(style.minWidth).toBeGreaterThanOrEqual(44);
+			// No negative margin: on Android a part pushed outside the clipping ScrollView is
+			// untappable, which shrank the effective target below the glyph's own box.
+			expect(style.marginHorizontal ?? 0).toBeGreaterThanOrEqual(0);
+			expect(style.marginLeft ?? 0).toBeGreaterThanOrEqual(0);
+			expect(style.marginRight ?? 0).toBeGreaterThanOrEqual(0);
+		}
 	});
 
 	it('firing register-first-name onChangeText calls updateField(firstName, value) — write-through', () => {

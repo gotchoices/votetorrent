@@ -52,6 +52,16 @@ jest.mock("@react-navigation/native", () => ({
 		setOptions: mockSetOptions,
 	}),
 	useRoute: () => ({ params: mockRouteParams }),
+	// Run the callback once on mount (like a first focus); an effect keyed on `cb` would re-run every render.
+	useFocusEffect: (cb: () => void | (() => void)) => {
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		const ReactLib = require("react");
+		ReactLib.useEffect(() => {
+			const cleanup = cb();
+			return typeof cleanup === "function" ? cleanup : undefined;
+			// eslint-disable-next-line react-hooks/exhaustive-deps
+		}, []);
+	},
 }));
 
 const AUTHORITY_FIXTURE = {
@@ -71,7 +81,7 @@ function makeAdminDetails() {
 const mockGetAdminDetails = jest.fn(async () => makeAdminDetails());
 // The screen probes `authorityEngine.getInvitedAuthorities` via `typeof fn === "function"` —
 // this fixture deliberately omits it, matching the upstream_contract's "may be absent" floor.
-const mockAuthorityEngine = { getAdminDetails: mockGetAdminDetails };
+const mockAuthorityEngine = { getAdminDetails: mockGetAdminDetails, getPendingInviteCids: jest.fn(async () => []) };
 const mockOpenAuthority = jest.fn(async () => mockAuthorityEngine);
 const mockGetPinnedAuthorities = jest.fn(async () => []);
 const mockPinAuthority = jest.fn(async () => {});
@@ -84,6 +94,7 @@ const mockNetworkEngine = {
 };
 const mockGetEngine = jest.fn(async (name: string) => {
 	if (name === "network") return mockNetworkEngine;
+	if (name === "invitations") return { getOfficerInvite: jest.fn(async () => undefined) };
 	return undefined;
 });
 
@@ -143,7 +154,7 @@ beforeEach(() => {
 	mockGetAdminDetails.mockImplementation(async () => makeAdminDetails());
 	mockOpenAuthority.mockImplementation(async () => mockAuthorityEngine);
 	mockGetPinnedAuthorities.mockImplementation(async () => []);
-	mockGetEngine.mockImplementation(async (name: string) => (name === "network" ? mockNetworkEngine : undefined));
+	mockGetEngine.mockImplementation(async (name: string) => (name === "network" ? mockNetworkEngine : name === "invitations" ? { getOfficerInvite: jest.fn(async () => undefined) } : undefined));
 });
 
 describe("AuthorityDetailsScreen — Phase 47 entry rows (D-08)", () => {

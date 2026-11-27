@@ -1,0 +1,309 @@
+/*
+ * packages/ui-web/src/components.css — the shared components' OWN default
+ * styles (D-15 revision, 53-CR01).
+ *
+ * D-15 originally read "each app owns its own component styles" (see
+ * LifecyclePill.tsx's now-superseded header note, 53-05). Code review CR-01
+ * (Phase 53) measured the consequence on the shipped public app:
+ * `apps/VoteTorrentPublic/src/app.css` never authored rules for
+ * `.pv-disclosure`, `.lifecycle-pill` (+ 3 modifiers) or `.dt-toggle-group` —
+ * the class names `AdvisoryDisclosure`, `LifecyclePill` and `DetailsToggle`
+ * themselves render — so the D-16 binding advisory disclosure and the
+ * lifecycle indicator rendered as unstyled text on the one page whose entire
+ * purpose is that its claims can be checked. D-15 is REVISED here: the
+ * package that owns a shared component's markup also owns that component's
+ * DEFAULT rules, for exactly the class names that component renders — no
+ * more, no less. A consumer may still override anything below through the
+ * normal cascade (this file uses no `!important` anywhere); what a consumer
+ * may no longer do is forget to author the rule at all.
+ *
+ * This does NOT reclaim `.election-title` (rendered directly by
+ * `ElectionShell.tsx`, not by a shared component — see
+ * `apps/VoteTorrentPublic/src/app.css`'s own rule) or `.dt-toggle`/`.dt-body`
+ * (already correctly authored, independently, in every current consumer's
+ * own app.css — CR-01 found no gap there, so nothing here moves them).
+ *
+ * Uses ONLY this package's own `tokens.css` custom properties — no hex
+ * literal, no new raw spacing value, mirroring the discipline every
+ * consumer's own component CSS already follows (preview-as.css,
+ * election-ops.css).
+ *
+ * `.pv-disclosure` and `.lifecycle-pill` (+ 3 modifiers) below were originally
+ * transcribed VERBATIM from
+ * `apps/VoteTorrentDashboard/src/screens/panels/election-ops.css` and
+ * `.../preview-as.css` as they stood before the D-15 revision — relocating,
+ * not redesigning. `.dt-toggle-group` is new at that same revision: no
+ * consumer declared it before CR-01, so its shape there was authored fresh.
+ *
+ * Phase 54 (D-06/D-10): the modifiers are no longer the relocated dashboard
+ * rules unchanged — five now exist, not three. The `pre` and `closed`
+ * phase rules keep the prior organizing/released reduced-opacity treatment;
+ * the `voting` phase rule keeps the prior running treatment. Two rules below
+ * are genuinely NEW: the `settling` phase rule uses `--warn` at full
+ * opacity (matching 54-UI-SPEC's `wait` tone) and the `indeterminate`
+ * rule uses `--fail` at full opacity (matching the spec's `bad` tone) —
+ * these are the two intervals with no analog in the three-phase model.
+ */
+
+.pv-disclosure {
+	margin: 0;
+	color: var(--muted);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+.lifecycle-pill {
+	display: inline-flex;
+	align-items: center;
+	padding: 0 var(--space-sm);
+	border-radius: var(--radius);
+	background: var(--surface2);
+	border: 1px solid var(--border);
+	color: var(--muted);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+.lifecycle-pill--pre {
+	opacity: 0.85;
+}
+
+.lifecycle-pill--voting {
+	color: var(--text);
+	opacity: 1;
+}
+
+.lifecycle-pill--settling {
+	color: var(--warn);
+	opacity: 1;
+}
+
+.lifecycle-pill--closed {
+	opacity: 0.85;
+}
+
+/* D-21 retone: on a page whose heading already says no election is held, a
+ * red pill asserts an error that did not occur. `--fail` stays reserved for
+ * a genuine fault (see `.status-banner--bad`, untouched by this rule). */
+.lifecycle-pill--indeterminate {
+	color: var(--text);
+	opacity: 0.85;
+}
+
+.dt-toggle-group {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-xs);
+}
+
+/*
+ * Chart primitives (60-03) — packages/ui-web/src/charts/*.tsx's OWN default
+ * rules, following this file's own header doctrine above for exactly the
+ * class names those primitives render. Colour is expressed ONLY through
+ * var(--chart-series-1/-2, --ok, --warn, --fail, --border, --muted, --text,
+ * --surface, --surface2) — zero hex literals (D-15). SVG marks (the bar/line
+ * shapes, axis text, gridlines, direct labels) take fill/stroke; the legend
+ * swatches and the meter fill/track are HTML, so they take background. Raw
+ * px appears only for the geometry constants 60-UI-SPEC carves out of the
+ * spacing scale (the 2px segment stroke, and the two meter heights) — every
+ * other value below is var(--space-*) or var(--font-*).
+ */
+
+.vt-chart {
+	display: block;
+}
+
+/* A long axis label may extend past the plot rather than be cropped — the
+ * one layer a stylesheet can carry D-16's "a label is never clipped". */
+.vt-chart .recharts-surface {
+	overflow: visible;
+}
+
+.vt-chart__empty-frame {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--surface);
+}
+
+.vt-chart__empty {
+	margin: 0;
+	color: var(--muted);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+.vt-chart__axis {
+	fill: var(--muted);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+}
+
+.vt-chart__grid {
+	stroke: var(--border);
+}
+
+.vt-chart__label {
+	fill: var(--text);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+}
+
+.vt-chart__bar {
+	stroke: none;
+}
+
+.vt-chart__bar--series-1 {
+	fill: var(--chart-series-1);
+}
+
+.vt-chart__bar--series-2 {
+	fill: var(--chart-series-2);
+}
+
+.vt-chart__bar--ok {
+	fill: var(--ok);
+}
+
+.vt-chart__bar--warn {
+	fill: var(--warn);
+}
+
+.vt-chart__bar--fail {
+	fill: var(--fail);
+}
+
+.vt-chart__segment--series-1 {
+	fill: var(--chart-series-1);
+	stroke: var(--surface);
+	stroke-width: 2px;
+}
+
+.vt-chart__segment--series-2 {
+	fill: var(--chart-series-2);
+	stroke: var(--surface);
+	stroke-width: 2px;
+}
+
+.vt-chart__line {
+	stroke: var(--chart-series-1);
+	fill: none;
+}
+
+.vt-chart__dot {
+	fill: var(--chart-series-1);
+	stroke: var(--surface);
+}
+
+.vt-chart__crosshair {
+	stroke: var(--border);
+}
+
+.vt-chart__tooltip {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-xs);
+	padding: var(--space-sm);
+	border-radius: var(--radius);
+	background: var(--surface2);
+	border: 1px solid var(--border);
+}
+
+.vt-chart__tooltip-label {
+	color: var(--muted);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+.vt-chart__tooltip-value {
+	color: var(--text);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+.vt-chart__legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-sm);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.vt-chart__legend-item {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-xs);
+}
+
+.vt-chart__legend-swatch {
+	display: inline-block;
+	width: var(--space-sm);
+	height: var(--space-sm);
+	border-radius: var(--radius);
+	background: var(--muted);
+}
+
+.vt-chart__legend-swatch--series-1 {
+	background: var(--chart-series-1);
+}
+
+.vt-chart__legend-swatch--series-2 {
+	background: var(--chart-series-2);
+}
+
+.vt-chart__legend-label {
+	color: var(--muted);
+	font-size: var(--font-label-size);
+	font-weight: var(--font-label-weight);
+	line-height: var(--font-label-line-height);
+}
+
+.vt-chart__meter {
+	display: flex;
+	align-items: stretch;
+	gap: var(--space-sm);
+}
+
+.vt-chart__meter--panel {
+	height: 32px;
+}
+
+.vt-chart__meter--compact {
+	height: 20px;
+}
+
+.vt-chart__meter-track {
+	flex: 1;
+	border-radius: var(--radius);
+	background: var(--border);
+}
+
+.vt-chart__meter-fill {
+	height: 100%;
+	border-radius: var(--radius);
+	background: var(--chart-series-1);
+}
+
+.vt-chart__meter-value {
+	align-self: center;
+	white-space: nowrap;
+	color: var(--text);
+	font-size: var(--font-display-size);
+	font-weight: var(--font-display-weight);
+	line-height: var(--font-display-line-height);
+}
+
+.vt-chart--bar,
+.vt-chart--stacked-bar,
+.vt-chart--time-series,
+.vt-chart--meter {
+	width: 100%;
+}

@@ -1,0 +1,11 @@
+{
+  "base": "base-device",
+  "ops": [
+    {
+      "op": "append",
+      "path": "64-device-evidence/rehearsal-2026-10-20/commands.log",
+      "content": "{{PLANT:pgrep-dash-e}}\n"
+    }
+  ],
+  "expect": "pgrep-dash-e"
+}

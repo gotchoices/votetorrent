@@ -6,6 +6,7 @@ import type {
   ElectionDisclosurePolicy,
   ElectionRegistrant,
   ElectionRegistrationField,
+  LikelyDuplicateRequest,
   PriorRejection,
   RegisterInit,
   Registrant,
@@ -19,12 +20,19 @@ import type {
   RegistrantStatus,
   RegistrationBridgeKey,
   RegistrationBridgeKeyInit,
+  RegistrationDecisionPublishOptions,
+  RegistrationDecisionPublishPort,
+  RegistrationDecisionPublishResult,
+  RegistrationDuplicateClosure,
+  RegistrationDuplicateClosureRepairReport,
   RegistrationRequestDecision,
   RegistrationRequestInit,
   RegistrationRequestListFilter,
   RegistrationRequestListPage,
   RegistrationRequestListResult,
   RegistrationRequestRead,
+  RegistrationStaleCloseAvailability,
+  RegistrationStaleCloseInput,
   RegistrationTransparencyStats
 } from './models.js'
 
@@ -213,9 +221,12 @@ export interface IRegistrationEngine {
    * D-06, newest-first. This is what makes persisted rejections actually
    * reachable by the reviewing officer, and it is keyed by `requesterKey`
    * (not by request id) so a re-application from the same key carries its
-   * history.
+   * history. `excludeRequestId` omits the request currently being viewed so
+   * a rejected request cannot cite itself; it excludes exactly one row by
+   * id — it is not a general-purpose filter and must never be used to hide
+   * a rejection an officer is entitled to see.
    */
-  getPriorRejections(requesterKey: string): Promise<PriorRejection[]>
+  getPriorRejections(requesterKey: string, excludeRequestId?: string): Promise<PriorRejection[]>
 
   /**
    * D-09. Derived from `Status`/`SubmittedAt`/`DecidedAt` with **no new
@@ -236,6 +247,59 @@ export interface IRegistrationEngine {
    * reject UI gates on a non-empty trimmed reason).
    */
   rejectRegistrationRequest(requestId: string, decision: RegistrationRequestDecision, signatureOrCallback: SignatureOrCallback): Promise<void>
+
+  /**
+   * Whether the caller may close `requestId` as rejected on their own; `undefined` when the request
+   * does not exist or is no longer pending. See `RegistrationStaleCloseAvailability`.
+   */
+  getStaleCloseAvailability(requestId: string): Promise<RegistrationStaleCloseAvailability | undefined>
+
+  /**
+   * Above a 'vrg' threshold of 1, any single officer holding 'vrg' closes a pending request as
+   * rejected once its session has been open for `REGISTRATION_STALE_CLOSE_TIMEOUT_MS`, recording
+   * `input.rejectionReason`. The signed decision records the checklist `['none']`: the closing
+   * officer asserts no verification. Refuses (`RegistrationStaleCloseError`) before any write when
+   * the request is not pending, the threshold is 1 (use `rejectRegistrationRequest`), the session has
+   * already reached its threshold, the timeout has not passed, or the caller does not hold 'vrg'.
+   */
+  closeStaleRegistrationRequest(requestId: string, input: RegistrationStaleCloseInput, signatureOrCallback: SignatureOrCallback): Promise<void>
+
+  // ---------- D-44 duplicate detection and closure (Phase 62 Plan 19) ----------
+
+  /**
+   * D-44: likely duplicates of `requestId`, authority-side, computed IN MEMORY over the
+   * authority's own PENDING requests' already-decrypted identity fields — never a SQL CHECK, and
+   * nothing derived from the comparison is persisted anywhere (T-62-01-10 is referenced, not
+   * widened). Never throws: an unknown id, a non-pending target, or a closed/closing target all
+   * resolve `[]`.
+   */
+  getLikelyDuplicateRequests(requestId: string): Promise<LikelyDuplicateRequest[]>
+
+  /** D-44: the closure state of one request — `undefined` when it is neither closed nor closing. */
+  getDuplicateClosure(requestId: string): Promise<RegistrationDuplicateClosure | undefined>
+
+  /** D-44: decided (`'a'`/`'r'`) request ids of `authorityId` with no `RegistrationDecision` row
+   *  yet, oldest `DecidedAt` first (then `Id`) — the peer-sync drain list. */
+  listUnpublishedRegistrationDecisions(authorityId: string): Promise<string[]>
+
+  /**
+   * D-44: publishes a decided request's `RegistrationDecision` through `publisher`, which MUST
+   * write into the SAME database this engine reads. Resolves the surviving `'a'`/`'r'` row first
+   * (carrying `ClosesRequestId` when a duplicate closure target is chosen), then — in a SEPARATE
+   * publisher call, with the database in autocommit between the two — the closed request's own
+   * `'d'` row. An interrupted close never throws from this method: it reports `closure:
+   * 'pending-retry'` instead, resumable by `completeDuplicateClosures`.
+   */
+  publishRegistrationDecision(
+    publisher: RegistrationDecisionPublishPort,
+    requestId: string,
+    options?: RegistrationDecisionPublishOptions
+  ): Promise<RegistrationDecisionPublishResult>
+
+  /** D-44: resumes every interrupted two-transaction close of `publisher.authorityId` — writes
+   *  the missing `'d'` row for each target exactly once. Idempotent: a target already closed by a
+   *  prior call is simply absent from a later call's `completed` list. */
+  completeDuplicateClosures(publisher: RegistrationDecisionPublishPort): Promise<RegistrationDuplicateClosureRepairReport>
 }
 
 export interface IRegistrationRegisterBuilder extends IBuilder<RegisterInit, void> {

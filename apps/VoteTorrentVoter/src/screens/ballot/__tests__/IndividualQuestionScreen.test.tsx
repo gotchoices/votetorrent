@@ -2,7 +2,7 @@
  * IndividualQuestionScreen.test.tsx (VOTE-02, TDD RED->GREEN) — mounts a real NavigationContainer
  * + real VoterAppProvider + real BallotSelectionProvider around a minimal native-stack harness
  * (the real IndividualQuestionScreen plus DummyScreen stand-ins for CandidateInfo/ReviewSubmit) so
- * getBallot()'s real mockBallot offices resolve and navigation calls land on registered routes —
+ * getBallot()'s real FIXTURE_BALLOT offices resolve and navigation calls land on registered routes —
  * mirrors BallotScreen.test.tsx's real-provider harness. A Probe captures
  * BallotSelectionProvider's context (mirrors BallotSelectionProvider.test.tsx's Probe-capture
  * convention) so the test can jump `currentQuestionIndex` directly instead of walking Next N
@@ -21,10 +21,15 @@ import {createNativeStackNavigator} from '@react-navigation/native-stack';
 // CadreNodeProvider ancestor — this ballot-flow test has no need to exercise that boot, so it
 // uses the manual Jest mock at providers/__mocks__/VoterAppProvider.tsx.
 jest.mock('../../../providers/VoterAppProvider');
+// The candidate dialog's detail read is stubbed at the info-read boundary; the dialog wiring is real.
+jest.mock('../../../engines/info-read', () => ({
+	readCandidateInfo: jest.fn(() => Promise.reject(new Error('no engine in this harness'))),
+}));
+import {readCandidateInfo} from '../../../engines/info-read';
 import {VoterAppProvider} from '../../../providers/VoterAppProvider';
 import {BallotSelectionProvider, useBallotSelection} from '../../../providers/BallotSelectionProvider';
 import type {BallotSelectionContextType} from '../../../providers/BallotSelectionProvider';
-import {mockBallot} from '../../../providers/mockData';
+import {FIXTURE_BALLOT} from '../../../providers/__fixtures__/voter-fixtures';
 import IndividualQuestionScreen from '../IndividualQuestionScreen';
 import {lightTheme} from '../../../theme/themes';
 import '../../../i18n'; // initializes the global i18next instance useTranslation() reads from
@@ -63,7 +68,6 @@ function renderScreen() {
 						<Probe />
 						<Stack.Navigator initialRouteName="IndividualQuestion" screenOptions={{headerShown: false}}>
 							<Stack.Screen name="IndividualQuestion" component={IndividualQuestionScreen} />
-							<Stack.Screen name="CandidateInfo" component={DummyScreen} />
 							<Stack.Screen name="ReviewSubmit" component={DummyScreen} />
 						</Stack.Navigator>
 					</BallotSelectionProvider>
@@ -79,16 +83,16 @@ describe('IndividualQuestionScreen (VOTE-02)', () => {
 		const {tr, captured} = renderScreen();
 		await flushBoot();
 
-		const firstOffice = mockBallot.offices[0];
+		const firstOffice = FIXTURE_BALLOT.offices[0];
 		expect(JSON.stringify(tr.toJSON())).toContain(`Vote for ${firstOffice.voteFor}`);
 
-		const boardIndex = mockBallot.offices.findIndex(o => o.id === 'office-state-board-education');
+		const boardIndex = FIXTURE_BALLOT.offices.findIndex(o => o.id === 'office-state-board-education');
 		renderer.act(() => {
 			captured.value!.setCurrentQuestionIndex(boardIndex);
 		});
 		await flushBoot();
 
-		const boardOffice = mockBallot.offices[boardIndex];
+		const boardOffice = FIXTURE_BALLOT.offices[boardIndex];
 		expect(JSON.stringify(tr.toJSON())).toContain(`Vote for ${boardOffice.voteFor}`);
 	});
 
@@ -96,7 +100,7 @@ describe('IndividualQuestionScreen (VOTE-02)', () => {
 		const {tr, captured} = renderScreen();
 		await flushBoot();
 
-		const firstOffice = mockBallot.offices[0];
+		const firstOffice = FIXTURE_BALLOT.offices[0];
 		const firstCandidateId = firstOffice.candidates[0].id;
 		const row = tr.root.findByProps({testID: `candidate-row-${firstCandidateId}`});
 		renderer.act(() => {
@@ -147,7 +151,7 @@ describe('IndividualQuestionScreen (VOTE-02)', () => {
 		const {tr, captured, navRef} = renderScreen();
 		await flushBoot();
 
-		const lastIndex = mockBallot.offices.length - 1;
+		const lastIndex = FIXTURE_BALLOT.offices.length - 1;
 		renderer.act(() => {
 			captured.value!.setCurrentQuestionIndex(lastIndex);
 		});
@@ -165,7 +169,7 @@ describe('IndividualQuestionScreen (VOTE-02)', () => {
 		const {tr} = renderScreen();
 		await flushBoot();
 
-		const firstCandidateId = mockBallot.offices[0].candidates[0].id;
+		const firstCandidateId = FIXTURE_BALLOT.offices[0].candidates[0].id;
 		// Dialog is closed until the in-card link is tapped.
 		expect(tr.root.findAllByProps({testID: 'info-dialog'})).toHaveLength(0);
 
@@ -176,5 +180,40 @@ describe('IndividualQuestionScreen (VOTE-02)', () => {
 
 		expect(tr.root.findByProps({testID: 'info-dialog'})).toBeTruthy();
 		expect(JSON.stringify(tr.toJSON())).toContain('Candidate Info');
+		await flushBoot(); // settle the dialog's detail read inside act()
+	});
+
+	it('the candidate dialog shows the tapped candidate\'s published detail and info link', async () => {
+		const mockRead = readCandidateInfo as jest.Mock;
+		mockRead.mockImplementationOnce(() =>
+			Promise.resolve({name: 'Ada Lovelace', details: 'Analytical Party', infoURL: 'https://example.org/ada'}),
+		);
+		const {tr} = renderScreen();
+		await flushBoot();
+
+		const candidateId = FIXTURE_BALLOT.offices[0].candidates[1].id;
+		renderer.act(() => {
+			tr.root.findByProps({testID: `candidate-learn-${candidateId}`}).props.onPress();
+		});
+		await flushBoot();
+
+		expect(mockRead).toHaveBeenLastCalledWith(expect.anything(), candidateId);
+		const json = JSON.stringify(tr.toJSON());
+		expect(json).toContain('Ada Lovelace');
+		expect(json).toContain('Analytical Party');
+		expect(tr.root.findByProps({testID: 'candidate-info-details-link'})).toBeTruthy();
+	});
+
+	it('a failed candidate read renders the unavailable line, not boilerplate', async () => {
+		const {tr} = renderScreen();
+		await flushBoot();
+
+		const candidateId = FIXTURE_BALLOT.offices[0].candidates[0].id;
+		renderer.act(() => {
+			tr.root.findByProps({testID: `candidate-learn-${candidateId}`}).props.onPress();
+		});
+		await flushBoot();
+
+		expect(tr.root.findByProps({testID: 'candidate-info-details-unavailable'})).toBeTruthy();
 	});
 });

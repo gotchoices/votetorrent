@@ -30,9 +30,8 @@ import {
   addTestAuthority,
   addTestElection,
   seedAuthorityInvite,
-  seedSignedMutation as seedSignedMutationFixture
+  seedSignedMutation as seedSignedMutationFixture, testKeyPairFor
 } from './fixtures/test-context.js'
-import { randomTestKeyPair } from './fixtures/keys.js'
 import { digestToBytes, nowCanonicalDatetime } from '../src/utils.js'
 import { toDeferredCheckDatetime, reZuluDatetime } from '../src/signing/ceremony-helpers.js'
 import { allocateTid } from '../src/database/tid-allocator.js'
@@ -49,7 +48,7 @@ const __dirname = dirname(__filename)
 
 /** Build a real secp256k1 sign callback (@noble/curves v2 defaults — prehash:true). */
 function makeRegistrantSigner (userId: string): { sign: (digest: Uint8Array) => Promise<Signature>; publicHex: string } {
-  const { privateHex, publicHex } = randomTestKeyPair()
+  const { privateHex, publicHex } = testKeyPairFor(userId)
   const privBytes = hexToBytes(privateHex)
   const sign = async (digest: Uint8Array): Promise<Signature> => {
     const sig = secp256k1.sign(digest, privBytes) // v2 default: prehash:true

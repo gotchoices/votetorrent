@@ -76,6 +76,38 @@ async function flush() {
 	});
 }
 
+/**
+ * 57-17/57-18 scroll-container gap closure (mirrors
+ * apps/VoteTorrentAuthority/src/screens/settings/SettingsScreen.scrollContainer.test.tsx — the
+ * canonical model). Walks the RENDERED react-test-renderer JSON tree for a host node whose
+ * `type` is `RCTScrollView`, rather than a source-level grep. This screen has TWO separate JSX
+ * return branches (the in-flight probe interstitial and the terminal capability wall), each with
+ * its OWN `<ScrollView>` — a source grep can't distinguish "both branches actually wrap their
+ * content" from "only one branch does", so each reachable branch is asserted independently below.
+ */
+type TreeNode = {
+	type: string;
+	props: Record<string, unknown>;
+	children: Array<TreeNode | string> | null;
+};
+
+function findHostNodeByType(json: unknown, targetType: string): TreeNode | null {
+	if (json === null || json === undefined) return null;
+	const nodes: unknown[] = Array.isArray(json) ? json : [json];
+	for (const node of nodes) {
+		if (node === null || typeof node !== 'object') continue;
+		const typed = node as TreeNode;
+		if (typed.type === targetType) {
+			return typed;
+		}
+		if (typed.children) {
+			const found = findHostNodeByType(typed.children, targetType);
+			if (found) return found;
+		}
+	}
+	return null;
+}
+
 describe('DeviceAttestationScreen (REG-02/D-07/D-08/D-10/D-11)', () => {
 	const originalDev = (globalThis as {__DEV__?: boolean}).__DEV__;
 
@@ -157,5 +189,42 @@ describe('DeviceAttestationScreen (REG-02/D-07/D-08/D-10/D-11)', () => {
 		await flush();
 
 		expect(mockReplace).not.toHaveBeenCalled();
+	});
+
+	describe('scroll container regression guard — both branches (57-17/57-18)', () => {
+		it('Test 1: the in-flight (default) branch renders a real RCTScrollView host node', () => {
+			mockProvisionDeviceKey.mockReturnValue(new Promise(() => {})); // never resolves — stays in-flight
+			const tr = renderScreen();
+			const scrollNode = findHostNodeByType(tr.toJSON(), 'RCTScrollView');
+			expect(scrollNode).not.toBeNull();
+		});
+
+		it('Test 2: the terminal-wall branch ALSO renders a real RCTScrollView host node', async () => {
+			(globalThis as {__DEV__?: boolean}).__DEV__ = false;
+			mockProvisionDeviceKey.mockRejectedValue({code: 'NO_STRONGBOX_OR_TEE'});
+
+			const tr = renderScreen();
+			await flush();
+
+			// Precondition — confirm the terminal branch actually rendered (otherwise the scroll
+			// assertion below would be vacuously checking the wrong tree).
+			const heading = tr.root.findByProps({testID: 'device-attestation-terminal-heading'});
+			expect(heading).toBeDefined();
+
+			const scrollNode = findHostNodeByType(tr.toJSON(), 'RCTScrollView');
+			expect(scrollNode).not.toBeNull();
+		});
+
+		it('Test 3 (anti-vacuity): the walker returns null against a View-only synthetic tree', () => {
+			const syntheticTree = {
+				type: 'View',
+				props: {},
+				children: [
+					{type: 'View', props: {}, children: null},
+					{type: 'View', props: {}, children: [{type: 'View', props: {}, children: null}]},
+				],
+			};
+			expect(findHostNodeByType(syntheticTree, 'RCTScrollView')).toBeNull();
+		});
 	});
 });

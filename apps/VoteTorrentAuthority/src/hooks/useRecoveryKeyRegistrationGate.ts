@@ -37,11 +37,21 @@ import type { NavigationProp } from "../navigation/types";
  * the network `User` is missing), so an unnecessary trip is harmless — but the gate
  * still checks first so officers with nothing to do are not shown a ceremony screen.
  */
-export function useRecoveryKeyRegistrationGate(): () => Promise<boolean> {
+/**
+ * `replaceCurrent`: the calling screen is finished (a create or join just succeeded), so the
+ * ceremony REPLACES it rather than stacking on top. The ceremony leaves with `goBack()`, which
+ * would otherwise land the officer back on the finished form (Add Network or the join details)
+ * with the network already created -- measured on a release APK, 2026-10-31.
+ */
+export interface RecoveryKeyGateOptions {
+	replaceCurrent?: boolean;
+}
+
+export function useRecoveryKeyRegistrationGate(): (options?: RecoveryKeyGateOptions) => Promise<boolean> {
 	const navigation = useNavigation<NavigationProp>();
 	const { getEngine } = useApp();
 
-	return useCallback(async () => {
+	return useCallback(async (options?: RecoveryKeyGateOptions) => {
 		let observed: RegisteredKeyHolder | undefined;
 		const needed = await shouldPromptRecoveryKeyRegistration(async () => {
 			const engine = await getEngine<INetworkEngine>("network");
@@ -76,7 +86,11 @@ export function useRecoveryKeyRegistrationGate(): () => Promise<boolean> {
 			);
 		}
 		if (needed) {
-			navigation.navigate("ProvisionSigningKey", { reason: "first-run" });
+			if (options?.replaceCurrent && navigation.replace) {
+				navigation.replace("ProvisionSigningKey", { reason: "first-run" });
+			} else {
+				navigation.navigate("ProvisionSigningKey", { reason: "first-run" });
+			}
 		}
 		return needed;
 	}, [getEngine, navigation]);

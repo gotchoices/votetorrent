@@ -23,10 +23,19 @@
  *
  * Uses the same import paths as device-signer.ts and signing-proof.ts so that the import
  * under test is the same module instance that the app's signing path resolves.
+ *
+ * SC3 / SC4 (62-05) — same multi-copy hazard, now for `abstract/frost.js`. `src/crypto/dkg.ts`
+ * imports `secp256k1_FROST` from this SAME `@noble/curves/secp256k1.js` path, so a future dep
+ * re-split that reintroduces a second `@noble/curves` copy would silently bind the DKG wrapper
+ * to the wrong FROST implementation. SC3 is the boot-guard (functions are callable); SC4 is a
+ * byte-shape/known-answer guard (`combineSecret` over RFC 9591 Appendix E.5 P1+P3 reproduces the
+ * published group_secret_key).
  */
 
 import { expect } from 'chai'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { secp256k1_FROST } from '@noble/curves/secp256k1.js'
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js'
 
 // Known secp256k1 test vector — identical to signing-proof.ts PROOF_PRIVKEY / PROOF_DIGEST
 const PROOF_PRIVKEY = new Uint8Array(32).fill(0x01)
@@ -73,6 +82,38 @@ describe('@noble/curves dedupe regression (SIGN-04)', () => {
     // Verify — must return true for the known-vector round-trip to close
     const valid = secp256k1.verify(sig, PROOF_DIGEST, pubkey)
     expect(valid, '[spike013] secp256k1.verify() must return true for the known-vector round-trip').to.equal(true)
+  })
+
+  // ---------------------------------------------------------------------------
+  // SC3 (62-05) boot-guard: the FROST DKG and combine entry points used by
+  // src/crypto/dkg.ts must be real functions on the SAME @noble/curves/secp256k1.js
+  // instance as SC1/SC2 above — otherwise a re-split binds dkg.ts to a different copy.
+  // ---------------------------------------------------------------------------
+  it('SC3 boot-guard: secp256k1_FROST DKG round1/round2/round3, validateSecret, combineSecret and Identifier.derive are functions', () => {
+    expect(typeof secp256k1_FROST.DKG.round1, 'secp256k1_FROST.DKG.round1 must be a function (SC3 boot-guard invariant)').to.equal('function')
+    expect(typeof secp256k1_FROST.DKG.round2, 'secp256k1_FROST.DKG.round2 must be a function (SC3 boot-guard invariant)').to.equal('function')
+    expect(typeof secp256k1_FROST.DKG.round3, 'secp256k1_FROST.DKG.round3 must be a function (SC3 boot-guard invariant)').to.equal('function')
+    expect(typeof secp256k1_FROST.validateSecret, 'secp256k1_FROST.validateSecret must be a function (SC3 boot-guard invariant)').to.equal('function')
+    expect(typeof secp256k1_FROST.combineSecret, 'secp256k1_FROST.combineSecret must be a function (SC3 boot-guard invariant)').to.equal('function')
+    expect(typeof secp256k1_FROST.Identifier.derive, 'secp256k1_FROST.Identifier.derive must be a function (SC3 boot-guard invariant)').to.equal('function')
+  })
+
+  // ---------------------------------------------------------------------------
+  // SC4 (62-05) known-answer byte-shape guard: combineSecret over RFC 9591
+  // Appendix E.5 P1 and P3 must reproduce the published group_secret_key as a
+  // 32-byte Uint8Array. A v1.x-shaped or otherwise mis-split copy would not
+  // expose this split-round DKG API at all, or would return a different shape.
+  // ---------------------------------------------------------------------------
+  it('SC4 known-answer byte-shape: combineSecret(P1, P3) returns a 32-byte Uint8Array equal to RFC 9591 E.5 group_secret_key', () => {
+    const P1 = { identifier: secp256k1_FROST.Identifier.fromNumber(1), signingShare: hexToBytes('08f89ffe80ac94dcb920c26f3f46140bfc7f95b493f8310f5fc1ea2b01f4254c') }
+    const P3 = { identifier: secp256k1_FROST.Identifier.fromNumber(3), signingShare: hexToBytes('00e95d59dd0d46b0e303e500b62b7ccb0e555d49f5b849f5e748c071da8c0dbc') }
+    const combined = secp256k1_FROST.combineSecret([P1, P3], { min: 2, max: 3 })
+
+    expect(combined, 'combineSecret must return a Uint8Array (SC4 byte-shape guard)').to.be.instanceOf(Uint8Array)
+    expect(combined.length, 'combined secp256k1 FROST group secret must be exactly 32 bytes').to.equal(32)
+    expect(bytesToHex(combined), '[RFC 9591 E.5] combineSecret(P1, P3) must equal group_secret_key').to.equal(
+      '0d004150d27c3bf2a42f312683d35fac7394b1e9e318249c1bfe7f0795a83114'
+    )
   })
 
 })

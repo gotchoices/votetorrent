@@ -21,8 +21,7 @@ import type { AttestationChallenge, AttestationVerification, DeviceAttestation, 
 import { AssociationEngine } from '../src/association/association-engine.js'
 import { MockAssociationEngine } from '../src/association/mock-association-engine.js'
 import { RegistrationEngine } from '../src/registration/registration-engine.js'
-import { createTestNetwork, addTestAuthority, addTestElection } from './fixtures/test-context.js'
-import { randomTestKeyPair } from './fixtures/keys.js'
+import { createTestNetwork, addTestAuthority, addTestElection, testKeyPairFor } from './fixtures/test-context.js'
 import type { TestAuthorityContext } from './fixtures/test-context.js'
 import type { EngineContext } from '../src/types.js'
 
@@ -42,7 +41,7 @@ async function resolveElectionId (ctx: EngineContext, authorityId: string): Prom
 
 /** Build a real secp256k1 sign callback (@noble/curves v2 defaults — prehash:true). */
 function makeRealSigner (userId: string): { sign: (digest: Uint8Array) => Promise<Signature>; publicHex: string; privateHex: string } {
-  const { privateHex, publicHex } = randomTestKeyPair()
+  const { privateHex, publicHex } = testKeyPairFor(userId)
   const privBytes = hexToBytes(privateHex)
   const sign = async (digest: Uint8Array): Promise<Signature> => {
     const sig = secp256k1.sign(digest, privBytes) // v2 default: prehash:true
@@ -64,7 +63,6 @@ function nextDeviceKey (): string {
 }
 
 const FUTURE_REGISTRANT_EXPIRATION = Date.now() + 365 * 86_400_000
-const FUTURE_CHALLENGE_EXPIRATION = new Date(Date.now() + 10 * 60_000).toISOString()
 
 function makeDeviceAttestation (overrides?: Partial<DeviceAttestation>): DeviceAttestation {
   deviceSeq += 1
@@ -126,7 +124,7 @@ describe('AttestationVerdict store (D-03)', () => {
     it('pass path: exactly one AttestationVerdict row, Verdict=pass, Sequence=0, Reason null', async () => {
       const { auth, registrantId, engine, sign } = await setupAssociationTest()
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
       const attestation = makeDeviceAttestation()
 
       await engine.associate({ registrantId, deviceKey, nonce: challenge.nonce, attestation }, sign)
@@ -147,7 +145,7 @@ describe('AttestationVerdict store (D-03)', () => {
       const { auth, registrantId, sign } = await setupAssociationTest()
       const engine = new AssociationEngine(auth.ctx, rejectingVerifier)
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
       const attestation = makeDeviceAttestation()
 
       let threw = false
@@ -175,7 +173,7 @@ describe('AttestationVerdict store (D-03)', () => {
       const { auth, registrantId, sign } = await setupAssociationTest()
       const engine = new AssociationEngine(auth.ctx, rejectingVerifier)
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
       const attestation = makeDeviceAttestation()
 
       try {
@@ -205,12 +203,12 @@ describe('AttestationVerdict store (D-03)', () => {
       const { auth, registrantId: passRegistrantId, sign } = await setupAssociationTest()
       const passEngine = new AssociationEngine(auth.ctx)
       const deviceKeyPass = nextDeviceKey()
-      const passChallenge = await passEngine.issueAttestationChallenge(passRegistrantId, deviceKeyPass, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const passChallenge = await passEngine.issueAttestationChallenge(passRegistrantId, deviceKeyPass, sign)
       await passEngine.associate({ registrantId: passRegistrantId, deviceKey: deviceKeyPass, nonce: passChallenge.nonce, attestation: makeDeviceAttestation() }, sign)
 
       const failEngine = new AssociationEngine(auth.ctx, rejectingVerifier)
       const deviceKeyFail = nextDeviceKey()
-      const failChallenge = await failEngine.issueAttestationChallenge(passRegistrantId, deviceKeyFail, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const failChallenge = await failEngine.issueAttestationChallenge(passRegistrantId, deviceKeyFail, sign)
       try {
         await failEngine.associate({ registrantId: passRegistrantId, deviceKey: deviceKeyFail, nonce: failChallenge.nonce, attestation: makeDeviceAttestation() }, sign)
       } catch {
@@ -242,7 +240,7 @@ describe('AttestationVerdict store (D-03)', () => {
 
       const engine = new AssociationEngine(auth.ctx, throwIfCalledVerifier)
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign, electionId)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign, electionId)
       const attestation = makeDeviceAttestation()
 
       // Resolving (not throwing) is itself the proof that verify() never ran.
@@ -269,7 +267,7 @@ describe('AttestationVerdict store (D-03)', () => {
         const { auth, registrantId, sign } = await setupAssociationTest()
         const engine = new ThrowingVerdictEngine(auth.ctx, rejectingVerifier)
         const deviceKey = nextDeviceKey()
-        const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+        const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
         const attestation = makeDeviceAttestation()
 
         let caught: Error | undefined
@@ -289,7 +287,7 @@ describe('AttestationVerdict store (D-03)', () => {
         const { auth, registrantId, sign } = await setupAssociationTest()
         const engine = new ThrowingVerdictEngine(auth.ctx)
         const deviceKey = nextDeviceKey()
-        const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+        const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
         const attestation = makeDeviceAttestation()
 
         let caught: Error | undefined
@@ -415,6 +413,95 @@ describe('AttestationVerdict store (D-03)', () => {
       expect(rows[0].sequence).to.equal(0)
       expect(rows[0].verdict).to.equal('fail')
       expect(rows[0].reason).to.equal('revoked hardware root')
+    })
+
+    it('the landed-row probe survives a trailing-zero millisecond, which Quereus stores truncated (WR-01 root cause, 51-02)', async () => {
+      // REGRESSION LOCK for the ~20-25% flake documented in
+      // `.planning/todos/pending/2026-08-11-attestation-verdict-wr01-retry-duplicates-intermittently.md`.
+      //
+      // Quereus coerces the `datetime` column through a normalization that
+      // drops the trailing `Z` AND strips trailing zeros from the fractional
+      // seconds: a bound `...:31.910Z` comes back as `...:31.91`. The probe
+      // originally compared the two as strings after removing only the `Z`
+      // (`stripZ`), so whenever `Date.now()` landed on a millisecond ending in
+      // zero the probe answered "not ours", the retry ran, and a SECOND copy
+      // of the same verdict was appended. `AttestationVerdict` is InsertOnly,
+      // so the duplicate is permanent. This is the exact defect
+      // `recordRegistrantAccessEvent` already found and fixed for
+      // `RegistrantAccessEvent.Timestamp` — see
+      // `registrant-access-trail.spec.ts`'s twin of this test.
+      //
+      // This test PINS the clock to a trailing-zero millisecond so the
+      // regression is deterministic rather than a ~1-in-10 flake. Do not
+      // "fix" a failure here by loosening the comparison to ignore the
+      // timestamp — that would let a genuinely foreign row at the same
+      // sequence be mistaken for ours and silently DROP a verdict write.
+      const { registrantId, engine } = await setupAssociationTest()
+      const deviceKey = nextDeviceKey()
+      const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+
+      const realNow = Date.now
+      // .910 -> Quereus stores ".91". Any ms ending in 0 reproduces it.
+      const pinned = new Date('2026-08-05T12:04:31.910Z').getTime()
+      Date.now = () => pinned
+
+      const realExec = ctx.db.exec.bind(ctx.db)
+      let rejectedOnce = false
+      ;(ctx.db as unknown as { exec: typeof ctx.db.exec }).exec = async (sql: any, params?: any) => {
+        const result = await realExec(sql, params)
+        if (!rejectedOnce && typeof sql === 'string' && sql.includes('insert into AttestationVerdict')) {
+          rejectedOnce = true
+          throw new Error('stale revision: rev 1 vs rev 1')
+        }
+        return result
+      }
+
+      try {
+        await engine.recordAttestationVerdict(registrantId, deviceKey, { ok: false, reason: 'revoked hardware root' })
+      } finally {
+        ;(ctx.db as unknown as { exec: typeof ctx.db.exec }).exec = realExec
+        Date.now = realNow
+      }
+
+      expect(rejectedOnce, 'the fault injector must actually have fired, or this test is vacuous').to.equal(true)
+      const rows = await engine.getAttestationVerdicts(registrantId, deviceKey)
+      expect(rows, 'a trailing-zero millisecond must not defeat the own-row probe and duplicate the verdict').to.have.length(1)
+      expect(rows[0].sequence).to.equal(0)
+      expect(rows[0].verdict).to.equal('fail')
+    })
+
+    it('a forced failure where the row genuinely did NOT land still retries and writes exactly one row', async () => {
+      // The counterpart to the two tests above: when the insert truly never
+      // committed (no side effect at all), the retry must still succeed —
+      // this is the ordinary "transient storage error" case the whole guard
+      // exists to recover from, not just the "landed but ack failed" case.
+      const { registrantId, engine } = await setupAssociationTest()
+      const deviceKey = nextDeviceKey()
+      const ctx = (engine as unknown as { ctx: EngineContext }).ctx
+
+      const realExec = ctx.db.exec.bind(ctx.db)
+      let failedOnce = false
+      ;(ctx.db as unknown as { exec: typeof ctx.db.exec }).exec = async (sql: any, params?: any) => {
+        if (!failedOnce && typeof sql === 'string' && sql.includes('insert into AttestationVerdict')) {
+          failedOnce = true
+          // Never calls realExec — nothing lands, unlike the "stale revision"
+          // fault injector above which commits before throwing.
+          throw new Error('transient storage error: no side effect')
+        }
+        return await realExec(sql, params)
+      }
+
+      try {
+        await engine.recordAttestationVerdict(registrantId, deviceKey, { ok: true })
+      } finally {
+        ;(ctx.db as unknown as { exec: typeof ctx.db.exec }).exec = realExec
+      }
+
+      expect(failedOnce, 'the fault injector must actually have fired, or this test is vacuous').to.equal(true)
+      const rows = await engine.getAttestationVerdicts(registrantId, deviceKey)
+      expect(rows, 'the retry must write the row that genuinely never landed').to.have.length(1)
+      expect(rows[0].sequence).to.equal(0)
+      expect(rows[0].verdict).to.equal('pass')
     })
 
     it('a probe failure inside the verdict retry never REPLACES the original insert error (WR-01)', async () => {
@@ -545,7 +632,7 @@ describe('AttestationVerdict store (D-03)', () => {
     it('never touches AssociationPrivate: its Cid is unchanged by further verdicts', async () => {
       const { auth, registrantId, engine, sign } = await setupAssociationTest()
       const deviceKey = nextDeviceKey()
-      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sign)
+      const challenge = await engine.issueAttestationChallenge(registrantId, deviceKey, sign)
       await engine.associate({ registrantId, deviceKey, nonce: challenge.nonce, attestation: makeDeviceAttestation() }, sign)
 
       const before = await auth.ctx.db
@@ -619,7 +706,7 @@ describe('AttestationVerdict store (D-03)', () => {
       // produce a 'pass' verdict from associate() — fail-path behavior is
       // proven against the real engine only (tests above).
       const deviceKey = nextDeviceKey()
-      const challenge = await mock.issueAttestationChallenge('mock-assoc-registrant', deviceKey, FUTURE_CHALLENGE_EXPIRATION, { signerUserId: 'u', signerKey: 'k', signature: 's' })
+      const challenge = await mock.issueAttestationChallenge('mock-assoc-registrant', deviceKey, { signerUserId: 'u', signerKey: 'k', signature: 's' })
       await mock.associate(
         { registrantId: 'mock-assoc-registrant', deviceKey, nonce: challenge.nonce, attestation: makeDeviceAttestation() },
         { signerUserId: 'u', signerKey: 'k', signature: 's' }
@@ -643,7 +730,7 @@ describe('AttestationVerdict store (D-03)', () => {
       const deviceKey = nextDeviceKey()
       const sig: Signature = { signerUserId: 'u', signerKey: 'k', signature: 's' }
 
-      const challenge = await mock.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sig)
+      const challenge = await mock.issueAttestationChallenge(registrantId, deviceKey, sig)
       await mock.associate({ registrantId, deviceKey, nonce: challenge.nonce, attestation: makeDeviceAttestation() }, sig)
 
       // The association itself is still written — only the verdict is skipped.
@@ -660,7 +747,7 @@ describe('AttestationVerdict store (D-03)', () => {
       const sig: Signature = { signerUserId: 'u', signerKey: 'k', signature: 's' }
 
       for (const mock of [new MockAssociationEngine(), new MockAssociationEngine({}), new MockAssociationEngine({ attestationRequired: true })]) {
-        const challenge = await mock.issueAttestationChallenge(registrantId, deviceKey, FUTURE_CHALLENGE_EXPIRATION, sig)
+        const challenge = await mock.issueAttestationChallenge(registrantId, deviceKey, sig)
         await mock.associate({ registrantId, deviceKey, nonce: challenge.nonce, attestation: makeDeviceAttestation() }, sig)
         expect(await mock.getAttestationVerdicts(registrantId, deviceKey)).to.have.lengthOf(1)
       }

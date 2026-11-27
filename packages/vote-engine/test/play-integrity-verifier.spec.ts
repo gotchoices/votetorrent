@@ -31,10 +31,12 @@ import { digestFields, resolveHasher, resolveOutputEncoder } from '@optimystic/q
 import type { AttestationChallenge, DeviceAttestation } from '@votetorrent/vote-core'
 // Wave-3 target — does not exist yet. This import failing IS the RED gate.
 import { verifyPlayIntegrity } from '../src/association/verifiers/play-integrity.js'
-import { PlayIntegrityVerifier } from '../src/association/play-integrity-verifier.js'
+import { PlayIntegrityVerifier, PLAY_INTEGRITY_HALF_SKIPPED_REASON } from '../src/association/play-integrity-verifier.js'
 import type { IIntegrityKeyProvider } from '../src/association/key-provider.js'
 import { generateTestRootCa } from './fixtures/attestation/test-root-ca.js'
 import { buildSyntheticDeviceAttestation } from './fixtures/attestation/synthetic-device-attestation.js'
+import { generateAndroidDeviceKeyPair } from './fixtures/attestation/synthetic-key-description.js'
+import { p256KeyToCompressedHex } from '../src/voting/vote-signing.js'
 import {
   buildDefaultSyntheticPayload,
   buildForgedHs256Jwe,
@@ -55,7 +57,6 @@ function makeChallenge (overrides?: Partial<AttestationChallenge>): AttestationC
     authorityId: 'authority-1',
     registrantId: 'registrant-1',
     deviceKey: 'device-key-1',
-    expiration: new Date(Date.now() + 60_000).toISOString(),
     ...overrides
   }
 }
@@ -285,9 +286,13 @@ describe('PlayIntegrityVerifier class — D-09 keysProvisioned fail-closed reloc
   })
 
   it('(b) positive control: the normal path still runs to completion when provisioned', async () => {
-    const challenge = makeChallenge()
+    // 51-02: the leaf certificate's embedded public key must equal
+    // challenge.deviceKey (verifyKeyAttestation's 4b-2 binding check), so the
+    // challenge and the synthetic chain must share the SAME generated keypair.
+    const { keyPair, deviceKeySpkiBase64 } = await generateAndroidDeviceKeyPair()
+    const challenge = makeChallenge({ deviceKey: deviceKeySpkiBase64 })
     const { verifier, jweKeys, testRoot } = await buildClassVerifier(true)
-    const attestation = await buildSyntheticDeviceAttestation({ challenge, jweKeys, testRoot })
+    const attestation = await buildSyntheticDeviceAttestation({ challenge, jweKeys, testRoot, overrides: { leafKeyPair: keyPair } })
     const result = await verifier.verify(challenge, attestation)
     // This is what stops (a) from passing vacuously against a fixture that
     // was broken all along, and proves the guard does not short-circuit the
@@ -346,9 +351,11 @@ describe('PlayIntegrityVerifier class — D-09 keysProvisioned fail-closed reloc
   })
 
   it('(e) default-arity lock: the three-argument constructor form leaves the verifier provisioned', async () => {
-    const challenge = makeChallenge()
+    // 51-02: see (b)'s comment — the leaf key must match challenge.deviceKey.
+    const { keyPair, deviceKeySpkiBase64 } = await generateAndroidDeviceKeyPair()
+    const challenge = makeChallenge({ deviceKey: deviceKeySpkiBase64 })
     const { verifier, jweKeys, testRoot } = await buildClassVerifier()
-    const attestation = await buildSyntheticDeviceAttestation({ challenge, jweKeys, testRoot })
+    const attestation = await buildSyntheticDeviceAttestation({ challenge, jweKeys, testRoot, overrides: { leafKeyPair: keyPair } })
     const result = await verifier.verify(challenge, attestation)
     // Locks the `= true` default so association-attestation-policy.spec.ts:140
     // and authority-transport.spec.ts's existing 3-argument construction
@@ -356,5 +363,140 @@ describe('PlayIntegrityVerifier class — D-09 keysProvisioned fail-closed reloc
     // MUST thread the real flag in (47-09) — forgetting the argument fails OPEN.
     expect(result.ok).to.equal(true)
     expect(result.reason).to.equal(undefined)
+  })
+})
+
+// Spike 104 (R1d): the real Android ceremony presents the voting key's own chain (provisioning tag)
+// beside a throwaway key's nonce-bound chain. Both must pass; either failing rejects, and the reason
+// names which one.
+describe('PlayIntegrityVerifier — two-chain Android form (spike 104, R1d)', () => {
+  async function twoChain (mutate?: { deviceLeaf?: CryptoKeyPair, deviceChallenge?: Uint8Array, freshChallenge?: Uint8Array }) {
+    const { keyPair: votingKey, deviceKeySpkiBase64 } = await generateAndroidDeviceKeyPair()
+    const { keyPair: throwaway } = await generateAndroidDeviceKeyPair()
+    const challenge = makeChallenge({ deviceKey: p256KeyToCompressedHex(deviceKeySpkiBase64) })
+    const { verifier, jweKeys, testRoot } = await buildClassVerifier(true)
+    const attestation = await buildSyntheticDeviceAttestation({
+      challenge,
+      jweKeys,
+      testRoot,
+      overrides: {
+        leafKeyPair: throwaway,
+        ...(mutate?.freshChallenge !== undefined ? { attestationChallengeBytes: mutate.freshChallenge } : {}),
+        deviceKeyChain: { leafKeyPair: mutate?.deviceLeaf ?? votingKey, ...(mutate?.deviceChallenge !== undefined ? { attestationChallengeBytes: mutate.deviceChallenge } : {}) }
+      }
+    })
+    return { verifier, challenge, attestation }
+  }
+
+  it('accepts the honest two-chain attestation (voting key tagged, throwaway key nonce-bound)', async () => {
+    const { verifier, challenge, attestation } = await twoChain()
+    const result = await verifier.verify(challenge, attestation)
+    expect(result.ok, result.ok ? '' : result.reason).to.equal(true)
+  })
+
+  it("REJECTS when the device-key chain's leaf is another key (T-51-02-01)", async () => {
+    const { keyPair: other } = await generateAndroidDeviceKeyPair()
+    const { verifier, challenge, attestation } = await twoChain({ deviceLeaf: other })
+    const result = await verifier.verify(challenge, attestation)
+    expect(result.ok).to.equal(false)
+    expect(result.reason).to.match(/^device-key chain: .*not the challenge deviceKey/)
+  })
+
+  it('REJECTS when the device-key chain lacks the provisioning tag', async () => {
+    const { verifier, challenge, attestation } = await twoChain({ deviceChallenge: new TextEncoder().encode('some-other-tag') })
+    const result = await verifier.verify(challenge, attestation)
+    expect(result.ok).to.equal(false)
+    expect(result.reason).to.match(/^device-key chain: .*provisioning tag/)
+  })
+
+  it('REJECTS when the nonce-bound chain answers a different nonce (anti-relay)', async () => {
+    const { verifier, challenge, attestation } = await twoChain({ freshChallenge: new TextEncoder().encode(boundNonce({ nonce: 'an-earlier-nonce', deviceKey: 'x' })) })
+    const result = await verifier.verify(challenge, attestation)
+    expect(result.ok).to.equal(false)
+    expect(result.reason).to.match(/^nonce-bound chain: /)
+  })
+})
+
+
+// The debug-only "skip the Play Integrity half" option. The Authority computes it as
+// `__DEV__ && SKIP_PLAY_INTEGRITY_HALF` (its release-path test lives in the Authority app); this
+// block locks what the verifier does with it. Mutation locks: reading the option as truthy rather
+// than `=== true` turns (s5) RED; dropping the skip reason turns (s1) RED; letting the skip also
+// bypass the Android platform gate turns (s3) RED; skipping the key attestation half too turns (s2) RED.
+describe('PlayIntegrityVerifier — skipPlayIntegrityHalf (debug-only switch)', () => {
+  async function build (opts: { keysProvisioned: boolean, skip?: unknown, identity?: typeof SYNTHETIC_EXPECTED_APP_IDENTITY }) {
+    const jweKeys = await generateSyntheticJweKeyMaterial()
+    const testRoot = await generateTestRootCa()
+    const keyProvider: IIntegrityKeyProvider = {
+      getDecryptionKey: async () => jweKeys.decryptionKey,
+      getVerificationKey: async () => jweKeys.verificationPublicKey
+    }
+    const verifier = new PlayIntegrityVerifier(
+      keyProvider,
+      [new Uint8Array(testRoot.cert.rawData)],
+      opts.identity ?? SYNTHETIC_EXPECTED_APP_IDENTITY,
+      new Set<string>(),
+      opts.keysProvisioned,
+      { skipPlayIntegrityHalf: opts.skip as boolean }
+    )
+    const { keyPair, deviceKeySpkiBase64 } = await generateAndroidDeviceKeyPair()
+    const challenge = makeChallenge({ deviceKey: deviceKeySpkiBase64 })
+    const attestation = await buildSyntheticDeviceAttestation({ challenge, jweKeys, testRoot, overrides: { leafKeyPair: keyPair } })
+    return { verifier, challenge, attestation }
+  }
+
+  /** The same attestation with a Play Integrity token that could never verify. */
+  function withGarbageToken (attestation: DeviceAttestation): DeviceAttestation {
+    const details = attestation.platformDetails as Extract<NonNullable<DeviceAttestation['platformDetails']>, { type: 'Android' }>
+    return { ...attestation, platformDetails: { ...details, safetyNetAttestation: 'not-a-play-integrity-token' } }
+  }
+
+  it('(s1) skipped + UNPROVISIONED keys: reaches key attestation, passes, and says only that half ran', async () => {
+    const { verifier, challenge, attestation } = await build({ keysProvisioned: false, skip: true })
+    const result = await verifier.verify(challenge, withGarbageToken(attestation))
+    expect(result.ok, result.reason).to.equal(true)
+    expect(result.reason).to.equal(PLAY_INTEGRITY_HALF_SKIPPED_REASON)
+    expect(result.reason).to.match(/SKIPPED/)
+  })
+
+  it('(s2) skipped: the key attestation half still enforces the app-identity certificate pin (a wrong digest fails)', async () => {
+    const wrongPin = { ...SYNTHETIC_EXPECTED_APP_IDENTITY, certificateSha256Digests: ['00'.repeat(32)] }
+    const { verifier, challenge, attestation } = await build({ keysProvisioned: false, skip: true, identity: wrongPin })
+    const result = await verifier.verify(challenge, withGarbageToken(attestation))
+    expect(result.ok).to.equal(false)
+    expect(result.reason).to.match(/signing-certificate digest/)
+  })
+
+  it('(s3) skipped: the Android-only platform gate is unchanged — an iOS attestation is still refused', async () => {
+    const { verifier, challenge } = await build({ keysProvisioned: false, skip: true })
+    const ios: DeviceAttestation = {
+      publicKey: 'synthetic-device-voting-pubkey',
+      deviceId: 'synthetic-device-ios-1',
+      attestationTime: Date.now(),
+      certificateChain: [],
+      // Only the discriminant matters to the gate; the rest of the iOS shape is irrelevant here.
+      platformDetails: { type: 'iOS', secureEnclavePublicKey: 'synthetic-secure-enclave-pubkey' } as unknown as DeviceAttestation['platformDetails']
+    }
+    const result = await verifier.verify(challenge, ios)
+    expect(result.ok).to.equal(false)
+    expect(result.reason).to.match(/no Android platform details/)
+  })
+
+  it('(s4) NOT skipped (explicit false): byte-identical to today — unprovisioned keys still report not provisioned first', async () => {
+    const { verifier, challenge, attestation } = await build({ keysProvisioned: false, skip: false })
+    const result = await verifier.verify(challenge, attestation)
+    expect(result).to.deep.equal({ ok: false, reason: 'Play Console key material is not provisioned — see SETUP.md' })
+  })
+
+  it('(s5) only a boolean true skips: a truthy non-boolean runs both halves (the garbage token is refused)', async () => {
+    const { verifier, challenge, attestation } = await build({ keysProvisioned: true, skip: 'yes' })
+    const result = await verifier.verify(challenge, withGarbageToken(attestation))
+    expect(result.ok).to.equal(false)
+  })
+
+  it('(s6) NOT skipped + provisioned: a full pass carries no reason, so it cannot be confused with a skipped pass', async () => {
+    const { verifier, challenge, attestation } = await build({ keysProvisioned: true, skip: false })
+    const result = await verifier.verify(challenge, attestation)
+    expect(result).to.deep.equal({ ok: true })
   })
 })

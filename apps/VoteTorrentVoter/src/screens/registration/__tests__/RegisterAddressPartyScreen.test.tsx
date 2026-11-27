@@ -5,7 +5,7 @@
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
-import {Keyboard, Platform, ScrollView, View} from 'react-native';
+import {Keyboard, Platform, ScrollView, TextInput, View} from 'react-native';
 import '../../../i18n';
 
 const mockNavigate = jest.fn();
@@ -91,6 +91,26 @@ describe('RegisterAddressPartyScreen (REG-03, Step 2)', () => {
 		expect(tr.root.findByProps({testID: 'register-address-2'})).toBeDefined();
 		expect(tr.root.findByProps({testID: 'register-address-3'})).toBeDefined();
 		expect(tr.root.findByProps({testID: 'register-party'})).toBeDefined();
+	});
+
+	it('every text input and both header icons resolve to a >= 44dp touch target', () => {
+		const tr = renderScreen();
+		for (const testID of ['register-address-1', 'register-address-2', 'register-address-3']) {
+			// The host TextInput itself (not the FieldRow wrapper that forwards the testID).
+			const input = tr.root.findAllByType(TextInput).find(n => n.props.testID === testID);
+			const style = Object.assign({}, ...[].concat(input?.props.style ?? []));
+			expect(style.minHeight).toBeGreaterThanOrEqual(44);
+		}
+		for (const testID of ['register-back', 'register-close']) {
+			const style = Object.assign({}, ...[].concat(tr.root.findByProps({testID}).props.style ?? []));
+			expect(style.minHeight).toBeGreaterThanOrEqual(44);
+			expect(style.minWidth).toBeGreaterThanOrEqual(44);
+			// No negative margin: on Android a part pushed outside the clipping ScrollView is
+			// untappable, which shrank the effective target below the glyph's own box.
+			expect(style.marginHorizontal ?? 0).toBeGreaterThanOrEqual(0);
+			expect(style.marginLeft ?? 0).toBeGreaterThanOrEqual(0);
+			expect(style.marginRight ?? 0).toBeGreaterThanOrEqual(0);
+		}
 	});
 
 	it('picking a party option calls updateField(party, stable key) — not the localized label', () => {

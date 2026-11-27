@@ -96,8 +96,13 @@ export class ElectionProposeRevisionBuilder implements IElectionProposeRevisionB
     if (draft.timeline && typeof draft.timeline === 'object' && !Array.isArray(draft.timeline)) {
       const t = draft.timeline as Record<string, number>
       const ordered: Array<[string, string]> = [
-        ['votingStarts', 'tallyingStarts'],
-        ['tallyingStarts', 'certificationStarts']
+        ['votingStarts', 'accruingVotes'],
+        ['accruingVotes', 'hashingVotes'],
+        ['hashingVotes', 'releasingKeys'],
+        ['releasingKeys', 'tallyingStarts'],
+        ['tallyingStarts', 'validation'],
+        ['validation', 'certificationStarts'],
+        ['certificationStarts', 'closed']
       ]
       for (const [before, after] of ordered) {
         if (

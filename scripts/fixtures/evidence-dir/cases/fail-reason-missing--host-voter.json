@@ -1,0 +1,10 @@
+{
+  "base": "base-host",
+  "ops": [
+    {
+      "op": "delete",
+      "path": "64-evidence/host-voter/selftest/attempt-2/reason.txt"
+    }
+  ],
+  "expect": "reason-missing"
+}

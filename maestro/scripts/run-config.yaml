@@ -1,0 +1,9 @@
+# Workspace config used by scripts/run.sh, which runs ONE flow file per `maestro test` call
+# (so it can order flows, swap Metro between apps and record a verdict per flow). No `flows` or
+# tag filters here: run.sh does the selection.
+executionOrder:
+  continueOnFailure: false
+
+platform:
+  android:
+    disableAnimations: true

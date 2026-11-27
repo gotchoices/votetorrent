@@ -2,6 +2,8 @@ import { setCommit, setDisclose, randomBytes } from '@optimystic/quereus-plugin-
 import { RegistrationRegisterBuilder } from './builders/registration-register-builder.js'
 import { clampPageSize } from './registrant-list-query.js'
 import { collectPrivateFieldNames, sanitizeAccessTrailFields } from './access-trail-fields.js'
+import { findLikelyDuplicates, extractRegistrationIdentity } from './duplicate-detection.js'
+import type { DuplicateComparable } from './duplicate-detection.js'
 import type {
   DisclosedSelective,
   ElectionAttestationPolicy,
@@ -10,6 +12,7 @@ import type {
   ElectionRegistrationField,
   IRegistrationEngine,
   IRegistrationRegisterBuilder,
+  LikelyDuplicateRequest,
   PriorRejection,
   PrivateDetail,
   RegisterInit,
@@ -25,6 +28,12 @@ import type {
   RegistrantStatus,
   RegistrationBridgeKey,
   RegistrationBridgeKeyInit,
+  RegistrationDecisionPublishOptions,
+  RegistrationDecisionPublishPort,
+  RegistrationDecisionPublishResult,
+  RegistrationDuplicateClosure,
+  RegistrationDuplicateClosureRepairReport,
+  RegistrationDuplicateClosureState,
   RegistrationRequestDecision,
   RegistrationRequestInit,
   RegistrationRequestIssuerType,
@@ -35,6 +44,8 @@ import type {
   RegistrationRequestRead,
   RegistrationRequestStatus,
   RegistrationTransparencyStats,
+  RegistrationStaleCloseAvailability,
+  RegistrationStaleCloseInput,
   SelectiveLeaf,
   Signature
 } from '@votetorrent/vote-core'
@@ -81,6 +92,34 @@ export class MockRegistrationEngine implements IRegistrationEngine {
    * submission is always pending); only the seeded fixture rows below and a
    * future rejection-plan mock method populate them.
    */
+  private readonly duplicateClosures = new Map<string, RegistrationDuplicateClosureState>()
+
+  /**
+   * Mock-only test seam. Stands in for the real engine's `RegistrationDecision` 'd' /
+   * `ClosesRequestId` rows (D-44), so screens can be tested against duplicate closure
+   * without the schema. The request's own Status stays 'p', as in the real engine.
+   */
+  markDuplicateClosure (
+    requestId: string,
+    state: RegistrationDuplicateClosureState,
+    options?: { closedByRequestId?: string, closedAt?: string }
+  ): void {
+    // Mirrors vote-core models.ts RegistrationDuplicateClosure: 'closing' always has a closer (it is
+    // defined by another decision naming it) and never a closedAt; 'closed' may have a null closer
+    // (a 'd' row no decision names) and carries the 'd' row's DecidedAt.
+    const closedByRequestId = options?.closedByRequestId ?? null
+    if (state === 'closing' && closedByRequestId === null) {
+      throw new Error("markDuplicateClosure: a 'closing' request must name the request that closes it")
+    }
+    this.duplicateClosures.set(requestId, state)
+    this.duplicateClosureDetails.set(requestId, {
+      closedByRequestId,
+      ...(state === 'closed' ? { closedAt: options?.closedAt ?? new Date().toISOString() } : {})
+    })
+  }
+
+  private readonly duplicateClosureDetails = new Map<string, { closedByRequestId: string | null, closedAt?: string }>()
+
   private readonly registrationRequests = new Map<string, {
     id: string
     authorityId: string
@@ -193,6 +232,46 @@ export class MockRegistrationEngine implements IRegistrationEngine {
       submittedAt: iso(now - 30_000),
       receivedAt: iso(now - 30_000),
       requesterKey: repeatRequesterKey,
+      issuerType: 'registrant',
+      bridgeId: null,
+      status: 'p'
+    })
+
+    // D-43/D-44 (Phase 62 Plan 19): a look-alike PENDING pair — same public name, no dob
+    // conflict, two DIFFERENT requester keys — so `getLikelyDuplicateRequests` has something to
+    // flag against a fresh mock. Checked first: none of the four fixtures above form such a pair
+    // (the two PENDING entries, `fixture-request-bridge-1` and `fixture-request-pending-repeat`,
+    // carry different names). Both land in the SAME authority as every other fixture above, and
+    // neither touches `this.registrants` (same "no exact-count-assertion contamination" rule the
+    // comment below states for `approvedRegistrantId`).
+    const duplicatePairPayloadA: RegisterInit = {
+      registrant: { id: 'fixture-registrant-duplicate-a', authorityId, expiration: iso(now + 365 * 86_400_000) },
+      public: { lastName: 'Dupree', firstName: 'Sam' },
+      private: { expiration: iso(now + 365 * 86_400_000), details: [] }
+    }
+    this.registrationRequests.set('fixture-request-pending-duplicate-a', {
+      id: 'fixture-request-pending-duplicate-a',
+      authorityId,
+      payload: duplicatePairPayloadA,
+      submittedAt: iso(now - 20 * 60_000),
+      receivedAt: iso(now - 20 * 60_000),
+      requesterKey: 'fixture-requester-duplicate-a',
+      issuerType: 'registrant',
+      bridgeId: null,
+      status: 'p'
+    })
+    const duplicatePairPayloadB: RegisterInit = {
+      registrant: { id: 'fixture-registrant-duplicate-b', authorityId, expiration: iso(now + 365 * 86_400_000) },
+      public: { lastName: 'Dupree', firstName: 'Sam' },
+      private: { expiration: iso(now + 365 * 86_400_000), details: [] }
+    }
+    this.registrationRequests.set('fixture-request-pending-duplicate-b', {
+      id: 'fixture-request-pending-duplicate-b',
+      authorityId,
+      payload: duplicatePairPayloadB,
+      submittedAt: iso(now - 10 * 60_000),
+      receivedAt: iso(now - 10 * 60_000),
+      requesterKey: 'fixture-requester-duplicate-b',
       issuerType: 'registrant',
       bridgeId: null,
       status: 'p'
@@ -577,6 +656,8 @@ export class MockRegistrationEngine implements IRegistrationEngine {
     let candidates = [...this.registrationRequests.values()]
     if (filter?.authorityId !== undefined) candidates = candidates.filter((r) => r.authorityId === filter.authorityId)
     if (filter?.status !== undefined) candidates = candidates.filter((r) => r.status === filter.status)
+    // Mirrors the real engine's registrationRequestNotClosedSql: the pending filter drops closed/closing rows.
+    if (filter?.status === 'p') candidates = candidates.filter((r) => !this.duplicateClosures.has(r.id))
     if (filter?.issuerType !== undefined) candidates = candidates.filter((r) => r.issuerType === filter.issuerType)
     if (filter?.name !== undefined) {
       const q = filter.name.toLowerCase()
@@ -631,6 +712,7 @@ export class MockRegistrationEngine implements IRegistrationEngine {
       const hasPriorRejections = [...this.registrationRequests.values()].some(
         (other) => other.requesterKey === r.requesterKey && other.status === 'r' && other.id !== r.id
       )
+      const closure = this.duplicateClosures.get(r.id)
       return {
         requestId: r.id,
         authorityId: r.authorityId,
@@ -642,7 +724,8 @@ export class MockRegistrationEngine implements IRegistrationEngine {
         receivedAt: r.receivedAt,
         lastName: r.payload.public?.lastName,
         firstName: r.payload.public?.firstName,
-        hasPriorRejections
+        hasPriorRejections,
+        ...(closure !== undefined ? { duplicateClosure: closure } : {})
       }
     })
 
@@ -690,10 +773,10 @@ export class MockRegistrationEngine implements IRegistrationEngine {
     }
   }
 
-  /** D-06: in-memory parity, key-scoped (not authority-scoped), newest-`decidedAt`-first. */
-  async getPriorRejections (requesterKey: string): Promise<PriorRejection[]> {
+  /** D-06: in-memory parity, key-scoped (not authority-scoped), newest-`decidedAt`-first. `excludeRequestId` mirrors the `other.id !== r.id` idiom from `hasPriorRejections` above — an omitted argument excludes nothing. */
+  async getPriorRejections (requesterKey: string, excludeRequestId?: string): Promise<PriorRejection[]> {
     return [...this.registrationRequests.values()]
-      .filter((r) => r.requesterKey === requesterKey && r.status === 'r')
+      .filter((r) => r.requesterKey === requesterKey && r.status === 'r' && r.id !== excludeRequestId)
       .sort((a, b) => {
         const aAt = a.decidedAt ?? ''
         const bAt = b.decidedAt ?? ''
@@ -711,7 +794,11 @@ export class MockRegistrationEngine implements IRegistrationEngine {
   /** D-09: in-memory parity — counts + a median measured from receivedAt, matching the real engine's measurement basis. NO rating/score/rank surface. */
   async getRegistrationTransparencyStats (authorityId: string): Promise<RegistrationTransparencyStats> {
     const rows = [...this.registrationRequests.values()].filter((r) => r.authorityId === authorityId)
-    const pending = rows.filter((r) => r.status === 'p').length
+    // Mirrors registration-engine.ts getRegistrationTransparencyStats: pending excludes rows closed or
+    // closing as duplicates, which are reported separately (present only when > 0).
+    const pendingRows = rows.filter((r) => r.status === 'p')
+    const closedAsDuplicate = pendingRows.filter((r) => this.duplicateClosures.has(r.id)).length
+    const pending = pendingRows.length - closedAsDuplicate
     const approved = rows.filter((r) => r.status === 'a').length
     const rejected = rows.filter((r) => r.status === 'r').length
 
@@ -729,11 +816,87 @@ export class MockRegistrationEngine implements IRegistrationEngine {
         : Math.round((deltas[mid - 1]! + deltas[mid]!) / 2)
     }
 
-    return { pending, approved, rejected, medianTimeToDecisionMs }
+    return closedAsDuplicate > 0
+      ? { pending, approved, rejected, medianTimeToDecisionMs, closedAsDuplicate }
+      : { pending, approved, rejected, medianTimeToDecisionMs }
   }
 
   async rejectRegistrationRequest (_requestId: string, _decision: RegistrationRequestDecision, _signatureOrCallback: SignatureOrCallback): Promise<void> {
     // CONTRACT STUB — replaced by 48-12 (rejection)
     throw new Error('rejectRegistrationRequest is not implemented')
+  }
+
+  async getStaleCloseAvailability (_requestId: string): Promise<RegistrationStaleCloseAvailability | undefined> {
+    // The mock holds no 'vrg' sessions or thresholds: nothing is ever closable on its own.
+    return undefined
+  }
+
+  async closeStaleRegistrationRequest (_requestId: string, _input: RegistrationStaleCloseInput, _signatureOrCallback: SignatureOrCallback): Promise<void> {
+    throw new Error('closeStaleRegistrationRequest is not implemented')
+  }
+
+  // ---------- D-44 duplicate detection and closure (Phase 62 Plan 19) ----------
+
+  /**
+   * D-44 mock parity: builds `DuplicateComparable`s from this map's PENDING entries of the
+   * target's own authority (the mock holds no `RegistrationDecision` table, so every pending
+   * entry is implicitly "not closed") and runs the SAME shared matcher the real engine uses.
+   */
+  async getLikelyDuplicateRequests (requestId: string): Promise<LikelyDuplicateRequest[]> {
+    const target = this.registrationRequests.get(requestId)
+    if (!target || target.status !== 'p') return []
+
+    const pending = [...this.registrationRequests.values()].filter((r) => r.status === 'p' && r.authorityId === target.authorityId)
+    const comparables: DuplicateComparable[] = pending.map((r) => ({
+      requestId: r.id,
+      authorityId: r.authorityId,
+      requesterKey: r.requesterKey,
+      receivedAt: r.receivedAt,
+      identity: extractRegistrationIdentity(r.payload)
+    }))
+    const targetComparable = comparables.find((c) => c.requestId === requestId)
+    if (!targetComparable) return []
+
+    const byId = new Map(pending.map((r) => [r.id, r]))
+    return findLikelyDuplicates(targetComparable, comparables).map((m) => {
+      const r = byId.get(m.comparable.requestId)!
+      return {
+        requestId: r.id,
+        authorityId: r.authorityId,
+        issuerType: r.issuerType as RegistrationRequestIssuerType,
+        submittedAt: r.submittedAt,
+        receivedAt: r.receivedAt,
+        firstName: r.payload.public?.firstName,
+        lastName: r.payload.public?.lastName,
+        matchedOn: m.matchedOn
+      }
+    })
+  }
+
+  /** D-44 mock parity: a request is closed only when a test marked it via `markDuplicateClosure`. */
+  async getDuplicateClosure (requestId: string): Promise<RegistrationDuplicateClosure | undefined> {
+    const state = this.duplicateClosures.get(requestId)
+    if (state === undefined) return undefined
+    const details = this.duplicateClosureDetails.get(requestId) ?? { closedByRequestId: null }
+    return { requestId, state, closedByRequestId: details.closedByRequestId, ...(details.closedAt !== undefined ? { closedAt: details.closedAt } : {}) }
+  }
+
+  /** D-44 mock parity: the mock publishes no decisions, so nothing is ever "unpublished". */
+  async listUnpublishedRegistrationDecisions (_authorityId: string): Promise<string[]> {
+    return []
+  }
+
+  async publishRegistrationDecision (
+    _publisher: RegistrationDecisionPublishPort,
+    _requestId: string,
+    _options?: RegistrationDecisionPublishOptions
+  ): Promise<RegistrationDecisionPublishResult> {
+    // CONTRACT STUB — the mock holds no RegistrationDecision table
+    throw new Error('publishRegistrationDecision is not implemented')
+  }
+
+  async completeDuplicateClosures (_publisher: RegistrationDecisionPublishPort): Promise<RegistrationDuplicateClosureRepairReport> {
+    // CONTRACT STUB — the mock holds no RegistrationDecision table
+    throw new Error('completeDuplicateClosures is not implemented')
   }
 }

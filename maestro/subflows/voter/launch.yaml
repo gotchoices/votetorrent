@@ -1,0 +1,31 @@
+# Launch the Voter debug app and wait until Home has rendered.
+#
+# env (all set by the calling flow):
+#   APP_ID          the Voter package (default org.votetorrent.voter)
+#   CLEAR_STATE     "true" wipes app data first (pm clear), so the __DEV__ dev seed rebuilds its
+#                   "VoteTorrent Dev Network" + "Dev Voter Registration Election" from scratch.
+#                   That boot is CPU-heavy: give it BOOT_TIMEOUT_MS and keep the host quiet.
+#   BOOT_TIMEOUT_MS how long to wait for the tab bar (default 300000 in the flows)
+#
+# The boot shows a spinner ("Syncing" on a re-attach). A dev-seed boot offers "Continue without a
+# network" after 60 s; this subflow never taps it, because that abandons the dev seed and every
+# later journey needs the seeded election.
+appId: ${APP_ID}
+---
+- runFlow:
+    when:
+      true: ${CLEAR_STATE == 'true'}
+    commands:
+      - clearState: ${APP_ID}
+- launchApp:
+    appId: ${APP_ID}
+    stopApp: true
+- extendedWaitUntil:
+    visible:
+      id: "tab-vote"
+    timeout: ${BOOT_TIMEOUT_MS}
+- runFlow: ../common/dismiss-logbox.yaml
+- extendedWaitUntil:
+    visible:
+      id: "network-header-title"
+    timeout: 60000

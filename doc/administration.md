@@ -124,6 +124,17 @@ Represents the acceptance of an invitation to form a new Authority.
 - The primary Authority's SID (the CID of its initial administration) is encoded directly into the protocol.
 - This establishes the root of trust for the entire network.
 
+### Joining a network from a founding file
+
+- A founding file carries the network's first administration. Joining from it is only safe if the file is the one the
+  founding officers meant to share.
+- The exporting officer reads the network fingerprint shown on the export screen aloud, over a channel they trust (in
+  person or a voice call), never in the same message that carried the file.
+- The importing officer types that fingerprint into the import screen. The screen does not show the fingerprint of the
+  file before it matches.
+- If the typed fingerprint does not match the file, do not join: ask the sender for a new file and read the fingerprint
+  again.
+
 ### Administrative Actions
 
 - All actions performed by an Administration require signatures from the relevant Administrators.

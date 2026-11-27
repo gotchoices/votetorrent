@@ -55,6 +55,7 @@ import {
   seedProposedBallot,
   makeDistinctTestUser,
   addSiblingAuthority,
+  provisionTestIntakeRecipient,
 } from './fixtures/test-context.js'
 import type { TestAuthorityContext } from './fixtures/test-context.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
@@ -62,6 +63,7 @@ import type { TestKeyPair } from './fixtures/keys.js'
 import { toIsoZDatetime } from '../src/signing/ceremony-helpers.js'
 import { RegistrationEngine } from '../src/registration/registration-engine.js'
 import { SignatureTasksEngine } from '../src/tasks/signature-tasks-engine.js'
+import { UserEngine } from '../src/user/user-engine.js'
 import type { EngineContext } from '../src/types.js'
 import type {
   RegisterInit,
@@ -89,7 +91,28 @@ function makeNetworkRef () {
 
 async function setup (): Promise<TestAuthorityContext> {
   const net = await createTestNetwork()
-  return addTestAuthority(net)
+  const auth = await addTestAuthority(net)
+  // D-49 (62-31): submitPendingRequest below drives the real (now-sealed) submitRegistrationRequest
+  // against auth.authority.id — a single provisioning call here covers that address; call sites
+  // that address a FOREIGN or SIBLING authority provision that authority separately (see below).
+  await provisionTestIntakeRecipient(auth.ctx, auth.authority.id)
+  return auth
+}
+
+/**
+ * D-49: registers `foreignUser`'s intake encryption key for `foreignAuthorityId` so a request
+ * addressed there can be sealed — `foreignUser` is a genuine officer of that authority
+ * (`createForeignAuthority`), but is NOT `ctx.user` on the fixture's own `auth.ctx`, so a throwaway
+ * ctx object (sharing the same `db`) is built here rather than mutating `auth.ctx`.
+ */
+async function provisionForeignIntakeRecipient (auth: TestAuthorityContext, foreignAuthorityId: string, foreignUser: User): Promise<void> {
+  const foreignCtx = { db: auth.ctx.db, user: foreignUser }
+  // `UserEncryptionKey.SignerIsUser` is a hard EXISTS check against UserKey — `foreignUser` (seeded
+  // via `createForeignAuthority`'s raw `insert into User`) has no UserKey row by default (only the
+  // founder gets one from genesis). Bootstrap one for real first (62-14-SUMMARY's own documented
+  // pattern), then register the intake key.
+  await new UserEngine({ ...foreignUser, activeKeys: [] }, foreignCtx).addKey(foreignUser.activeKeys[0]!)
+  await provisionTestIntakeRecipient(foreignCtx, foreignAuthorityId)
 }
 
 /**
@@ -240,7 +263,8 @@ describe('registrant task seeding — authority scope and per-row isolation (CR-
     const auth = await setup()
     const selfUserId = auth.user.id
 
-    const { foreignAuthorityId } = await createForeignAuthority(auth)
+    const { foreignAuthorityId, foreignUser } = await createForeignAuthority(auth)
+    await provisionForeignIntakeRecipient(auth, foreignAuthorityId, foreignUser)
 
     // Fixture-integrity assertions — these must hold BEFORE any behavioural assertion is made.
     const officerCount = await countRows(
@@ -346,7 +370,8 @@ describe('registrant task seeding — authority scope and per-row isolation (CR-
     const { ballotId } = await seedProposedBallot(elec)
     await elec.electionEngine.submitBallotForConfirmation(ballotId)
 
-    const { foreignAuthorityId } = await createForeignAuthority(elec)
+    const { foreignAuthorityId, foreignUser } = await createForeignAuthority(elec)
+    await provisionForeignIntakeRecipient(elec, foreignAuthorityId, foreignUser)
     await submitPendingRequest(elec, { authorityId: foreignAuthorityId })
 
     const engine = new SignatureTasksEngine(makeNetworkRef(), elec.ctx)
@@ -673,6 +698,8 @@ describe('registrant task seeding — rollback recovery, skip telemetry and pass
       domainName: 'rad-only.example.com',
       scopes: ['rad'] as Scope[],
     })
+    await provisionTestIntakeRecipient(auth.ctx, scopedAuthorityId)
+    await provisionTestIntakeRecipient(auth.ctx, unscopedAuthorityId)
 
     // Fixture integrity — assert the premise instead of assuming it: the officer must genuinely be
     // an officer at BOTH, so a non-seed can only be attributable to the scope.

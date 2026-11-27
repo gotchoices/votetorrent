@@ -92,6 +92,18 @@ function hideKeyboard() {
 }
 
 describe("KeyboardAvoidingScreen", () => {
+	it("forwards an optional testID to its shell View", () => {
+		let tr!: renderer.ReactTestRenderer;
+		act(() => {
+			tr = renderer.create(
+				<KeyboardAvoidingScreen testID="shell-under-test">
+					<View testID="child" />
+				</KeyboardAvoidingScreen>,
+			);
+		});
+		expect(tr.root.findAllByType(View)[0].props.testID).toBe("shell-under-test");
+	});
+
 	it("subscribes to the show/hide pair this platform actually emits", () => {
 		renderShell();
 		expect(Object.keys(handlers).sort()).toEqual([HIDE_EVENT, SHOW_EVENT].sort());

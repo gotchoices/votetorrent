@@ -19,7 +19,7 @@ import 'reflect-metadata'
 import { expect } from 'chai'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { bytesToHex, hexToBytes } from '@noble/curves/utils.js'
-import { createTestNetwork, addTestAuthority, makeTestSignCallback } from './fixtures/test-context.js'
+import { createTestNetwork, addTestAuthority, makeTestSignCallback, provisionTestIntakeRecipient } from './fixtures/test-context.js'
 import { randomTestKeyPair } from './fixtures/keys.js'
 import type { TestKeyPair } from './fixtures/keys.js'
 import { toIsoZDatetime, toDeferredCheckDatetime, restoreCanonicalDatetime } from '../src/signing/ceremony-helpers.js'
@@ -56,7 +56,12 @@ function makeNetworkRef () {
 
 async function setup (): Promise<TestAuthority> {
   const net = await createTestNetwork()
-  return addTestAuthority(net)
+  const auth = await addTestAuthority(net)
+  // D-49 (62-31): every test in this file submits a pending request through the real
+  // submitRegistrationRequest() (submitPendingRequest below) — now sealed — so a single
+  // provisioning call here covers every call site.
+  await provisionTestIntakeRecipient(auth.ctx, auth.authority.id)
+  return auth
 }
 
 /** WR-10 prehash contract: mirrors authority-transport.spec.ts / registrant-approval.spec.ts. */
@@ -223,6 +228,18 @@ async function getRegistrantTask (engine: SignatureTasksEngine, requestId: strin
  * in a counting proxy" the plan specifies, constructed through SignatureTasksEngine's own
  * constructor-injected `signingEngine` field (48-11's documented injection seam).
  */
+/**
+ * 62-11 deviation (Rule 1): `SignatureTasksEngine.completeSignature`'s non-admin accept path now
+ * calls `signWithOutcome()` directly (D-10's crossedNow signal), not `sign()` — `sign()` itself
+ * still delegates to `signWithOutcome()` internally, but that internal call happens on the REAL
+ * engine, not through this Proxy, so a Proxy that intercepted only `sign` would silently stop
+ * observing every completeSignature-driven signature (both the "never signs on reject" case this
+ * spec asserts AND the accept control run that proves the spy is live). Intercepting
+ * `signWithOutcome` as well — the ONE signing primitive both `sign()` and `completeSignature`
+ * ultimately route through — keeps this spy accurate to its own doc comment's "sign() is never
+ * called" claim (which means "no signature is ever recorded", not "this one specific method
+ * name is never invoked").
+ */
 function makeCountingSigningEngine (ctx: EngineContext): { engine: ISigningEngine; counter: { calls: number } } {
   const real = new SigningEngine(ctx)
   const counter = { calls: 0 }
@@ -232,6 +249,12 @@ function makeCountingSigningEngine (ctx: EngineContext): { engine: ISigningEngin
         return async (...args: Parameters<ISigningEngine['sign']>) => {
           counter.calls += 1
           return target.sign(...args)
+        }
+      }
+      if (prop === 'signWithOutcome') {
+        return async (...args: Parameters<ISigningEngine['signWithOutcome']>) => {
+          counter.calls += 1
+          return target.signWithOutcome(...args)
         }
       }
       return Reflect.get(target, prop, receiver)
@@ -519,5 +542,56 @@ describe('D-06 reachability — getPriorRejections surfaces the record', () => {
     const engine = new RegistrationEngine(auth.ctx)
     const rejections = await engine.getPriorRejections(otherRequester.publicHex)
     expect(rejections, "a different requesterKey's history must not leak the other applicant's rejection").to.deep.equal([])
+  })
+
+  it('R3: excludes the named request from its own citation — a rejected request must not cite itself', async () => {
+    const auth = await setup()
+    const requester = randomTestKeyPair()
+    const { requestId } = await submitPendingRequest(auth, { requesterKey: requester })
+    await rejectRequest(auth, requestId, { rejectionReason: 'Self-citation must be excluded' })
+
+    const engine = new RegistrationEngine(auth.ctx)
+    const rejections = await engine.getPriorRejections(requester.publicHex, requestId)
+    expect(rejections, "a rejected request's own detail view must not cite itself as a prior rejection").to.deep.equal([])
+  })
+
+  it('R3: a genuine earlier sibling rejection still surfaces when a later request excludes only its own id', async () => {
+    const auth = await setup()
+    const requester = randomTestKeyPair()
+    const { requestId: firstRequestId } = await submitPendingRequest(auth, { requesterKey: requester })
+    await rejectRequest(auth, firstRequestId, { rejectionReason: 'Earlier sibling rejection' })
+
+    const { requestId: secondRequestId } = await submitPendingRequest(auth, { requesterKey: requester })
+    await rejectRequest(auth, secondRequestId, { rejectionReason: 'Later rejection under review' })
+
+    const engine = new RegistrationEngine(auth.ctx)
+    const rejections = await engine.getPriorRejections(requester.publicHex, secondRequestId)
+    expect(rejections.map((r) => r.requestId), 'excluding the second request must still surface the earlier sibling').to.deep.equal([firstRequestId])
+  })
+
+  it('R3: the one-argument call is unchanged — both rejections still surface with no exclusion supplied', async () => {
+    const auth = await setup()
+    const requester = randomTestKeyPair()
+    const { requestId: firstRequestId } = await submitPendingRequest(auth, { requesterKey: requester })
+    await rejectRequest(auth, firstRequestId, { rejectionReason: 'Earlier sibling rejection' })
+
+    const { requestId: secondRequestId } = await submitPendingRequest(auth, { requesterKey: requester })
+    await rejectRequest(auth, secondRequestId, { rejectionReason: 'Later rejection under review' })
+
+    const engine = new RegistrationEngine(auth.ctx)
+    const rejections = await engine.getPriorRejections(requester.publicHex)
+    expect(rejections.map((r) => r.requestId), 'the one-argument form must keep returning both rows, newest-DecidedAt-first').to.deep.equal([secondRequestId, firstRequestId])
+  })
+
+  it('R3: an exclusion id that matches nothing is inert — it must not filter any row', async () => {
+    const auth = await setup()
+    const requester = randomTestKeyPair()
+    const { requestId } = await submitPendingRequest(auth, { requesterKey: requester })
+    await rejectRequest(auth, requestId, { rejectionReason: 'Unknown exclusion id must not filter' })
+
+    const engine = new RegistrationEngine(auth.ctx)
+    const withUnknownExclusion = await engine.getPriorRejections(requester.publicHex, 'no-such-request')
+    const withNoExclusion = await engine.getPriorRejections(requester.publicHex)
+    expect(withUnknownExclusion.map((r) => r.requestId), 'an id matching nothing must not remove any row').to.deep.equal(withNoExclusion.map((r) => r.requestId))
   })
 })

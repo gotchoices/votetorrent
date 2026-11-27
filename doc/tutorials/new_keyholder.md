@@ -11,6 +11,15 @@ This tutorial aims to:
 
 The tutorial targets both election administrators who need to select and manage keyholders, and individuals who have been invited to serve as keyholders.
 
+## Key model (current design)
+
+- An election invites n keyholders, with a threshold k (2 <= k <= n) set on the election revision. Revealing results needs key share releases from at least k of the n keyholders during the appointed timeframe.
+- If keyholders do not perform their duties, up to n - k of them may be absent without blocking the tally. Fewer than k releases simply means results cannot yet be revealed.
+- No single keyholder, and no device, ever holds the full election private key. Keyholders jointly generate the key through a distributed key generation (DKG) with no trusted dealer, so even the keyholder who proposes the election never sees the whole key.
+- Up to k - 1 colluding keyholders learn nothing about the election private key, before or after release. Collusion among fewer than the threshold cannot unlock results early.
+- What a keyholder releases, when their turn comes, is their one key share — not the election private key itself. A single released share reveals nothing on its own.
+- Once at least k shares are public, anyone can verify each share against the published commitments and reconstruct the election private key themselves — the authority does not perform a special reconstruction step on anyone's behalf.
+
 ## Key Questions to Address
 
 ### Essential Understanding

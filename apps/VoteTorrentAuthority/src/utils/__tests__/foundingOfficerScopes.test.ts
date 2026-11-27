@@ -32,10 +32,11 @@ describe("FOUNDING_OFFICER_SCOPES (D-15)", () => {
 	});
 
 	test("the seed set does not contain rnp", () => {
-		// 'rnp' is in the TS Scope union (models.ts:160) but NOT in the
-		// schema's view Scope. Officer.ScopesValid (votetorrent.qsql:185) and
-		// ProposedOfficer.ScopesValid (:421) would reject it and the whole
-		// network-creation transaction would throw.
+		// 'rnp' was declared in the TS Scope union but never in the schema's
+		// view Scope; it was removed from the union on 2026-08-25. Officer.ScopesValid
+		// (votetorrent.qsql:185) and ProposedOfficer.ScopesValid (:421) reject any
+		// code the view does not define, which would throw the whole
+		// network-creation transaction. Kept as a regression guard.
 		expect(FOUNDING_OFFICER_SCOPES).not.toContain("rnp");
 	});
 

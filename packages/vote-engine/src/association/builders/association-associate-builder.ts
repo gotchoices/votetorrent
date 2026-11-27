@@ -28,6 +28,9 @@ import {
   BuilderAlreadyCommittedError,
   BuilderValidationError
 } from '@votetorrent/vote-core'
+// Shared with the authority-side verifiers — the D-06 binding is computed in exactly ONE place
+// (SIGN-05: no independent reimplementation).
+import { recomputeChallengeDigest } from '../verifiers/digest-binding.js'
 
 type SignatureOrCallback = Signature | ((digest: Uint8Array) => Promise<Signature>)
 
@@ -128,22 +131,87 @@ export class AssociationAssociateBuilder implements IAssociationAssociateBuilder
   }
 
   /**
-   * Cross-field: when the attestation carries an explicit platform-level
-   * nonce (`AndroidAttestationDetails.nonce` — the only platform detail this
-   * phase's model exposes a nonce on; `IOSAttestationDetails` has none), it
-   * must equal the draft's own `nonce` (the challenge nonce being answered).
+   * Cross-field anti-relay binding — the attestation must answer THIS challenge, for THIS device
+   * key.
+   *
+   * **Phase 51 fix (was a fail-open).** This validator previously gated on
+   * `platformDetails?.type === 'Android'` alone, so an iOS attestation skipped the check
+   * ENTIRELY — the `if` simply never matched and the function returned `[]`. It was unreachable
+   * only because nothing produced iOS attestations; it would have become a live gap the moment an
+   * iOS producer shipped. Found by spike 080 (P2), which showed the Android control correctly
+   * emitting `NONCE_MISMATCH` for a wrong nonce while the identical iOS case emitted nothing.
+   *
+   * The two platforms bind differently, so they are checked differently:
+   *
+   * - **Android** carries the raw challenge nonce in `platformDetails.nonce` (the producer sends
+   *   `challenge.nonce` verbatim there — NOT `BOUND_DIGEST`, see
+   *   `ATTESTATION-CONTRACT.md` Pitfall 5), so a direct string comparison is the whole check.
+   * - **iOS** has no raw-nonce field. Its binding is `BOUND_DIGEST = Digest(nonce, deviceKey)`,
+   *   which is recomputed here from the draft's own values and compared — and, separately, the
+   *   Secure Enclave voting key it names must be the very key being associated.
+   *
+   * This is a cheap, legible EARLY gate, not the security boundary: the real proof is the
+   * authority-side verifier (`AppAttestVerifier` / `PlayIntegrityVerifier`), which recomputes every
+   * digest from authority-held values and verifies signatures. A builder-side check only stops a
+   * malformed submission before it costs a round trip — it must never be mistaken for verification.
    */
   private static validateNonceCrossField (draft: Readonly<Draft>): BuilderError[] {
     if (draft.attestation === undefined || draft.attestation === null || draft.nonce === undefined || draft.nonce === null) return []
     const platformDetails = draft.attestation.platformDetails
-    if (platformDetails?.type === 'Android' && platformDetails.nonce !== draft.nonce) {
-      return [{
-        path: 'attestation.platformDetails.nonce',
-        code: 'NONCE_MISMATCH',
-        message: 'attestation.platformDetails.nonce must equal the challenge nonce being answered',
-        kind: 'cross-field'
-      }]
+    if (platformDetails === undefined) return []
+
+    if (platformDetails.type === 'Android') {
+      if (platformDetails.nonce !== draft.nonce) {
+        return [{
+          path: 'attestation.platformDetails.nonce',
+          code: 'NONCE_MISMATCH',
+          message: 'attestation.platformDetails.nonce must equal the challenge nonce being answered',
+          kind: 'cross-field'
+        }]
+      }
+      return []
     }
+
+    if (platformDetails.type === 'iOS') {
+      const errors: BuilderError[] = []
+      // The attested ceremony must name the key actually being associated. Without this an
+      // attestation could be bound to one key and submitted alongside another.
+      if (draft.deviceKey !== undefined && draft.deviceKey !== null &&
+          platformDetails.secureEnclavePublicKey !== draft.deviceKey) {
+        errors.push({
+          path: 'attestation.platformDetails.secureEnclavePublicKey',
+          code: 'DEVICE_KEY_MISMATCH',
+          message: 'attestation.platformDetails.secureEnclavePublicKey must equal the deviceKey being associated',
+          kind: 'cross-field'
+        })
+      }
+      // Recomputed, never trusted from the submission.
+      if (draft.deviceKey !== undefined && draft.deviceKey !== null) {
+        const expected = recomputeChallengeDigest(draft.nonce, draft.deviceKey)
+        if (platformDetails.boundDigest !== expected) {
+          errors.push({
+            path: 'attestation.platformDetails.boundDigest',
+            code: 'NONCE_MISMATCH',
+            message: 'attestation.platformDetails.boundDigest must equal Digest(nonce, deviceKey) for the challenge being answered',
+            kind: 'cross-field'
+          })
+        }
+      }
+      // At association time no counter has been stored yet, so the first assertion must be >= 1.
+      // A zero counter is what a replayed or fabricated assertion looks like.
+      if (!Number.isInteger(platformDetails.assertionCounter) || platformDetails.assertionCounter < 1) {
+        errors.push({
+          path: 'attestation.platformDetails.assertionCounter',
+          code: 'INVALID',
+          message: 'attestation.platformDetails.assertionCounter must be an integer >= 1',
+          kind: 'cross-field'
+        })
+      }
+      return errors
+    }
+
+    // Unknown platform tag: nothing to cross-check here. The authority-side verifier fails closed
+    // on it (`PlatformDispatchingAttestationVerifier`), which is where that decision belongs.
     return []
   }
 

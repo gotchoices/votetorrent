@@ -107,6 +107,7 @@ export function BallotTemplateForm({
 
 	return (
 		<ScrollView
+			keyboardShouldPersistTaps="handled"
 			style={[styles.container, { backgroundColor: colors.background }]}
 			contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
 			{/* 1. Election + Date context header */}

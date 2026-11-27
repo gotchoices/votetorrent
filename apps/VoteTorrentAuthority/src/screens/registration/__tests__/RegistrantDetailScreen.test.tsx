@@ -922,7 +922,7 @@ describe("RegistrantDetailScreen — the phase's integration seam", () => {
 	// D-10 failed-write retry latch
 	// -------------------------------------------------------------------------
 
-	it("D-10: a failed write keeps the card mounted and retryable (47-10's latch contract)", async () => {
+	it("D-10: a failed write keeps the card mounted and retryable (47-10's latch contract) (translated, no engine text)", async () => {
 		await seedRegistrant(mockRegistrationEngine);
 		const changeStatusSpy = jest
 			.spyOn(mockRegistrationEngine, "changeStatus")
@@ -935,7 +935,8 @@ describe("RegistrantDetailScreen — the phase's integration seam", () => {
 		typeInto(tr, prefix + "-typed-input", "Doe, Jane");
 		await press(tr, prefix + "-confirm");
 
-		expect(treeText(tr)).toContain("signed write failed");
+		expect(treeText(tr)).toContain("errorActionFailedGeneric");
+		expect(treeText(tr)).not.toContain("signed write failed");
 		present(tr, prefix + "-card");
 		expect(isDisabled(tr, prefix + "-confirm")).toBe(false);
 
@@ -1012,7 +1013,8 @@ describe("RegistrantDetailScreen — the phase's integration seam", () => {
 				node.props.testID.startsWith("selective-field-disclosure-")
 		);
 		expect(disclosureBadges.length).toBe(0);
-		expect(treeText(tr)).toContain("disclosure fetch failed");
+		expect(treeText(tr)).toContain("errorLoadFailedGeneric");
+		expect(treeText(tr)).not.toContain("disclosure fetch failed");
 		present(tr, "selective-field-row-Email");
 		present(tr, "selective-field-row-Address");
 	});
@@ -1073,7 +1075,8 @@ describe("RegistrantDetailScreen — the phase's integration seam", () => {
 		await press(tr, "registrant-detail-lifecycle-revoke");
 		typeInto(tr, "registrant-detail-confirm-revoke-typed-input", "Doe, Jane");
 		await press(tr, "registrant-detail-confirm-revoke-confirm");
-		expect(treeText(tr)).toContain("signed write failed");
+		expect(treeText(tr)).toContain("errorActionFailedGeneric");
+		expect(treeText(tr)).not.toContain("signed write failed");
 		await press(tr, "registrant-detail-confirm-revoke-dismiss");
 
 		await press(tr, "registrant-detail-lifecycle-renew");

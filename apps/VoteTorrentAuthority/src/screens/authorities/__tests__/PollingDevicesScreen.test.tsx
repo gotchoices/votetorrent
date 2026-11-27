@@ -29,7 +29,7 @@
 
 import React from "react";
 import renderer from "react-test-renderer";
-import { StyleSheet } from "react-native";
+import { StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 import { ChipButton } from "../../../components/ChipButton";
 import { CustomButton } from "../../../components/CustomButton";
 import type { PollingDevice } from "@votetorrent/vote-core";
@@ -629,8 +629,8 @@ describe("PollingDevicesScreen — D-08/D-13 whitelist CRUD", () => {
     expect(rowFlat.flexDirection).toBe("row");
 
     const [cardSlot, removeWrapper] = row.props.children as [
-      { props: { style?: unknown } },
-      { props: { style?: unknown } },
+      { props: { style?: StyleProp<ViewStyle> } },
+      { props: { style?: StyleProp<ViewStyle> } },
     ];
     const cardFlat = StyleSheet.flatten(cardSlot.props.style) as Record<string, unknown>;
     expect(cardFlat.flex).toBe(1);

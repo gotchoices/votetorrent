@@ -1,0 +1,33 @@
+// D-16: the shared web compilerOptions base for EVERY web workspace — this
+// package (@votetorrent/ui-web), apps/VoteTorrentDashboard, and
+// apps/VoteTorrentPublic once 53-06 lands.
+//
+// Referenced by RELATIVE PATH (e.g. ../../packages/ui-web/tsconfig.base.json),
+// never by package specifier — a package-specifier `extends` would require a
+// new key in this package's `exports` map, which `test/package-shape.test.mjs`
+// rung 5 forbids widening without an accompanying test/README update in
+// lockstep. Eight keys as of 59-02: `.`, `./components`, `./lifecycle`,
+// `./lifecycle-core`, `./facts`, `./tokens.css`, `./components.css`,
+// `./mutations`.
+//
+// Changing an option here changes it for every web workspace at once.
+//
+// Deliberately carries NO `include` and NO `files`: a base that declares
+// `include` silently overrides each extender's own include list.
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"jsx": "react-jsx",
+		"strict": true,
+		"noEmit": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"resolveJsonModule": true,
+		"allowJs": true,
+		"checkJs": true,
+		"types": ["node", "vite/client"]
+	}
+}

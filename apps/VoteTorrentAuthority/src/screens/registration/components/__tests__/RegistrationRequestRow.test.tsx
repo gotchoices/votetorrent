@@ -173,6 +173,27 @@ describe("RegistrationRequestRow — status ladder", () => {
 		}
 	});
 
+	it("a duplicate-closed or closing row renders the Closed pill in textSecondary, never Pending (UAT 62 test 12)", () => {
+		for (const duplicateClosure of ["closed", "closing"] as const) {
+			const row = makeRow({ status: "p", duplicateClosure });
+			const tr = renderRow(row);
+			const pillNodes = hostNodes(tr, "registration-request-row-status-" + row.requestId);
+			expect(pillNodes).toHaveLength(1);
+			const texts = pillNodes[0]
+				.findAll((n) => typeof n.type === "string" && (n.type as unknown) === "Text")
+				.map((n) => textOf(n));
+			expect(texts).toContain("registrationRequestStatusClosedDuplicate");
+			expect(texts).not.toContain("registrationRequestStatusPending");
+			const label = pillNodes[0]
+				.findAll((n) => typeof n.type === "string" && (n.type as unknown) === "Text")
+				.find((n) => textOf(n) === "registrationRequestStatusClosedDuplicate");
+			expect(colorOf(label!)).toBe("sentinel-textSecondary");
+			renderer.act(() => {
+				tr.unmount();
+			});
+		}
+	});
+
 	it("unknown status code renders the raw code with zero status pill nodes and does not throw", () => {
 		const row = makeRow({ status: "z" as unknown as RegistrationRequestListRow["status"] });
 		expect(() => renderRow(row)).not.toThrow();
@@ -314,5 +335,56 @@ describe("RegistrationRequestRow — onPress and negative space", () => {
 		expect(json).not.toContain("Cid");
 		expect(json).not.toContain("ssn");
 		expect(json).not.toContain("SSN");
+	});
+});
+
+describe("RegistrationRequestRow — long names never push the pill or chevron off the card (360dp)", () => {
+	const LONG = { lastName: "Fernández-Villalobos de la Concepción", firstName: "María Guadalupe" };
+
+	function nameNode(tr: renderer.ReactTestRenderer, requestId: string): renderer.ReactTestInstance {
+		const nodes = hostNodes(tr, "registration-request-row-name-" + requestId);
+		expect(nodes).toHaveLength(1);
+		return nodes[0];
+	}
+
+	it.each([
+		["pending", { status: "p" as const }],
+		["duplicate-closed", { status: "p" as const, duplicateClosure: "closed" as const }],
+		["approved", { status: "a" as const }],
+	])("%s: the name shrinks and ellipsizes on one line; the pill never shrinks", (_label, overrides) => {
+		const row = makeRow({ ...LONG, ...overrides });
+		const tr = renderRow(row);
+		const name = nameNode(tr, row.requestId);
+		expect(name.props.numberOfLines).toBe(1);
+		expect(flattenedStyle(name).flexShrink).toBeGreaterThanOrEqual(1);
+		expect(flattenedStyle(name).minWidth ?? 0).toBe(0);
+		const pill = hostNodes(tr, "registration-request-row-status-" + row.requestId);
+		expect(pill).toHaveLength(1);
+		expect(flattenedStyle(pill[0]).flexShrink).toBe(0);
+	});
+
+	it("the chevron keeps its width and the left column is bounded (flex:1, minWidth 0)", () => {
+		const row = makeRow(LONG);
+		const tr = renderRow(row);
+		const chevron = tr.root.findAll((n) => n.props.name === "chevron-right" && typeof n.type === "string");
+		expect(chevron).toHaveLength(1);
+		expect(flattenedStyle(chevron[0]).flexShrink).toBe(0);
+		// The left column is the name's ancestor that sits beside the chevron.
+		const column = chevron[0].parent!.children.find(
+			(c) => typeof c !== "string" && c !== chevron[0],
+		) as renderer.ReactTestInstance;
+		const columnStyle = flattenedStyle(column);
+		expect(columnStyle.flex).toBe(1);
+		expect(columnStyle.minWidth).toBe(0);
+	});
+
+	it("unknown status: the raw-code fallback in the pill slot never shrinks either", () => {
+		const row = makeRow({ ...LONG, status: "z" as unknown as RegistrationRequestListRow["status"] });
+		const tr = renderRow(row);
+		const raw = tr.root.findAll(
+			(n) => typeof n.type === "string" && (n.type as unknown) === "Text" && textOf(n) === "z",
+		);
+		expect(raw).toHaveLength(1);
+		expect(flattenedStyle(raw[0]).flexShrink).toBe(0);
 	});
 });

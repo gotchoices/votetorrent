@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Face ID reason</string>
+	<key>NSCameraUsageDescription</key>
+	<string></string>
+</dict>
+</plist>

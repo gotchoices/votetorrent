@@ -184,9 +184,9 @@ describe('P2P-11 residual: a relay-only peer has no address SEED (db-p2p 0.24.0)
 
   it('BLOCKER: findCluster sources a record\'s multiaddrs solely from what THIS node already knows', () => {
     const keyNet = readInstalled(...KEY_NETWORK)
-    // The producer reads the local peerStore...
+    // The producer reads the local peerStore records (1.30 renamed the lookup helper)...
     expect(
-      keyNet.includes('getPeerStoreAddrsByPeer'),
+      keyNet.includes('records[idStr]?.addrs') && keyNet.includes('unionPublishableAddrs('),
       'Expected findCluster to build peer addresses from the local peerStore lookup.'
     ).to.equal(true)
     // ...and publishes exactly that into the record, empty or not.
@@ -197,7 +197,7 @@ describe('P2P-11 residual: a relay-only peer has no address SEED (db-p2p 0.24.0)
     ).to.equal(true)
     // ...and explicitly tolerates the empty case rather than seeding it.
     expect(
-      /parsed\.length\s*===\s*0/.test(keyNet),
+      keyNet.includes('classifySelfDialability(parsed') && keyNet.includes('addressless.push('),
       'Expected findCluster to still merely COUNT addressless members rather than seed them.'
     ).to.equal(true)
   })
@@ -211,16 +211,20 @@ describe('P2P-11 residual: a relay-only peer has no address SEED (db-p2p 0.24.0)
     // CLASSIFIES an already-established connection; it never constructs a dialable address. The
     // assertion below is deliberately narrow to that distinction.
     const combined = `${keyNet}\n${book}`
+    const composingLines = combined.split('\n').filter((line) => {
+      const trimmed = line.trim()
+      return trimmed.includes('p2p-circuit/p2p/') && !trimmed.startsWith('*') && !trimmed.startsWith('//')
+    })
     expect(
-      combined.includes('p2p-circuit/p2p/'),
-      'db-p2p 0.24.0 never COMPOSES a `/<relay>/p2p-circuit/p2p/<peer>` address for an addressless ' +
-      'cohort member — the only `/p2p-circuit` reference is the isLimitedConnection classifier. If ' +
-      'a composition now appears, a seeding path may have landed: verify against a device run ' +
+      composingLines.length,
+      'db-p2p never COMPOSES a `/<relay>/p2p-circuit/p2p/<peer>` address for an addressless ' +
+      'cohort member — 1.30.0 mentions the shape only in a comment about relay-side dialing. If ' +
+      'a code line now composes one, a seeding path may have landed: verify against a device run ' +
       'before closing the upstream issue.'
-    ).to.equal(false)
+    ).to.equal(0)
     expect(
-      keyNet.includes('isLimitedConnection'),
-      'Expected the isLimitedConnection classifier to still exist — it is the reference point for ' +
+      keyNet.includes('classifySelfDialability'),
+      'Expected the self-dialability classifier to still exist — it is the reference point for ' +
       'the narrow assertion above.'
     ).to.equal(true)
   })
@@ -235,6 +239,6 @@ describe('P2P-11 residual: a relay-only peer has no address SEED (db-p2p 0.24.0)
       `peer-address-book:merge fired 0 times in 46,798 drone log lines while findCluster:done logged ` +
       `1,389 times from the same namespace. Installed version is now ${version} — if it moved, re-run ` +
       `the device proof before trusting the assertions above.`
-    ).to.equal('0.24.0')
+    ).to.equal('1.30.0')
   })
 })

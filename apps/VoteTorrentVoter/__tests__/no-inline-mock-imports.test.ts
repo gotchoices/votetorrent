@@ -31,13 +31,17 @@ function stripComments(source: string): string {
 
 const screenFiles = walk(screensDir);
 
-describe('no inline mockData imports in screens (SHELL-03, D-06)', () => {
-	test('no screen file imports providers/mockData', () => {
-		// Matches the import FORM (an `import ... from '...mockData'` statement, or a
-		// `require('...mockData')` call) rather than a bare substring, so unrelated identifiers
-		// containing "mockData" can't false-trip it.
-		const importRe =
-			/import\s[^;]*?from\s+['"][^'"]*mockData['"]|require\(\s*['"][^'"]*mockData['"]\s*\)/;
+// Every fixture module a screen must never read directly: the `__DEV__` lifecycle review fixture
+// (formerly `providers/mockData.ts`) and the test-only election/ballot fixtures.
+const FIXTURE_MODULE = String.raw`(?:mockData|devLifecycleFixtures|__fixtures__/[^'"]*)`;
+
+describe('no inline fixture imports in screens (SHELL-03, D-06)', () => {
+	test('no screen file imports a fixture module', () => {
+		// Matches the import FORM (an `import ... from '...'` statement, or a `require('...')`
+		// call) rather than a bare substring, so unrelated identifiers can't false-trip it.
+		const importRe = new RegExp(
+			String.raw`import\s[^;]*?from\s+['"][^'"]*${FIXTURE_MODULE}['"]|require\(\s*['"][^'"]*${FIXTURE_MODULE}['"]\s*\)`,
+		);
 
 		const offenders: string[] = [];
 		for (const file of screenFiles) {

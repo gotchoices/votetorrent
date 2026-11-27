@@ -1,0 +1,63 @@
+# Journey: a full registration request: Register now > three form steps > Submit > Confirm with
+# biometrics. On a single emulator with the dev seed nobody acts as the election office, so the
+# flow passes once the request is submitted (waiting / pending) or, if something approves it,
+# registered. Any error state fails the flow.
+#
+# Biometrics: the confirm raises a system BiometricPrompt. Maestro cannot touch the emulator's
+# fingerprint sensor, so run this through scripts/run.sh, which starts
+# scripts/biometric-autotouch.sh (adb emu finger touch 1 whenever the prompt has focus).
+#
+# Clears app data first, so it always starts unregistered.
+appId: ${APP_ID}
+name: "Voter: registration request"
+tags:
+  - voter
+  - registration
+  - biometric
+env:
+  APP_ID: "${typeof VOTER_APP_ID == 'undefined' ? 'org.votetorrent.voter' : VOTER_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+  REG_FIRST_NAME: "${typeof REG_FIRST_NAME == 'undefined' ? 'Ana' : REG_FIRST_NAME}"
+  REG_LAST_NAME: "${typeof REG_LAST_NAME == 'undefined' ? 'Lee' : REG_LAST_NAME}"
+  REG_DOB_DIGITS: "${typeof REG_DOB_DIGITS == 'undefined' ? '01152000' : REG_DOB_DIGITS}"
+  REG_EMAIL: "${typeof REG_EMAIL == 'undefined' ? 'ana.lee@example.com' : REG_EMAIL}"
+  REG_PHONE: "${typeof REG_PHONE == 'undefined' ? '5550101234' : REG_PHONE}"
+  REG_ADDRESS_1: "${typeof REG_ADDRESS_1 == 'undefined' ? '12 Main St' : REG_ADDRESS_1}"
+  REG_PARTY: "${typeof REG_PARTY == 'undefined' ? 'independent' : REG_PARTY}"
+  CONFIRM_TIMEOUT_MS: "${typeof CONFIRM_TIMEOUT_MS == 'undefined' ? '180000' : CONFIRM_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/voter/launch.yaml
+    env:
+      CLEAR_STATE: "true"
+- runFlow:
+    file: ../subflows/voter/open-tab.yaml
+    env:
+      TAB: registration
+- extendedWaitUntil:
+    visible:
+      id: "registration-card-register-now"
+    timeout: 60000
+- tapOn:
+    id: "registration-card-register-now"
+- runFlow: ../subflows/voter/fill-registration-form.yaml
+# Review step shows what will be submitted.
+- assertVisible:
+    id: "register-review-.*"
+- tapOn:
+    id: "register-submit"
+- extendedWaitUntil:
+    visible:
+      id: "confirmation-confirm-face-id"
+    timeout: 30000
+- tapOn:
+    id: "confirmation-confirm-face-id"
+# The host helper answers the BiometricPrompt here.
+- extendedWaitUntil:
+    visible:
+      id: "confirmation-(waiting|pending|registered|error|identity-lost)"
+    timeout: ${CONFIRM_TIMEOUT_MS}
+- assertNotVisible:
+    id: "confirmation-(error|identity-lost)"
+- assertVisible:
+    id: "confirmation-(waiting|pending|registered)"

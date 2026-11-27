@@ -1,0 +1,12 @@
+{
+  "base": "base-device",
+  "args": [],
+  "ops": [
+    {
+      "op": "append",
+      "path": "64-device-evidence/rehearsal-2026-10-20/session.md",
+      "content": "\n## Run 1 network n6 (64-58)\nN6-NET: Rehearsal Network 6\nN6-COLD-START: at=2026-10-23T10:00:00Z\nN6-APP-PIDS: officer=1111 p63=2222 redmi=3333\n## Run 1 network n6 re-warm 1 (64-57)\nN6-REWARM-1-COMMANDS-LOG-START\nN6-COLD-START-R1: at=2026-10-24T10:00:00Z\nN6-APP-PIDS-R1: officer=1112 p63=2223 redmi=3334\nN6-REWARM-1-READBACK: ok\n"
+    }
+  ],
+  "expect": "PASS"
+}

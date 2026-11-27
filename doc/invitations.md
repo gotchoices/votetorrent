@@ -100,3 +100,23 @@ if (isInviteValid && isInviteeValid) {
 
 ### Step 4: Prevent Reuse
 - Once the public claim is validated and recorded, any subsequent claims using the same invitation public key are invalidated.
+
+
+## Answering, withdrawing and re-sending
+
+- Answering an invitation needs the one-time key that travels in the share. A share without the key, or with the wrong
+  key, is refused and nothing is written.
+- Once the share is pasted into the app it is masked: the screen shows a short summary, not the key.
+- Only the officer who sent an invitation, or an administrator holding the scope that issues that kind of invitation,
+  may withdraw it or re-send it. Any other officer is told they are not allowed.
+- After a withdrawal, an authorized officer may issue a new invitation to the same person.
+
+## Keyholder invitations
+
+- A keyholder invitation is sent to a named keyholder of the election, chosen from the election's list.
+- The sender chooses how long it stays valid: 1 hour, 12 hours, 24 hours (the default), 3 days or 7 days.
+- The officer who sent the invitation cannot accept it.
+- A device holds at most one live keyholder seat per election revision.
+- When the election is revised, a keyholder who accepted an earlier revision must accept a new invitation for the new
+  revision.
+- Keyholder invitations cannot be re-sent: send a new one.

@@ -15,18 +15,33 @@ interface InfoCardProps {
 		value?: string;
 	}>;
 	icon?: string;
+	/** Title weight. Entity cards keep the default `cardTitle`; plain navigation
+	 *  rows (e.g. Settings) use `defaultSemiBold` so they don't outweigh the
+	 *  section heading above them. */
+	titleType?: "cardTitle" | "defaultSemiBold";
 	onPress?: () => void;
+	/** When set, the icon is its own 44pt button: pressing it calls this and NOT `onPress`
+	 *  (a Find card opens on a body tap and pins only on the labelled thumbtack). */
+	onIconPress?: () => void;
+	iconAccessibilityLabel?: string;
 }
 
-export function InfoCard({ image, title, subtitle, additionalInfo, icon, onPress }: InfoCardProps) {
+export function InfoCard({ image, title, subtitle, additionalInfo, icon, titleType = "cardTitle", onPress, onIconPress, iconAccessibilityLabel }: InfoCardProps) {
 	const { colors } = useTheme() as ExtendedTheme;
 
 	return (
-		<TouchableOpacity onPress={onPress} style={[styles.card, { backgroundColor: colors.card }]}>
+		<TouchableOpacity
+			onPress={onPress}
+			style={[styles.card, { backgroundColor: colors.card }]}
+			// Explicit label so the trailing icon glyph doesn't add a stray ", " to what
+			// screen readers announce.
+			accessibilityRole={onPress ? "button" : undefined}
+			accessibilityLabel={[title, subtitle].filter(Boolean).join(", ") || undefined}
+		>
 			{image && <Image source={image} style={styles.image} />}
 			<View style={[styles.content, image ? styles.contentWithImage : null]}>
 				{title && (
-					<ThemedText type="cardTitle" numberOfLines={1}>
+					<ThemedText type={titleType} numberOfLines={1}>
 						{title}
 					</ThemedText>
 				)}
@@ -55,7 +70,18 @@ export function InfoCard({ image, title, subtitle, additionalInfo, icon, onPress
 						</View>
 					))}
 			</View>
-			{icon && <FontAwesome6 name={icon} size={20} color={colors.text} style={styles.icon} />}
+			{icon && onIconPress ? (
+				<TouchableOpacity
+					onPress={onIconPress}
+					accessibilityRole="button"
+					accessibilityLabel={iconAccessibilityLabel}
+					style={styles.iconButton}
+				>
+					<FontAwesome6 name={icon} size={20} color={colors.text} />
+				</TouchableOpacity>
+			) : icon ? (
+				<FontAwesome6 name={icon} size={20} color={colors.text} style={styles.icon} />
+			) : null}
 		</TouchableOpacity>
 	);
 }
@@ -115,5 +141,12 @@ const styles = StyleSheet.create({
 	},
 	icon: {
 		marginLeft: 8,
+	},
+	iconButton: {
+		marginLeft: 8,
+		minWidth: 44,
+		minHeight: 44,
+		alignItems: "center",
+		justifyContent: "center",
 	},
 });

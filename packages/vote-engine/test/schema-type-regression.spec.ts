@@ -330,6 +330,9 @@ describe('schema-sql.ts regeneration freshness lock (47-01 / D-16)', () => {
     // is NOT listed here would escape this lock entirely and be free to drift — the exact
     // failure mode the lock was written to catch.
     'run-recovery-branch-proof.sh',
+    // 52-07 (D-05): added with SEALED_PAYLOAD_PROOF_ENABLED, the on-device [seal-kat]
+    // Hermes gate for @noble/ciphers.
+    'run-sealed-payload-proof.sh',
   ]
 
   /** The `export const NAME` identifiers in a source blob, in order of appearance. */

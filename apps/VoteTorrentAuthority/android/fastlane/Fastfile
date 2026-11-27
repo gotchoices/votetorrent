@@ -7,14 +7,21 @@
 #   KEY_ALIAS_AUTHORITY         optional; defaults to org.votetorrent.authority
 #
 # Lanes:
-#   fastlane android verify_keystore  — prove the env/keystore without building (seconds)
-#   fastlane android prepare          — yarn install + build the workspace packages
-#   fastlane android build_debug      — debug-signed APK, needs none of the above vars
-#   fastlane android build_apk        — signed release APK with the real app id
-#   fastlane android build_apk_dev    — release-mode APK signed with the DEBUG key
-#   fastlane android build_aab        — signed release bundle for the Play Store
+#   fastlane android verify_keystore         — prove the env/keystore without building (seconds)
+#   fastlane android verify_appattest_config — prove the D-13/D-14/D-15 App Attest config is
+#                                              releasable, without building (seconds)
+#   fastlane android prepare                 — yarn install + build the workspace packages
+#   fastlane android build_debug             — debug-signed APK, needs none of the above vars
+#   fastlane android build_apk               — signed release APK with the real app id
+#   fastlane android build_apk_dev           — release-mode APK signed with the DEBUG key
+#   fastlane android build_aab               — signed release bundle for the Play Store
 #
 # The heavy lifting is shared with the Voter app — see scripts/fastlane/vt_signing.rb.
+#
+# build_apk and build_aab are real publish lanes, so both open with the D-14 App Attest
+# release gate (scripts/fastlane/vt_appattest_release_gate.rb) — see that file for why.
+# build_debug, build_apk_dev, prepare and verify_keystore are deliberately NOT gated:
+# none of them can produce a shippable release artifact.
 
 default_platform(:android)
 
@@ -24,6 +31,7 @@ APP_DIR      = File.expand_path("../..", FASTLANE_DIR)
 REPO_ROOT    = File.expand_path("../../../..", FASTLANE_DIR)
 
 require File.join(REPO_ROOT, "scripts", "fastlane", "vt_signing")
+require File.join(REPO_ROOT, "scripts", "fastlane", "vt_appattest_release_gate")
 
 APP = VtSigning::App.new(
   name: "authority",
@@ -44,6 +52,11 @@ platform :android do
     config
   end
 
+  desc "Prove the D-13/D-14/D-15 App Attest config is releasable, without running a build"
+  lane :verify_appattest_config do
+    VtAppAttestReleaseGate.assert_releasable!(REPO_ROOT)
+  end
+
   desc "Install workspace dependencies and build the packages the app imports"
   lane :prepare do
     UI.message("Running yarn install at #{REPO_ROOT} …")
@@ -62,6 +75,7 @@ platform :android do
 
   desc "Build a signed release APK with the real application id"
   lane :build_apk do
+    VtAppAttestReleaseGate.assert_releasable!(REPO_ROOT)
     APP.apply_signing_env!
     APP.require_workspace!
     gradle(task: "assembleRelease", project_dir: ANDROID_DIR)
@@ -81,6 +95,7 @@ platform :android do
 
   desc "Build a signed release App Bundle (.aab) for the Play Store"
   lane :build_aab do
+    VtAppAttestReleaseGate.assert_releasable!(REPO_ROOT)
     APP.apply_signing_env!
     APP.require_workspace!
     gradle(task: "bundleRelease", project_dir: ANDROID_DIR)

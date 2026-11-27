@@ -39,7 +39,8 @@ export function useAccessTrailVisit (record: AccessTrailRecorder): AccessTrailVi
   }
 
   // The previous state shouldFlushForAppState compares against.
-  const appStateRef = useRef<AppStateStatus>(AppState.currentState ?? 'active')
+  // RN 0.87 types currentState as string; its runtime values are still AppStateStatus.
+  const appStateRef = useRef<AppStateStatus>((AppState.currentState as AppStateStatus | null | undefined) ?? 'active')
 
   // Empty dependency array is the D-14 visit definition made structural:
   // the effect runs once on mount and its cleanup runs once on unmount, so

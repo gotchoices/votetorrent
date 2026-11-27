@@ -1,0 +1,40 @@
+# Journey: Settings > Join a network, with a code that does not decode. Expects the inline
+# "isn't a valid join code" style error and no join. Safe on any device: nothing is joined.
+appId: ${APP_ID}
+name: "Voter: join network rejects a bad code"
+tags:
+  - voter
+  - smoke
+  - join
+env:
+  APP_ID: "${typeof VOTER_APP_ID == 'undefined' ? 'org.votetorrent.voter' : VOTER_APP_ID}"
+  BOOT_TIMEOUT_MS: "${typeof BOOT_TIMEOUT_MS == 'undefined' ? '300000' : BOOT_TIMEOUT_MS}"
+---
+- runFlow:
+    file: ../subflows/voter/launch.yaml
+    env:
+      CLEAR_STATE: "false"
+- runFlow:
+    file: ../subflows/voter/open-tab.yaml
+    env:
+      TAB: settings
+- tapOn:
+    id: "settings-join-network-row"
+- extendedWaitUntil:
+    visible:
+      id: "join-network-code-input"
+    timeout: 15000
+- assertVisible:
+    id: "join-network-scan"
+- assertVisible:
+    id: "join-network-paste"
+- tapOn:
+    id: "join-network-code-input"
+- inputText: "not-a-join-code"
+- extendedWaitUntil:
+    visible:
+      id: "join-network-code-error"
+    timeout: 10000
+- assertNotVisible:
+    id: "join-network-preview"
+- back

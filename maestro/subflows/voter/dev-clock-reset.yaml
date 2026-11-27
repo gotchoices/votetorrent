@@ -1,0 +1,18 @@
+# Step the __DEV__ clock-offset control back to live ("DEV: Clock offset 0").
+# Run on the Timeline tab. env: APP_ID
+appId: ${APP_ID}
+---
+- repeat:
+    times: 14
+    while:
+      notVisible:
+        id: "timeline-dev-clock-offset-label"
+        text: "DEV: Clock offset 0"
+    commands:
+      - tapOn:
+          id: "timeline-dev-clock-offset"
+      - waitForAnimationToEnd:
+          timeout: 3000
+- assertVisible:
+    id: "timeline-dev-clock-offset-label"
+    text: "DEV: Clock offset 0"

@@ -10,6 +10,8 @@ import {
 	isNoOpTransition,
 	flattenPrivateDetails,
 	toPublicTierRows,
+	selectiveTierReadState,
+	SELECTIVE_TIER_READ_STATE_COPY,
 } from "../registrant-detail-model";
 import type { PrivateDetail, RegistrantPublic, RegistrantStatus } from "@votetorrent/vote-core";
 
@@ -199,12 +201,12 @@ describe("toPublicTierRows", () => {
 });
 
 describe("negative space — this module's runtime surface is pinned", () => {
-	it("exposes exactly the five runtime bindings; no export accepts or returns a signature, engine, or scope shape", () => {
+	it("exposes exactly the seven runtime bindings; no export accepts or returns a signature, engine, or scope shape", () => {
 		// `export type`/`export interface` (LifecycleActionId, LifecycleActionMeta,
 		// DetailFieldRow — three of the eight names in the plan's must_haves.artifacts
 		// export list) produce NO runtime binding at all: TypeScript erases them
 		// entirely, so they never appear in `Object.keys` of the compiled module.
-		// The module's actual JS surface is therefore these five names; the other
+		// The module's actual JS surface is therefore these seven names; the other
 		// three are pinned at compile time instead — any external use of those
 		// type names already fails to typecheck if this module stopped exporting
 		// them. Together the two mechanisms pin the same eight-name surface the
@@ -219,7 +221,33 @@ describe("negative space — this module's runtime surface is pinned", () => {
 				"isNoOpTransition",
 				"flattenPrivateDetails",
 				"toPublicTierRows",
+				"privateTierReadState",
+				"PRIVATE_TIER_READ_STATE_COPY",
+				"selectiveTierReadState",
+				"SELECTIVE_TIER_READ_STATE_COPY",
 			].sort(),
 		);
+	});
+});
+
+describe("selectiveTierReadState (M1/M2)", () => {
+	it("M1: readable states", () => {
+		expect(selectiveTierReadState(undefined)).toBe("readable");
+		expect(selectiveTierReadState("opened")).toBe("readable");
+		expect(selectiveTierReadState("unsealed")).toBe("readable");
+	});
+	it("M1: unread states", () => {
+		expect(selectiveTierReadState("not-a-recipient")).toBe("not-a-recipient");
+		expect(selectiveTierReadState("no-opener")).toBe("no-key");
+		expect(selectiveTierReadState("unreadable")).toBe("unreadable");
+		expect(selectiveTierReadState("tampered")).toBe("tampered");
+	});
+	it("M2: copy map", () => {
+		expect(SELECTIVE_TIER_READ_STATE_COPY).toEqual({
+			"not-a-recipient": "registrantSelectiveNotRecipient",
+			"no-key": "registrationContentNoKey",
+			unreadable: "registrantSelectiveUnreadable",
+			tampered: "registrantSelectiveTampered",
+		});
 	});
 });

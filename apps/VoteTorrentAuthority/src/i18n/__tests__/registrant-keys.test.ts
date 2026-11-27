@@ -161,8 +161,10 @@ describe('Phase 47 registrant/attestation/device i18n key groups', () => {
 		const REGISTRATION_POLICY_RE = /^registrationPolicy[A-Z]/;
 		const enPolicyKeys = Object.keys(enTranslation).filter((k) => REGISTRATION_POLICY_RE.test(k));
 		const esPolicyKeys = Object.keys(esTranslation).filter((k) => REGISTRATION_POLICY_RE.test(k));
-		expect(enPolicyKeys).toHaveLength(55);
-		expect(esPolicyKeys).toHaveLength(55);
+		// 62-10 added 7 registrationPolicyReassociation* device-change review keys, moving the pin
+		// from 55 to 62.
+		expect(enPolicyKeys).toHaveLength(62);
+		expect(esPolicyKeys).toHaveLength(62);
 
 		expect(enTranslation.registrationEnds).toBe('Registration Ends');
 		expect(enTranslation.registrationOpens).toBe('Registration Opens');

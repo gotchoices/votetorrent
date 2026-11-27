@@ -3,7 +3,7 @@
  * ballot navigation-flow test. Mounts a real `NavigationContainer` + real `VoterAppProvider` +
  * real `BallotSelectionProvider` around a minimal native-stack harness wiring the real
  * `BallotScreen`, `IndividualQuestionScreen`, `ReviewSubmitScreen` plus `DummyScreen` stand-ins
- * for `Home`/`ElectionInfo`/`OfficeInfo`/`CandidateInfo` — mirrors
+ * for `Home` — mirrors
  * `registration-flow.test.tsx`'s real-provider harness + `tr.root.findByProps({testID})`
  * interaction style (no `@testing-library/react-native`), and captures `useBallotSelection()`
  * via a Probe (mirrors `BallotSelectionProvider.test.tsx`/`IndividualQuestionScreen.test.tsx`'s
@@ -18,10 +18,10 @@
  * 3. VOTE-01/D-07: pressing `ballot-save-exit` returns to `Home` and `selectionMap` still holds
  *    the selection made before Save & Exit (retained across the round trip — this is the
  *    integration-level proof that D-07's "re-entering the ballot resumes" claim actually holds,
- *    now that `VoteStackNavigator` is wrapped in `BallotSelectionProvider`, Plan 07 Task 1).
- * 4. VOTE-03: the office row's "Learn about this office" link navigates to `OfficeInfo`, and
- *    `IndividualQuestion`'s "Learn about this candidate" link navigates to `CandidateInfo`
- *    (info-modal reachability).
+ *    now that `BallotSelectionProvider` is mounted app-scoped via `AppStateProviders` (Phase 59
+ *    D-22, this test's own harness wraps the provider directly — see below).
+ * 4. VOTE-03: the office row's "Learn about this office" link and `IndividualQuestion`'s "Learn
+ *    about this candidate" link open their in-place InfoDialogs.
  */
 import React from 'react';
 import renderer from 'react-test-renderer';
@@ -36,7 +36,7 @@ import {VoterAppProvider, useVoterApp} from '../../../providers/VoterAppProvider
 import {BallotSelectionProvider, useBallotSelection} from '../../../providers/BallotSelectionProvider';
 import type {BallotSelectionContextType} from '../../../providers/BallotSelectionProvider';
 import type {VoterAppContextType} from '../../../providers/types';
-import {mockBallot} from '../../../providers/mockData';
+import {FIXTURE_BALLOT} from '../../../providers/__fixtures__/voter-fixtures';
 import BallotScreen from '../BallotScreen';
 import IndividualQuestionScreen from '../IndividualQuestionScreen';
 import ReviewSubmitScreen from '../ReviewSubmitScreen';
@@ -87,9 +87,6 @@ function renderFlow(initialRouteName: 'Home' | 'Ballot' | 'IndividualQuestion') 
 							<Stack.Screen name="Ballot" component={BallotScreen} />
 							<Stack.Screen name="IndividualQuestion" component={IndividualQuestionScreen} />
 							<Stack.Screen name="ReviewSubmit" component={ReviewSubmitScreen} />
-							<Stack.Screen name="ElectionInfo" component={DummyScreen} />
-							<Stack.Screen name="OfficeInfo" component={DummyScreen} />
-							<Stack.Screen name="CandidateInfo" component={DummyScreen} />
 						</Stack.Navigator>
 					</BallotSelectionProvider>
 				</VoterAppProvider>
@@ -104,7 +101,7 @@ describe('ballot navigation flow (VOTE-01/02/03)', () => {
 		const {tr, capturedSelection} = renderFlow('IndividualQuestion');
 		await flushBoot();
 
-		const firstOffice = mockBallot.offices[0];
+		const firstOffice = FIXTURE_BALLOT.offices[0];
 		const firstCandidateId = firstOffice.candidates[0].id;
 
 		const candidateRow = tr.root.findByProps({testID: `candidate-row-${firstCandidateId}`});
@@ -149,7 +146,7 @@ describe('ballot navigation flow (VOTE-01/02/03)', () => {
 		});
 		await flushBoot();
 
-		const firstOffice = mockBallot.offices[0];
+		const firstOffice = FIXTURE_BALLOT.offices[0];
 		const firstCandidateId = firstOffice.candidates[0].id;
 		renderer.act(() => {
 			capturedSelection.value!.toggleCandidate(firstOffice.id, firstCandidateId, firstOffice.voteFor);
@@ -185,7 +182,7 @@ describe('ballot navigation flow (VOTE-01/02/03)', () => {
 		const {tr} = renderFlow('IndividualQuestion');
 		await flushBoot();
 
-		const firstCandidateId = mockBallot.offices[0].candidates[0].id;
+		const firstCandidateId = FIXTURE_BALLOT.offices[0].candidates[0].id;
 		expect(tr.root.findAllByProps({testID: 'info-dialog'})).toHaveLength(0);
 
 		const learnLink = tr.root.findByProps({testID: `candidate-learn-${firstCandidateId}`});

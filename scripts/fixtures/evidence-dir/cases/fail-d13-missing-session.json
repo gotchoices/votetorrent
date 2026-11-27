@@ -1,0 +1,11 @@
+{
+  "base": "base-device",
+  "ops": [
+    {
+      "op": "write",
+      "path": "64-device-evidence/rehearsal-2026-10-20/session.md",
+      "content": "R1-NEEDLE-VOTER: hv1\n"
+    }
+  ],
+  "expect": "d13-missing-session"
+}

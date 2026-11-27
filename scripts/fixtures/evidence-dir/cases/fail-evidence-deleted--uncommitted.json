@@ -1,0 +1,16 @@
+{
+  "base": "base-host",
+  "args": [
+    "--git"
+  ],
+  "ops": [
+    {
+      "op": "git-init"
+    },
+    {
+      "op": "delete",
+      "path": "64-evidence/relay/factory-leg-run-1/run.log"
+    }
+  ],
+  "expect": "evidence-deleted"
+}

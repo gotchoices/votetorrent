@@ -1,0 +1,14 @@
+{
+  "base": "base-device",
+  "ops": [
+    {
+      "op": "delete",
+      "path": "64-device-evidence/checks/camera-gate/attempt-1/android/failure-excerpt.txt"
+    },
+    {
+      "op": "delete",
+      "path": "64-device-evidence/checks/camera-gate/attempt-1/android/logscan.md"
+    }
+  ],
+  "expect": "failure-without-log"
+}

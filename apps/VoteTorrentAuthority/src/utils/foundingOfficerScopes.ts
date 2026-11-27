@@ -8,15 +8,14 @@ import type { Scope } from "@votetorrent/vote-core";
  * brand-new network, with no other officer able to grant it to them.
  *
  * The set below is the schema's `view Scope`
- * (packages/vote-core/schema/votetorrent.qsql:56-69) — NOT the TypeScript
- * `Scope` union (packages/vote-core/src/authority/models.ts:154-168). The
- * two have drifted: the TS union additionally declares `'rnp'`, which the
- * view does not define. `Officer.ScopesValid` (votetorrent.qsql:185) and
- * `ProposedOfficer.ScopesValid` (votetorrent.qsql:421) both reject any
- * scope code absent from `view Scope`, so seeding `'rnp'` would make the
- * founding-officer insert — part of the network-creation transaction —
- * throw, aborting "Add Network" entirely. See 47-02-PLAN.md's
- * `<blocking_correction>` for the full trace.
+ * (packages/vote-core/schema/votetorrent.qsql:56-69). The TypeScript `Scope`
+ * union used to drift from it — it declared `'rnp'`, which the view never
+ * defined — and seeding that code would have made the founding-officer insert
+ * (part of the network-creation transaction) throw against
+ * `Officer.ScopesValid` (votetorrent.qsql:185), aborting "Add Network"
+ * entirely. See 47-02-PLAN.md's `<blocking_correction>` for that trace. The
+ * drift was removed on 2026-08-25, so union and view now agree; this array
+ * still pins the seed set against the schema.
  *
  * This is exported as ONE shared constant, not duplicated as two inline
  * literals, because the two seed call sites (`AddNetworkScreen`,

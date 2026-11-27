@@ -79,6 +79,10 @@ RegistrantSelective — authority-held, committed separately from RegistrantPriv
 
 `PrivateDetails` and `SelectiveDetails` are JSON arrays of attribute triples `{ name, value, hint? }`, where `value` is either a scalar (a top-level field) or a nested array of the same triples (an object), and `hint` is optional validation metadata for that scalar or whole object.
 
+#### Who can read sealed details
+
+Private and selective details are sealed to the officers who hold an encryption key at the moment of sealing. That set never grows afterwards: this is a privacy rule, so that no one can widen who reads a voter's details after the fact. An officer added later (or who turns on encrypted intake later) sees an explanation on Registrant Detail and on the registration request, and another officer who could read the details at the time handles the record.
+
 #### Selective disclosure (spec)
 
 The **selective** tier lets an authority reveal _some_ registrant detail to _some_ audience without exposing the never-disclosed private fields.

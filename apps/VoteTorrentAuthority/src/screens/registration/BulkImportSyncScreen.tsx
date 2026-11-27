@@ -2,61 +2,91 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
 import { ExtendedTheme, useRoute, useTheme } from "@react-navigation/native";
 import { useTranslation } from "react-i18next";
-import { scopeDescriptions } from "@votetorrent/vote-core";
+import { type Signature } from "@votetorrent/vote-core";
+import { scopeLabel } from "../../utils/scopeLabel";
 import { ThemedText } from "../../components/ThemedText";
 import { InlineError } from "../../components/InlineError";
-import {
-	ExperimentalTransportStatusCard,
-	TransportStatusCard,
-} from "../../components/TransportStatusCard";
+import { TransportStatusCard } from "../../components/TransportStatusCard";
+import { PeerTransportStatusCard } from "../../components/PeerTransportStatusCard";
+import { OfficerIntakeKeyCard } from "./components/OfficerIntakeKeyCard";
+import { RestBridgeConfigCard } from "./components/RestBridgeConfigCard";
 import { globalStyles } from "../../theme/styles";
 import { useCurrentOfficerScopes } from "../../hooks/useCurrentOfficerScopes";
+import { useApp } from "../../providers/AppProvider";
+import { useDeviceSigningErrorHandler } from "../../hooks/useDeviceSigningErrorHandler";
+import { createDeviceSigner } from "../../engines/device-signer";
+import { getOrCreateDeviceUser } from "../../engines/device-user";
 import {
 	resolveSyncBinding,
 	resolveTransportCardState,
 	toSyncErrorRefs,
+	type PeerSyncCounts,
 	type SyncBindingId,
 	type TransportCardEntry,
 } from "./bulk-import-sync-model";
+import {
+	enableOfficerEncryptedIntake,
+	readOfficerIntakeKeyState,
+	type OfficerIntakeKeyState,
+} from "./officer-intake-key";
+import {
+	readRegistrationBridgeConfig,
+	saveRegistrationBridgeUrl,
+	type RegistrationBridgeConfig,
+} from "./registration-bridge-config";
+
+/** The card-facing subset of `RegistrationBridgeSaveOutcome` — 'invalid-url' never reaches here
+ * (the card's own draft validation already shows it), and 'not-authorized'/'conflict' both map to
+ * the generic 'save-error' notice (S11: both re-read the config rather than carry a distinct
+ * screen-level state). */
+type BridgeScreenNotice = "saved" | "save-error" | "co-sign-required";
 
 /**
- * BulkImportSyncScreen — the officer-facing surface for the D-01 transport bridges (D-01/D-11).
+ * BulkImportSyncScreen — the officer-facing surface for the D-01 transport bridges, the D-04/
+ * D-28/D-31 peer-staging surface (Phase 62 Plan 21), and the D-28/D-29 REST bridge config surface
+ * (Phase 62 Plan 25).
  *
  * Renders, in a FIXED order that is never reordered by any state:
  *   1. `InlineError`
  *   2. the scope-gate banner (only when ungated for `'vrg'`)
- *   3. Filesystem `TransportStatusCard` — first-listed, most-trusted binding
- *   4. REST `TransportStatusCard`
- *   5. the peer-to-peer card in its mandatory experimental treatment
- *      (`ExperimentalTransportStatusCard`) — never reordered above the two proven bindings
- *   6. the sync-errors section, identifier-only
+ *   3. `RestBridgeConfigCard` — its own section (62-UI-SPEC Surface 1, D-29)
+ *   4. Filesystem `TransportStatusCard` — first-listed, most-trusted binding; D-28/D-29: this
+ *      transport and its binding are unchanged by this plan, attached by the Node-side host as
+ *      before
+ *   5. REST `TransportStatusCard`, plus the unset-bridge hint directly below it when no URL is
+ *      saved yet
+ *   6. `OfficerIntakeKeyCard` — the D-04 "enable encrypted intake" step
+ *   7. `PeerTransportStatusCard` — D-31's live-count peer card
+ *   8. the sync-errors section, identifier-only
  *
- * The Filesystem and REST cards call REAL bindings resolved through the seam
- * (`bulk-import-sync-model.ts`'s registry) — this screen imports no transport module itself, so it
- * cannot drag `node:fs` into the Metro bundle (48-09's bundling clause).
- *
- * THE PEER CARD ROUTES THROUGH THE SEAM AS OF 48-23 — `SyncBindingId` now admits `'peer'`, and
- * pressing the card calls `runSync('peer')`. No host in this repo registers a `'peer'` binding, so
- * with nothing attached the existing no-binding path in `runSync` reports `{ failed: true }` — an
- * honest failure, not a silent no-op. The peer-cluster leg itself remains **code-complete,
- * unverified** (D-11): a green press proves only that the seam resolved a handle, and Node or jest
- * results are not verification for it. Nothing in this phase depended on 48-23 landing — if it had
- * not, this screen would still work and still tell the truth about that leg.
+ * D-28: association has NO REST or filesystem app binding of any kind (62-25 deletes the
+ * dev-only association REST harness) — association syncs only over the 'peer' binding, attached
+ * in EVERY build (`AppProvider.tsx`, no `__DEV__` gate). D-29: the registration REST binding is
+ * ALSO attached in every build now, reading its target from the signed, replicated
+ * `AuthorityIntakePolicy` at every sync — it is inert (refuses before any network call) until an
+ * officer with `'vrg'` saves an https URL here. D-31: `PeerTransportStatusCard` shows REAL numeric
+ * counts read via `resolveSyncBinding('peer').readCounts`. The peer leg itself remains
+ * **code-complete, unverified** on devices (D-23, proof debt against P2P-11) — attaching it and
+ * showing counts does not change that; the card's own hardcoded warning frame and verbatim caveat
+ * are what keep that distinction visible to the officer.
  *
  * The errors section renders a transport heading and an item IDENTIFIER only — never a payload
  * value, a requester name, or a transport's error text (T-48-20-02).
  *
  * The `'vrg'` scope gate DISABLES write controls, it does not hide them, and it is a legibility
  * control only — `useCurrentOfficerScopes()`'s own file header says so verbatim. No claim anywhere
- * in this file that this gate is enforcement (Phase 999.1's pre-existing, out-of-scope gap).
+ * in this file that this gate is enforcement (Phase 999.1's pre-existing, out-of-scope gap). D-04:
+ * encrypted intake registration is open to EVERY current officer of this authority (any scope) —
+ * `canEnableIntake` therefore does not require `'vrg'`, unlike `canSync`/`canConfigureBridge`.
+ *
+ * 62-25: this screen now resolves the device signer directly (the bridge-URL save is a
+ * user-initiated signing action), so it DOES invoke the injected signer factory — the
+ * `deviceSigningRollout` coverage inventory gains this file as an invoker, routed through
+ * `useDeviceSigningErrorHandler` below (see `handleSaveBridgeUrl`). The bundling gate this
+ * screen was already held to is unchanged: no vote-engine package import, no Node built-in
+ * module specifier, and no dynamic module loader of any kind.
  */
 
-// Route params typed screen-locally, following `RegistrantsListScreen.tsx:26-35`'s own precedent
-// in spirit: `RootStackParamList` does not carry a `BulkImportSync` key until 48-21 registers the
-// three Phase-48 routes, so a screen-local param type is used here and 48-21 tightens it to
-// `RouteProp<RootStackParamList, 'BulkImportSync'>`. This widening is a dated placeholder, not a
-// permanent loosening. `authorityId` is a plain identifier used only for the scope lookup and
-// reaches no crash payload.
 interface BulkImportSyncRouteParams {
 	authorityId: string;
 }
@@ -65,26 +95,22 @@ export function BulkImportSyncScreen() {
 	const { colors } = useTheme() as ExtendedTheme;
 	const { t } = useTranslation();
 	const { authorityId } = useRoute().params as BulkImportSyncRouteParams;
+	const { getEngine, resolveDeviceSigner } = useApp();
+	const handleDeviceSigningError = useDeviceSigningErrorHandler();
 
 	const { scopes, loading } = useCurrentOfficerScopes(authorityId);
 	// Legibility/convenience control only — NOT a security boundary. The real control is the
 	// signed ceremony downstream (see `useCurrentOfficerScopes.ts`'s own file header).
 	const canSync = !loading && scopes?.includes("vrg") === true;
+	// D-04: every current officer (any scope) is an intake recipient — no 'vrg' requirement.
+	const canEnableIntake = !loading && scopes !== undefined;
 
 	const [errorMessage, setErrorMessage] = useState("");
 	const [filesystemEntry, setFilesystemEntry] = useState<TransportCardEntry>({});
 	const [restEntry, setRestEntry] = useState<TransportCardEntry>({});
-	// The peer CARD renders no state — ExperimentalTransportStatusCard (48-17) carries no state
-	// channel, and this entry is never passed to it. WR-15: the entry IS read now, for
-	// `errorItemIds` only, so a peer binding's error identifiers reach the errors section instead
-	// of being dropped after `runSync('peer')` had already produced them. The slot also still
-	// gives runSync somewhere honest to record `{ failed: true }` when nothing is attached,
-	// without special-casing the peer id out of runSync's shared logic.
 	const [peerEntry, setPeerEntry] = useState<TransportCardEntry>({});
+	const [peerCounts, setPeerCounts] = useState<PeerSyncCounts | undefined>(undefined);
 
-	// CR-02/WR-08-class guard against a stale setState: a `syncNow()` resolving after this screen
-	// has been navigated away from must not `setState` on an unmounted screen
-	// (`RegistrantsListScreen.tsx`'s convention).
 	const unmountedRef = useRef(false);
 	useEffect(() => {
 		unmountedRef.current = false;
@@ -93,70 +119,204 @@ export function BulkImportSyncScreen() {
 		};
 	}, []);
 
-	// WR-16: a per-id in-flight guard. Every other signed/network control in this phase carries one
-	// (`RejectReasonCard`'s `submittingRef`, the approval screen's `handleApprove`); this one did
-	// not, so repeated "Sync Now" presses launched OVERLAPPING `syncNow()` calls against the same
-	// binding and whichever settled LAST won the card state. For the REST binding that means
-	// overlapping intake batches, and an early failure could overwrite a later success (or the
-	// reverse), so the displayed counts need not have described the most recent run at all.
-	//
-	// Two representations, deliberately, and the split is the same one WR-13 fixes on the approval
-	// screen: the REF is the correctness guard (two presses dispatched in the same JS tick both
-	// read the same closure's state, so a state-only guard cannot close that gap), and the STATE is
-	// the feedback (mutating a ref schedules no render, so a ref-only guard would never actually
-	// disable the button). Neither alone is sufficient.
 	const inFlightRef = useRef<Set<SyncBindingId>>(new Set());
 	const [inFlight, setInFlight] = useState<ReadonlySet<SyncBindingId>>(new Set());
 
-	const runSync = useCallback((id: SyncBindingId) => {
-		// Synchronous, same-tick guard. Checked and set before any await/promise boundary.
-		if (inFlightRef.current.has(id)) return;
+	// 62-21 (D-31): refresh the live peer counts. Guarded by unmountedRef; a rejection clears the
+	// counts rather than leaving a stale value on screen. Never sets any error message.
+	const refreshPeerCounts = useCallback(async () => {
+		try {
+			const counts = await resolveSyncBinding("peer")?.readCounts?.({ authorityId });
+			if (!unmountedRef.current) setPeerCounts(counts);
+		} catch {
+			if (!unmountedRef.current) setPeerCounts(undefined);
+		}
+	}, [authorityId]);
 
-		const setEntry =
-			id === "filesystem" ? setFilesystemEntry : id === "rest" ? setRestEntry : setPeerEntry;
-		const binding = resolveSyncBinding(id);
-		if (!binding) {
-			// An unattached binding must not read as a successful or idle sync — it is honestly an
-			// ERROR state, not a silent no-op. 48-24 gave this state its own string
-			// (`bulkImportSyncErrorBody`, fixed and interpolation-free so no transport-supplied text
-			// can ever reach it) rather than leaving it to fall through into a dangling "Last synced"
-			// with no date (48-UAT.md gap 1).
-			if (!unmountedRef.current) setEntry({ failed: true });
-			return;
+	useEffect(() => {
+		void refreshPeerCounts();
+	}, [refreshPeerCounts]);
+
+	const runSync = useCallback(
+		(id: SyncBindingId) => {
+			// Synchronous, same-tick guard. Checked and set before any await/promise boundary.
+			if (inFlightRef.current.has(id)) return;
+
+			const setEntry =
+				id === "filesystem" ? setFilesystemEntry : id === "rest" ? setRestEntry : setPeerEntry;
+			const binding = resolveSyncBinding(id);
+			if (!binding) {
+				if (!unmountedRef.current) setEntry({ failed: true });
+				return;
+			}
+
+			if (!unmountedRef.current) setErrorMessage("");
+
+			inFlightRef.current.add(id);
+			if (!unmountedRef.current) setInFlight(new Set(inFlightRef.current));
+			const settle = () => {
+				inFlightRef.current.delete(id);
+				if (!unmountedRef.current) setInFlight(new Set(inFlightRef.current));
+				if (id === "peer") void refreshPeerCounts();
+			};
+
+			binding
+				.syncNow({ authorityId })
+				.then((report) => {
+					if (!unmountedRef.current) setEntry({ report });
+				})
+				.catch(() => {
+					// The caught error's `message` is NEVER put into state, into `InlineError`, into a
+					// `testID`, or into any log — a transport error message can echo an adversarial or
+					// misconfigured endpoint's response body (T-48-20-02).
+					if (!unmountedRef.current) {
+						setEntry((prev) => ({ failed: true, report: prev.report }));
+					}
+				})
+				.finally(settle);
+		},
+		[authorityId, refreshPeerCounts],
+	);
+
+	// --- D-04: officer encrypted-intake enable step ---
+	const [intakeKeyState, setIntakeKeyState] = useState<"loading" | OfficerIntakeKeyState>("loading");
+	const [intakeShowError, setIntakeShowError] = useState(false);
+	const [intakeErrorMessage, setIntakeErrorMessage] = useState<string | undefined>(undefined);
+	const [intakeSubmitting, setIntakeSubmitting] = useState(false);
+	const intakeSubmittingRef = useRef(false);
+
+	useEffect(() => {
+		let cancelled = false;
+		void readOfficerIntakeKeyState({ getEngine, createSigner: resolveDeviceSigner }, authorityId).then((state) => {
+			if (!cancelled && !unmountedRef.current) setIntakeKeyState(state);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [getEngine, resolveDeviceSigner, authorityId]);
+
+	const handleEnableIntake = useCallback(() => {
+		if (intakeSubmittingRef.current) return;
+		intakeSubmittingRef.current = true;
+		if (!unmountedRef.current) {
+			setIntakeSubmitting(true);
+			setIntakeShowError(false);
+			setIntakeErrorMessage(undefined);
 		}
 
-		if (!unmountedRef.current) setErrorMessage("");
-
-		// Marked in flight only on the path that actually starts a call. The no-binding branch
-		// above returns synchronously and starts nothing, so it must not latch the control.
-		inFlightRef.current.add(id);
-		if (!unmountedRef.current) setInFlight(new Set(inFlightRef.current));
-		const settle = () => {
-			inFlightRef.current.delete(id);
-			// The ref is cleared unconditionally — the guard must not survive an unmount and wedge a
-			// remounted screen — while the render-facing state is only updated while mounted.
-			if (!unmountedRef.current) setInFlight(new Set(inFlightRef.current));
-		};
-
-		binding
-			.syncNow()
-			.then((report) => {
-				if (!unmountedRef.current) setEntry({ report });
+		enableOfficerEncryptedIntake({ getEngine, createSigner: resolveDeviceSigner }, authorityId)
+			.then((state) => {
+				if (!unmountedRef.current) setIntakeKeyState(state);
+				void refreshPeerCounts();
 			})
-			.catch(() => {
-				// The caught error's `message` is NEVER put into state, into `InlineError`, into a
-				// `testID`, or into any log — a transport error message can echo an adversarial or
-				// misconfigured endpoint's response body, exactly the leak vector 48-10 closed at
-				// the binding (T-48-20-02). No screen-level message is set from this catch at all.
+			.catch((err) => {
+				// The officer's key was superseded by their other device: a specific message, not the
+				// signing-error hook (the code literal mirrors officer-intake-key.ts).
+				if ((err as { code?: unknown } | null)?.code === "intake-key-superseded") {
+					if (!unmountedRef.current) {
+						setIntakeShowError(true);
+						setIntakeErrorMessage(t("officerIntakeKeySupersededBody"));
+					}
+					return;
+				}
+				const outcome = handleDeviceSigningError(err);
+				if (outcome.handled) return;
 				if (!unmountedRef.current) {
-					setEntry((prev) => ({ failed: true, report: prev.report }));
+					setIntakeShowError(true);
+					setIntakeErrorMessage(outcome.message);
 				}
 			})
-			.finally(settle);
-	}, []);
+			.finally(() => {
+				intakeSubmittingRef.current = false;
+				if (!unmountedRef.current) setIntakeSubmitting(false);
+			});
+	}, [getEngine, resolveDeviceSigner, authorityId, handleDeviceSigningError, refreshPeerCounts, t]);
 
-	// WR-15: all three bindings are passed. `toSyncErrorRefs` reads `errorItemIds` and nothing
-	// else, so this carries opaque identifiers only — no counts, no timestamps, no transport text.
+	// --- D-29: registration REST bridge URL config (62-25) ---
+	// `undefined` = loading (never read yet). A re-read also runs after 'conflict'/'failed' (S11),
+	// so a stale revision never gets re-submitted blind.
+	const [bridgeConfig, setBridgeConfig] = useState<RegistrationBridgeConfig | undefined>(undefined);
+	const [bridgeNotice, setBridgeNotice] = useState<BridgeScreenNotice | undefined>(undefined);
+	const [bridgeSubmitting, setBridgeSubmitting] = useState(false);
+	const bridgeSubmittingRef = useRef(false);
+
+	const readBridgeConfig = useCallback(() => {
+		void readRegistrationBridgeConfig({ getEngine }, authorityId).then((config) => {
+			if (!unmountedRef.current) setBridgeConfig(config);
+		});
+	}, [getEngine, authorityId]);
+
+	useEffect(() => {
+		readBridgeConfig();
+	}, [readBridgeConfig]);
+
+	const handleSaveBridgeUrl = useCallback(
+		(url: string) => {
+			// The ref guard (WR-16): a second press in the same tick is a no-op.
+			if (bridgeSubmittingRef.current) return;
+			// A latched co-sign-required notice is terminal for this mount — nothing to retry.
+			if (bridgeNotice === "co-sign-required") return;
+			bridgeSubmittingRef.current = true;
+			if (!unmountedRef.current) setBridgeSubmitting(true);
+
+			(async () => {
+				let sign: (digest: Uint8Array) => Promise<Signature>;
+				try {
+					const user = await getOrCreateDeviceUser("Device User");
+					sign = await createDeviceSigner(user.name);
+				} catch (err) {
+					const outcome = handleDeviceSigningError(err);
+					if (outcome.handled) return;
+					if (unmountedRef.current) return;
+					if (outcome.message) {
+						setErrorMessage(outcome.message);
+					} else {
+						// No mapped copy to show in the screen's own InlineError: fall back to the
+						// card's own SaveError notice rather than a silent no-op.
+						setBridgeNotice("save-error");
+					}
+					return;
+				}
+
+				const result = await saveRegistrationBridgeUrl(
+					{ getEngine },
+					authorityId,
+					url,
+					sign,
+					bridgeConfig?.revision,
+				);
+
+				if (unmountedRef.current) return;
+				switch (result.outcome) {
+					case "saved":
+						if (result.config) setBridgeConfig(result.config);
+						setBridgeNotice("saved");
+						break;
+					case "co-sign-required":
+						setBridgeNotice("co-sign-required");
+						break;
+					case "invalid-url":
+						// The card's own validation already shows this — no screen-level notice.
+						break;
+					case "not-authorized":
+					case "conflict":
+					case "failed":
+						setBridgeNotice("save-error");
+						readBridgeConfig();
+						break;
+				}
+			})()
+				.finally(() => {
+					bridgeSubmittingRef.current = false;
+					if (!unmountedRef.current) setBridgeSubmitting(false);
+				});
+		},
+		[getEngine, authorityId, bridgeConfig, bridgeNotice, handleDeviceSigningError, readBridgeConfig],
+	);
+
+	const canConfigureBridge = canSync;
+	const bridgeReady = bridgeConfig?.savedUrl != null;
+
 	const errorRefs = toSyncErrorRefs({
 		filesystem: filesystemEntry.report,
 		rest: restEntry.report,
@@ -184,17 +344,28 @@ export function BulkImportSyncScreen() {
 				) : (
 					<View testID="bulk-import-sync-scope-banner" style={styles.banner}>
 						<ThemedText type="small" style={{ color: colors.textSecondary }}>
-							{t("registrationRequestScopeReadOnlyBanner", { scope: scopeDescriptions.vrg })}
+							{t("registrationRequestScopeReadOnlyBanner", { scope: scopeLabel("vrg", t) })}
 						</ThemedText>
 					</View>
 				))}
+
+			{/* 62-UI-SPEC Surface 1, D-29: the registration REST bridge config card, its own
+			    section, placed before the filesystem/REST cards per the composition reference. */}
+			<View style={styles.section}>
+				<RestBridgeConfigCard
+					loading={bridgeConfig === undefined}
+					savedUrl={bridgeConfig?.savedUrl ?? null}
+					notice={bridgeNotice}
+					disabled={!canConfigureBridge}
+					submitting={bridgeSubmitting}
+					onSave={handleSaveBridgeUrl}
+				/>
+			</View>
 
 			<View style={styles.section}>
 				<TransportStatusCard
 					kind="filesystem"
 					{...resolveTransportCardState(filesystemEntry)}
-					// WR-16: reads the STATE half of the in-flight guard — the ref half cannot drive
-					// a render. Overlapping presses are refused by the ref regardless.
 					disabled={!canSync || inFlight.has("filesystem")}
 					onSyncNow={() => runSync("filesystem")}
 				/>
@@ -204,25 +375,39 @@ export function BulkImportSyncScreen() {
 				<TransportStatusCard
 					kind="rest"
 					{...resolveTransportCardState(restEntry)}
-					disabled={!canSync || inFlight.has("rest")}
+					disabled={!canSync || inFlight.has("rest") || !bridgeReady}
 					onSyncNow={() => runSync("rest")}
+				/>
+				{/* D-29: the REST card stays disabled, with plain guidance, until a bridge URL is
+				    saved above -- never a silent dead control. */}
+				{bridgeConfig !== undefined && !bridgeReady && (
+					<ThemedText
+						type="small"
+						style={{ color: colors.textSecondary }}
+						testID="registration-bridge-config-unset-hint"
+					>
+						{t("registrationBridgeConfigUnsetHint")}
+					</ThemedText>
+				)}
+			</View>
+
+			<View style={styles.section}>
+				<OfficerIntakeKeyCard
+					state={intakeKeyState}
+					disabled={!canEnableIntake}
+					submitting={intakeSubmitting}
+					showError={intakeShowError}
+					errorMessage={intakeErrorMessage}
+					onEnable={handleEnableIntake}
 				/>
 			</View>
 
-			{/* The peer-cluster leg ships code-complete, unverified (D-11). 48-23 routes this
-			    control's press through runSync('peer') against the widened SyncBindingId seam — no
-			    host in this repo registers a 'peer' binding, so with nothing attached the existing
-			    no-binding path in runSync sets { failed: true } and the transport is honestly
-			    reported as failed rather than silently idle. A green press proves only that the seam
-			    resolved a handle and nothing more; Node or jest results are not verification for this
-			    leg. No conditional of any kind wraps this card: it renders every time this screen
-			    renders, in this position, always — never reordered above the two proven bindings
-			    above it. Nothing but `disabled` and `onTrySync` is passed: no state, no counts, no
-			    connection flag, no `kind` — the card's own prop type carries no channel for any of
-			    that, so this routing change alters what the control DOES, never what the card
-			    SHOWS. */}
+			{/* D-28: the peer leg ships code-complete, unverified (D-23, proof debt against P2P-11).
+			    No conditional of any kind wraps this card: it renders every time this screen renders,
+			    in this position, always — never reordered above the two proven bindings above it. */}
 			<View style={styles.section}>
-				<ExperimentalTransportStatusCard
+				<PeerTransportStatusCard
+					counts={peerCounts}
 					disabled={!canSync || inFlight.has("peer")}
 					onTrySync={() => runSync("peer")}
 				/>
@@ -245,7 +430,9 @@ export function BulkImportSyncScreen() {
 							{t(
 								ref.transport === "filesystem"
 									? "bulkImportSyncFilesystemHeading"
-									: "bulkImportSyncRestHeading",
+									: ref.transport === "rest"
+										? "bulkImportSyncRestHeading"
+										: "peerSyncCardHeading",
 							)}
 							{": "}
 							{ref.itemId}

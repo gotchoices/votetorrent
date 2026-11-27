@@ -9,27 +9,23 @@
  *   (published, version-aligned with pinned @quereus/quereus@4.2.1; D-01/D-02).
  *   rn-leveldb@3.11: github.com/gotchoices/rn-leveldb — registry-audited Plan 14-02 (APPROVED).
  * Strand path: @optimystic/db-p2p-storage-rn@portal (unchanged; cadre-core/CadreNodeProvider).
+ *
+ * The strand-backed factory (createStrandDbFactory, StrandHost, StrandDbFactoryOptions) moved to
+ * @votetorrent/workflows common/strand-db-factory.ts and is re-exported here; this file keeps only the
+ * LevelDB solo factory.
  */
 
 import { LevelDB, LevelDBWriteBatch } from 'rn-leveldb';
 import { ReactNativeLevelDBProvider } from '@quereus/plugin-react-native-leveldb';
+import { leveldbOpenPool } from './leveldb-open-pool';
 import { createIsolatedStoreModule } from '@quereus/store';
 import { Database } from '@quereus/quereus';
-import { VOTETORRENT_SCHEMA_SQL } from '@votetorrent/vote-engine/rn';
 import type { DbFactory } from '@votetorrent/vote-engine';
-import type { StrandConfig, StrandInstance } from '@serfab/cadre-core';
+// Side-effect import: installs the dev-only strand-change reporter wherever the factory is reachable.
+import './strand-changes';
 
-// cadre-core's StrandDatabase.executeSchema() wraps the sApp schema as
-// `declare schema App { ${schema} } apply schema App;`. VOTETORRENT_SCHEMA_SQL is
-// itself wrapped in `declare schema main { ... } apply schema main;`, so passing it
-// verbatim nests invalidly and Quereus throws `got '}'`. Strip the outer wrapper so
-// only the inner DDL is handed to addStrand; cadre-core re-wraps it under `App` and
-// setSchemaPath(['App','main']) resolves bare engine table names (D-14). qsql has no
-// `main.`-qualified references, so the strip is clean.
-const VOTETORRENT_INNER_DDL = VOTETORRENT_SCHEMA_SQL
-	.replace(/^\s*declare\s+schema\s+\w+\s*\{/, '')
-	.replace(/\}\s*apply\s+schema\s+\w+\s*;\s*$/, '')
-	.trim();
+export { createStrandDbFactory } from '@votetorrent/workflows';
+export type { StrandHost, StrandDbFactoryOptions } from '@votetorrent/workflows';
 
 /**
  * Concrete DbFactory for the RN app layer — Quereus-native LevelDB via
@@ -49,8 +45,10 @@ export const rnDbFactory: DbFactory = async (networkHash: string) => {
   // D-04: version-bumped store name — zero collision with old 'votetorrent-<networkHash>'
   const databaseName = `votetorrent-q2-${networkHash}`;
 
+  // Quereus opens one LevelDB per table and per index; the pool keeps only a few of them open at
+  // once (leveldb-open-pool.ts).
   const provider = new ReactNativeLevelDBProvider({
-    openFn: (n: string, c: boolean, e: boolean) => new LevelDB(n, c, e),
+    openFn: leveldbOpenPool.openFn((n: string, c: boolean, e: boolean) => new LevelDB(n, c, e)),
     WriteBatch: LevelDBWriteBatch,
     databaseName,
     createIfMissing: true,
@@ -76,77 +74,3 @@ export const rnDbFactory: DbFactory = async (networkHash: string) => {
 
   return db;
 };
-
-/**
- * Minimal addStrand-capable seam — satisfied structurally by `CadreNode`.
- *
- * Injected (rather than reaching for a module-level singleton) so the
- * strand-backed factory is unit-testable with a fake node. CadreNode's
- * `getControlNode()` returns `Libp2p | null`; we only read `getConnections()`.
- */
-export interface StrandHost {
-	addStrand(config: StrandConfig): Promise<StrandInstance>;
-	getControlNode(): { getConnections(): readonly unknown[] } | null;
-}
-
-/**
- * Strand-backed DbFactory (P2P-03 / D-07 / D-14).
- *
- * Returns a `DbFactory` that, instead of opening a standalone LevelDB-backed
- * Quereus Database, attaches a CadreNode strand for the network and hands back
- * the strand's Quereus Database. The strand owns the vtab + transactor, so there
- * is NO registerPlugin / setDefaultVtab call on this path — cadre-core applies
- * the sApp schema (wrapped in `declare schema App { ... }`) during addStrand.
- *
- * D-05: strandId is derived directly from the network hash — already unique per
- *       network, so it doubles as the strandId with no extra mapping structure.
- * D-07: SUPERSEDED by cadre-core 0.11.0 (spike 064). `StrandMode` and
- *       `StrandConfig.mode` were DELETED upstream — a deliberate breaking change
- *       ("the repo carries no backwards compatibility"). The solo/networked
- *       transactor split is gone: every strand now uses the shared path, and the
- *       backfill gate is armed for every stored strand, which is what upstream
- *       says closes the "founded alone, never replicates" hole.
- *       The surviving knob is `founder?: boolean` — whether THIS node provisioned
- *       the strand. The founder runs the one-time membership bootstrap (writes
- *       `Strand.Header`, and for a closed strand the founding Member+Manager); a
- *       joiner leaves it false and receives those rows via Optimystic sync.
- *       The existing peer probe carries over with its meaning intact: no control
- *       peers ⇒ nobody else can have provisioned this strand ⇒ we are the founder.
- *       Reference: sereus v0.11.0 `scripts/lib/published-smoke-scenario.mjs:439`
- *       passes `founder: true` on the create path.
- * D-14: after `getDatabase()`, `setSchemaPath(['App','main'])` makes bare engine
- *       SQL table names (e.g. `Network`) resolve to `App.Network` first, with
- *       `main` as the fallback for SchemaInit / TidSequence. One call fixes
- *       the entire SQL tier — zero engine query rewrites.
- *
- * Ordering (Pitfall 3): never read `strand.database` before `await addStrand`
- * resolves — cadre-core awaits the strand DB's internal initialize() and returns
- * only once the database is safe to access.
- */
-export function createStrandDbFactory(node: StrandHost): DbFactory {
-	return async (networkHash: string) => {
-		// D-05: the network hash is already unique per network — use it as the strandId.
-		const strandId = networkHash;
-
-		// D-07 (0.11.0): check for peers BEFORE addStrand — no peers ⇒ we are the founder.
-		const hasPeers = (node.getControlNode()?.getConnections().length ?? 0) > 0;
-
-		const strand = await node.addStrand({
-			strandRow: { Id: strandId, MemberPrivateKey: null, Type: 'o' },
-			sAppConfig: {
-				id: 'org.votetorrent',
-				version: '1.0.0',
-				schema: VOTETORRENT_INNER_DDL,
-				latencyHint: 'interactive',
-			},
-			founder: !hasPeers,
-		});
-
-		// Safe only after addStrand resolves (Pitfall 3). `database` is present once
-		// the strand is active/idle, which addStrand guarantees on return.
-		const db = strand.database!.getDatabase();
-		db.setSchemaPath(['App', 'main']); // D-14 transparency — never omit (Pitfall 2).
-
-		return db;
-	};
-}
