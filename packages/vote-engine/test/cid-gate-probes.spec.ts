@@ -259,24 +259,21 @@ describe('D-01 compat gate: cid()/cid_decode registration + Wave 0 open-question
 	})
 
 	// -------------------------------------------------------------------------
-	// Probe 3b (discovered pitfall, load-bearing for Plan 02's CHECK shape):
-	// json_extract(...) is NOT directly `=`-comparable to a bare TEXT literal.
+	// Probe 3b (pitfall retired upstream in Quereus 5.7): json_extract(...) is now
+	// directly `=`-comparable to a bare TEXT literal. The cast form stays valid.
 	// -------------------------------------------------------------------------
-	it('Probe 3b: the bare RESEARCH Pattern 3 form json_extract(cid_decode(x),"$.codec")=\'raw\' under-accepts even VALID input — Plan 02 must use cast(...as text)', async () => {
+	it('Probe 3b: on Quereus 5.7 the bare json_extract(cid_decode(x),"$.codec")=\'raw\' form accepts valid input — cast(...as text) still works', async () => {
 		const validCid = (await db.prepare(`select cid('test') as c`).get()) as { c: string }
 
-		// DOCUMENTED PITFALL: reproduces at the plain-scalar-expression level — no
-		// CHECK, no table, no row context involved — so this is not a
-		// CHECK-evaluation-context artifact. json_extract's return carries a JSON
-		// logical type distinct from TEXT; Quereus's `=` operator does not coerce a
-		// JSON-typed operand against a bare TEXT literal.
+		// Quereus 5.7 made json_extract's return TEXT-comparable, so the old
+		// under-acceptance pitfall no longer reproduces at the scalar-expression level.
 		const naiveRow = (await db
 			.prepare(`select json_extract(cid_decode(:v), '$.codec') = 'raw' as eq`)
 			.get({ v: validCid.c })) as { eq: unknown }
 		expect(
 			naiveRow.eq,
-			'the bare json_extract(...) = \'raw\' comparison is FALSE even for a genuinely valid raw-codec CID (json_extract\'s JSON-typed return is not TEXT-literal-comparable without an explicit cast) — using this bare form for Plan 02\'s SlotCidValid CHECK would unconditionally reject every valid insert',
-		).to.equal(false)
+			'the bare json_extract(...) = \'raw\' comparison is TRUE for a genuinely valid raw-codec CID on Quereus 5.7 — the Plan 02 pitfall is fixed upstream',
+		).to.equal(true)
 
 		// The corrected form Plan 02 must use instead:
 		const castRow = (await db

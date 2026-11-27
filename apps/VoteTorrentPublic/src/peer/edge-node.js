@@ -60,9 +60,9 @@
  *  2. `profile: 'transaction'` — the RN PARTICIPANT profile. This is an
  *     Edge-tier reader; `fretProfile` set to `'edge'` is a different field
  *     with a different meaning.
- *  3. `storage: { provider: scopedStorageProvider }` — the RN callback
- *     shape belongs to `db-p2p-storage-rn`'s per-scope LevelDB. The web
- *     package takes a storage INSTANCE, one per strand (D-18).
+ *  3. `storage: { open(scope) }` — the RN callback shape belongs to
+ *     `db-p2p-storage-rn`'s per-scope LevelDB. The web package takes an
+ *     `OpenNodeStorage` instance, one per strand (D-18).
  *  4. `requireSignedSchemas: false` — a documented VoteTorrent decision for
  *     the RN network-CREATION path. A read-only anonymous browser node
  *     creates no network; there is no policy here to relax.
@@ -157,7 +157,7 @@
  *    whatever the tap observes.
  */
 
-import { openOptimysticWebDb, IndexedDBRawStorage } from '@optimystic/db-p2p-storage-web';
+import { openOptimysticWebDb, indexedDbNodeStorage } from '@optimystic/db-p2p-storage-web';
 import { createLibp2pNode } from '@optimystic/db-p2p/rn';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
@@ -241,12 +241,12 @@ export function strandStorageDbName(strandId) {
  * day one network carries multiple strands) and a single shared store (the
  * bug itself).
  * @param {unknown} strandId
- * @returns {Promise<{ dbName: string, db: import('@optimystic/db-p2p-storage-web').OptimysticWebDBHandle, storage: InstanceType<typeof IndexedDBRawStorage> }>}
+ * @returns {Promise<{ dbName: string, db: import('@optimystic/db-p2p-storage-web').OptimysticWebDBHandle, storage: import('@optimystic/db-p2p').OpenNodeStorage }>}
  */
 export async function openStrandBlockStorage(strandId) {
 	const dbName = strandStorageDbName(strandId);
 	const db = await openOptimysticWebDb(dbName);
-	const storage = new IndexedDBRawStorage(db);
+	const storage = indexedDbNodeStorage(db);
 	return { dbName, db, storage };
 }
 

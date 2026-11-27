@@ -64,7 +64,7 @@ interface Script {
 
 interface FakeNodeOptions {
   controlNetwork: { partyId: string, bootstrapNodes: string[] }
-  storage: { provider(scope: string): unknown }
+  storage: { open(scope: string): Promise<unknown> }
   network: {
     relayAddrs: string[]
     connectionGater: Record<string, (p: unknown) => Promise<boolean>>
@@ -86,8 +86,8 @@ class FakeNode {
   constructor(options: FakeNodeOptions) {
     this.options = options
     FakeNode.instances.push(this)
-    // cadre-core opens the control scope through the provider at construction
-    options.storage.provider('control-fake')
+    // cadre-core opens the control scope through the storage opener at construction
+    void options.storage.open('control-fake')
   }
 
   async start(): Promise<void> {
@@ -136,7 +136,7 @@ function fakeDeps(counters: Counters): RoleNodeDeps {
     PersistentBootstrapPeerStore: { open: async (slot: unknown, partyId: string) => ({ kind: 'bootstrapPeers', partyId, slot }) },
     ed25519KeyPairFromLibp2p: () => ({}),
     softwareOwnerSigner: () => ({}),
-    FileRawStorage: FakeRaw,
+    openStorage: async (dir: string) => new FakeRaw(dir) as never,
     webSockets: () => ({ transport: 'ws' }),
     circuitRelayTransport: (init: unknown) => ({ transport: 'circuit', init }),
     generateKeyPair,
@@ -269,17 +269,17 @@ describe('node units', function () {
     expect((err as { code?: string }).code).to.equal('peer-key-corrupt')
   })
 
-  it('scoped storage gives one FileRawStorage per scope inside store/ and never outside it', () => {
+  it('scoped storage gives one storage per scope inside store/ and never outside it', async () => {
     const peerDir = join(root, 'p', 'officer')
-    const scoped = createScopedStorage(peerDir, FakeRaw)
-    const a = scoped.provider('control-abc')
-    expect(scoped.provider('control-abc')).to.equal(a)
+    const scoped = createScopedStorage(peerDir, async (dir) => new FakeRaw(dir) as never)
+    const a = await scoped.open('control-abc')
+    expect(await scoped.open('control-abc')).to.equal(a)
     expect(FakeRaw.dirs).to.have.lengthOf(1)
     expect(FakeRaw.dirs[0]).to.equal(scopeDir(peerDir, 'control-abc'))
     expect(FakeRaw.dirs[0]!.startsWith(storeDir(peerDir) + sep)).to.equal(true)
     expect(statSync(FakeRaw.dirs[0]!).mode & 0o777).to.equal(0o700)
     expect(statSync(storeDir(peerDir)).mode & 0o777).to.equal(0o700)
-    const escaped = scoped.provider('../../x')
+    const escaped = await scoped.open('../../x')
     expect(escaped).to.not.equal(a)
     const dir = FakeRaw.dirs[1]!
     expect(resolve(dir).startsWith(resolve(storeDir(peerDir)) + sep)).to.equal(true)
@@ -291,9 +291,9 @@ describe('node units', function () {
 
   it('destroyScope closes then removes only its scope and closeStores closes every scope once', async () => {
     const peerDir = join(root, 'p', 'officer')
-    const scoped = createScopedStorage(peerDir, FakeRaw)
-    scoped.provider('control-one')
-    scoped.provider('strand-two')
+    const scoped = createScopedStorage(peerDir, async (dir) => new FakeRaw(dir) as never)
+    await scoped.open('control-one')
+    await scoped.open('strand-two')
     const oneDir = scopeDir(peerDir, 'control-one')
     const twoDir = scopeDir(peerDir, 'strand-two')
     writeFileSync(join(oneDir, 'x'), 'x')
@@ -307,8 +307,8 @@ describe('node units', function () {
     await scoped.closeStores()
     expect(FakeRaw.closes).to.deep.equal([oneDir, twoDir])
     expect(scoped.scopes()).to.deep.equal([])
-    // a fresh provider call after closeStores opens a new store
-    scoped.provider('strand-two')
+    // a fresh open after closeStores opens a new store
+    await scoped.open('strand-two')
     expect(FakeRaw.dirs.filter((d) => d === twoDir)).to.have.lengthOf(2)
   })
 

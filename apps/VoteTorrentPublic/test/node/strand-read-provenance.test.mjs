@@ -205,7 +205,7 @@ test(
 		// here would be reading local cache, and every downstream green in
 		// this plan would be worthless.
 		const seeded = await openStrandBlockStorage(strandId);
-		await seeded.storage.saveMetadata('strand-read-provenance-planted-block', { ranges: [[0, 1]] });
+		await seeded.storage.blocks.saveMetadata('strand-read-provenance-planted-block', { ranges: [[0, 1]] });
 		await seeded.db.close?.();
 
 		const second = await attemptNoPeerRead(strandId, bootstrapNodes);

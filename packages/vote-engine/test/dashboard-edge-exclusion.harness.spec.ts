@@ -157,17 +157,17 @@ describeP2PHarness('a paired dashboard is never an invitation member or a contro
 
     // A voter-like joiner (transaction profile, the Voter app's strand refusal) redeems the filtered code.
     const { CadreNode } = await import('@serfab/cadre-core')
-    const { MemoryRawStorage } = await import('@optimystic/db-p2p')
+    const { memoryNodeStorage } = await import('@optimystic/db-p2p')
     const { webSockets } = await import('@libp2p/websockets')
     const { generateKeyPair } = await import('@libp2p/crypto/keys')
     const { createEdgeReaderRefusal } = await import('../src/network/edge-reader-refusal.js')
-    const storage = new MemoryRawStorage()
+    const storage = memoryNodeStorage()
     const d: any = new CadreNode({
       privateKey: await generateKeyPair('Ed25519'),
       controlNetwork: { partyId: harness!.partyId, bootstrapNodes: [] },
       requireSignedSchemas: false,
       strandFilter: { mode: 'all' },
-      storage: { provider: () => storage },
+      storage: { open: async () => storage },
       strandClusterSize: 4,
       hibernation: { enabled: false },
       nodeClass: 'device',

@@ -33,7 +33,6 @@ import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { CadreNode, decodeCadreInvitation, ed25519KeyPairFromLibp2p } from '@serfab/cadre-core';
 import { VOTETORRENT_SCHEMA_VERSION, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
 import { resolveStrandRole, strandFounderOption } from './strand-role.mjs';
-import { MemoryRawStorage } from '@optimystic/db-p2p';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
 import { multiaddr } from '@multiformats/multiaddr';

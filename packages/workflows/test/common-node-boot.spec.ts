@@ -65,7 +65,7 @@ function fakeTransports(): FakeTransports {
 
 const fakeRefusal = () => ({ hook: () => ({ refuses: () => false }), control: { refuses: () => false } })
 const fakeSetup = (_db: unknown) => undefined
-const fakeProvider = (_scope: string) => ({})
+const fakeOpen = async (_scope: string) => ({})
 
 function authorityInput(overrides: Partial<CadreNodeOptionsInput> = {}, transports = fakeTransports()): CadreNodeOptionsInput {
   return {
@@ -74,7 +74,7 @@ function authorityInput(overrides: Partial<CadreNodeOptionsInput> = {}, transpor
     privateKey: { type: 'Ed25519' },
     relay: [RELAY_A],
     bootstrap: [],
-    storage: { provider: fakeProvider },
+    storage: { open: fakeOpen },
     transports: transports.factories,
     edgeReader: { refusal: fakeRefusal() },
     strandDatabaseSetup: fakeSetup,
@@ -236,7 +236,7 @@ describe('common node boot', function () {
       expect(opts.strandCohortRefusal).to.equal(input.edgeReader.refusal.hook)
       expect(opts.controlCohortRefusal).to.equal(input.edgeReader.refusal.control)
       expect(opts.strandDatabaseSetup).to.equal(input.strandDatabaseSetup)
-      expect(opts.storage.provider).to.equal(input.storage.provider)
+      expect(opts.storage.open).to.equal(input.storage.open)
       expect('edgeReaderProtocol' in opts).to.equal(false)
       expect('inviteAddressResolver' in opts.network).to.equal(false)
     })
@@ -297,7 +297,7 @@ describe('common node boot', function () {
       expect(isCadreNodeOptionsError(null)).to.equal(false)
     })
 
-    it('NO-6 two builds from one input are distinct objects with distinct transports and the same refusal, stores and provider', () => {
+    it('NO-6 two builds from one input are distinct objects with distinct transports and the same refusal, stores and storage opener', () => {
       const t = fakeTransports()
       const to = { kind: 'to' }
       const input = authorityInput({ stores: { trustedOwners: to } }, t)
@@ -312,7 +312,7 @@ describe('common node boot', function () {
       expect(a.strandCohortRefusal).to.equal(b.strandCohortRefusal)
       expect(a.controlCohortRefusal).to.equal(b.controlCohortRefusal)
       expect(a.trustedOwners?.store).to.equal(b.trustedOwners?.store)
-      expect(a.storage.provider).to.equal(b.storage.provider)
+      expect(a.storage.open).to.equal(b.storage.open)
       expect(a.controlNetwork.bootstrapNodes).to.deep.equal(b.controlNetwork.bootstrapNodes)
     })
 

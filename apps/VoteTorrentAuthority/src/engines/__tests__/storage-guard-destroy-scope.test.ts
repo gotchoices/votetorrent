@@ -6,7 +6,10 @@
 const mockCloses: string[] = [];
 jest.mock('@optimystic/db-p2p-storage-rn', () => ({
 	openOptimysticRNDb: ({ name }: { name: string }) => ({ name, close: async () => { mockCloses.push(name); } }),
-	LevelDBRawStorage: class MockRawStorage { mockDb: unknown; constructor (mockDb: unknown) { this.mockDb = mockDb } },
+	levelDbNodeStorage: (_db: { name: string }) => ({
+		blocks: { constructor: { name: 'LevelDBRawStorage' } },
+		close: async () => undefined,
+	}),
 }), { virtual: true });
 
 import { LevelDB } from 'rn-leveldb';
@@ -19,7 +22,7 @@ describe('createScopedRnStorageProvider().destroyScope', () => {
 
 	it('closes the open control DB, then destroys exactly that one store', async () => {
 		const provider = createScopedRnStorageProvider('vt-test');
-		try { provider('control-766f7465746f7272656e74'); provider('strand-abc'); } catch { /* the persistence guard may refuse the fake; the cache is what matters */ }
+		try { await provider.open('control-766f7465746f7272656e74'); await provider.open('strand-abc'); } catch { /* the persistence guard may refuse the fake; the cache is what matters */ }
 		await provider.destroyScope('control-766f7465746f7272656e74');
 		expect(mockCloses).toEqual(['vt-test-control-766f7465746f7272656e74']);
 		expect(destroyDB).toHaveBeenCalledTimes(1);

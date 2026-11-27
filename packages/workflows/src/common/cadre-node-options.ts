@@ -66,7 +66,7 @@ export interface CadreNodeOptionsInput {
   relay: readonly string[]
   /** Extra bootstrap peers such as a join code's dial hints. Bootstrap peers only, never relay targets. */
   bootstrap: readonly string[]
-  storage: { provider(scopeId: string): unknown }
+  storage: { open(scopeId: string): Promise<unknown> }
   transports: CadreNodeTransportFactories
   /** `protocol` is REQUIRED for a voter and FORBIDDEN for an authority. */
   edgeReader: { refusal: EdgeReaderRefusalPair; protocol?: string }
@@ -103,7 +103,7 @@ export interface VoteTorrentCadreNodeOptions {
   nodeClass: 'device' | 'server'
   requireSignedSchemas: false
   strandFilter: { mode: 'all' }
-  storage: { provider(scopeId: string): unknown }
+  storage: { open(scopeId: string): Promise<unknown> }
   network: VoteTorrentCadreNodeNetworkOptions
   hibernation: { readonly enabled: false }
   strandReactivity: { enabled: true }
@@ -167,8 +167,8 @@ export function buildCadreNodeOptions(input: CadreNodeOptionsInput): VoteTorrent
   const nodeClass = input.nodeClass ?? 'device'
   if (nodeClass !== 'device' && nodeClass !== 'server') throw new CadreNodeOptionsError('node-class-invalid')
   if (role === 'voter' && nodeClass !== 'device') throw new CadreNodeOptionsError('node-class-invalid')
-  const provider = input.storage?.provider
-  if (!isFunction(provider)) throw new CadreNodeOptionsError('storage-provider-missing')
+  const open = input.storage?.open
+  if (!isFunction(open)) throw new CadreNodeOptionsError('storage-provider-missing')
   const { webSockets, circuitRelayTransport } = input.transports ?? ({} as Partial<CadreNodeTransportFactories>)
   if (!isFunction(webSockets) || !isFunction(circuitRelayTransport)) throw new CadreNodeOptionsError('transport-factory-missing')
   const refusal = edgeReader?.refusal
@@ -219,9 +219,9 @@ export function buildCadreNodeOptions(input: CadreNodeOptionsInput): VoteTorrent
     // present-but-invalid one, so a signed schema would still be verified if VoteTorrent ever adopts signing.
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
-    // Per-scope storage: cadre-core invokes provider(scopeId) with the strand id for each strand and the
-    // control scope for the control DB. One distinct store per scope isolates each network's collections.
-    storage: { provider },
+    // Per-scope storage: cadre-core 1.25 invokes open(scopeId) once per scope (the control scope and
+    // each strand), and the returned NodeStorage holds blocks, kv and pieces for that scope.
+    storage: { open },
     // CONTROL node network block: it reserves through the configured CONTROL relay(s). cadre-core forwards
     // this one object to the control node AND every strand node (strand nodes derive their own transport
     // peer id, so one relay is correct and no per-strand override exists).

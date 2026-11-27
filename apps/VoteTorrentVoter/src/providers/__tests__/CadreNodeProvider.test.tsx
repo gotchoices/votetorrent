@@ -83,7 +83,7 @@ jest.mock(
 jest.mock('@libp2p/websockets', () => ({webSockets: () => ({})}), {virtual: true});
 jest.mock('@libp2p/circuit-relay-v2', () => ({circuitRelayTransport: () => ({})}), {virtual: true});
 jest.mock('../../engines/storage-guard', () => ({
-	createScopedRnStorageProvider: () => Object.assign(() => ({}), {destroyScope: jest.fn(async () => undefined)}),
+	createScopedRnStorageProvider: () => ({open: async () => ({}), destroyScope: jest.fn(async () => undefined)}),
 }));
 jest.mock('../../engines/rn-durable-slot', () => ({
 	openTrustedOwnerStore: jest.fn(async () => undefined),

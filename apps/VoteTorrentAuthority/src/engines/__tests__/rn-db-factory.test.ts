@@ -29,6 +29,10 @@ jest.mock(
   '@optimystic/db-p2p-storage-rn',
   () => ({
     openOptimysticRNDb: jest.fn((cfg: { name: string }) => ({ __openedName: cfg.name })),
+    levelDbNodeStorage: () => ({
+      blocks: { constructor: { name: 'LevelDBRawStorage' } },
+      close: async () => undefined,
+    }),
     LevelDBRawStorage: class {
       db: unknown;
       constructor(db: unknown) {
@@ -456,7 +460,7 @@ describe('Backend store-namespace disjointness — RESEARCH Open Question 1 (in-
     // the network hash (D-05), so invoking it with the SAME hash is the
     // correct like-for-like comparison.
     const scopedProvider = createScopedRnStorageProvider();
-    scopedProvider(sameHash);
+    await scopedProvider.open(sameHash);
     const strandCalls = (openOptimysticRNDb as jest.Mock).mock.calls;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const strandName: string = (strandCalls[strandCalls.length - 1][0] as any).name;

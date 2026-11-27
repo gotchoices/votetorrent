@@ -54,6 +54,7 @@ const L = (...a: unknown[]) => console.info('[strand-persistence-proof]', ...a);
 // NEVER 'votetorrent-cadre-node' — that store holds the stable peerId (T-23-03-02).
 // NEVER the solo 'votetorrent-q2-*' naming scheme — that is the rnDbFactory solo store.
 const CADRE_STORE = 'votetorrent-cadre-probe-persistence';
+const PROOF_STORAGE = createScopedRnStorageProvider('votetorrent-persistence-strand');
 
 /**
  * Boot entry point. Fire-and-forget from index.js after AppRegistry.registerComponent.
@@ -97,7 +98,7 @@ export async function runStrandPersistenceProof(): Promise<void> {
       requireSignedSchemas: false,
       strandFilter: { mode: 'all' },
       // ISO-01 per-scope storage + persistence guardrail (aligned with the app providers).
-      storage: { provider: createScopedRnStorageProvider('votetorrent-persistence-strand') },
+      storage: { open: (scopeId: string) => PROOF_STORAGE.open(scopeId) },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       network: {
         transports: [webSockets(), circuitRelayTransport()],

@@ -326,7 +326,7 @@ async function attemptBringUp (
   bringUpCohortRefusalRequest = false
 
   const { CadreNode, ed25519KeyPairFromLibp2p } = await import('@serfab/cadre-core')
-  const { MemoryRawStorage } = await import('@optimystic/db-p2p')
+  const { memoryNodeStorage } = await import('@optimystic/db-p2p')
   const { webSockets } = await import('@libp2p/websockets')
   const { generateKeyPair } = await import('@libp2p/crypto/keys')
   const edgeReaderRefusalModule = cohortRefusalOn ? await import('../../src/network/edge-reader-refusal.js') : undefined
@@ -341,14 +341,14 @@ async function attemptBringUp (
   }
 
   function buildConfig (bootstrapNodes: string[], privateKey: unknown): any {
-    const storage = new MemoryRawStorage()
+    const storage = memoryNodeStorage()
     return {
       privateKey,
       controlNetwork: { partyId, bootstrapNodes },
       // Test posture only (topology.mjs baseConfig) — never a production config.
       requireSignedSchemas: false,
       strandFilter: { mode: 'all' },
-      storage: { provider: () => storage },
+      storage: { open: async () => storage },
       strandClusterSize: clusterSize,
       hibernation: { enabled: false },
       nodeClass: 'server',
@@ -954,7 +954,7 @@ export async function startHarnessEdgeMember (opts: {
   const { InMemoryKeyStore } = await import('@serfab/cadre-core')
   // @ts-ignore -- exports-map subpath this package's moduleResolution cannot type; resolves at runtime
   const { createEdgeNode } = await import('@serfab/cadre-core/edge-node')
-  const { MemoryRawStorage } = await import('@optimystic/db-p2p')
+  const { memoryNodeStorage } = await import('@optimystic/db-p2p')
   const { EDGE_READER_PROTOCOL: edgeReaderProtocol } = await import('../../src/network/edge-reader-refusal.js')
   const keyStore = opts.keyStore ?? new InMemoryKeyStore()
   const destroyedScopes: string[] = []
@@ -967,7 +967,7 @@ export async function startHarnessEdgeMember (opts: {
       rawStorage (scope: string) {
         let s = scopes.get(scope)
         if (s === undefined) {
-          s = new MemoryRawStorage()
+          s = memoryNodeStorage()
           scopes.set(scope, s)
         }
         return s
@@ -1112,18 +1112,18 @@ export async function startHarnessStranger (
   opts?: { clusterSize?: number }
 ): Promise<{ node: any; peerId: string; stop(): Promise<void> }> {
   const { CadreNode } = await import('@serfab/cadre-core')
-  const { MemoryRawStorage } = await import('@optimystic/db-p2p')
+  const { memoryNodeStorage } = await import('@optimystic/db-p2p')
   const { webSockets } = await import('@libp2p/websockets')
   const { generateKeyPair } = await import('@libp2p/crypto/keys')
   const nodeAAddr = loopbackWs((harness.nodeA.node.getControlNode()?.getMultiaddrs() ?? []).map((m: any) => m.toString()))
-  const storage = new MemoryRawStorage()
+  const storage = memoryNodeStorage()
   const node: any = new CadreNode({
     privateKey: await generateKeyPair('Ed25519'),
     controlNetwork: { partyId: harness.partyId, bootstrapNodes: [nodeAAddr] },
     // Test posture only (as buildConfig above) — never a production config.
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
-    storage: { provider: () => storage },
+    storage: { open: async () => storage },
     strandClusterSize: opts?.clusterSize ?? 2,
     hibernation: { enabled: false },
     nodeClass: 'device',

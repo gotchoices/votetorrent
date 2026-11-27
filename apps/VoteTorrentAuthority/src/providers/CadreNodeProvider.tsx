@@ -404,7 +404,7 @@ export function CadreNodeProvider({ children }: PropsWithChildren) {
           privateKey,
           relay: CONTROL_RELAY_ADDRS,
           bootstrap: joinBootstrap,
-          storage: { provider: scopedStorageProvider },
+          storage: { open: (scopeId: string) => scopedStorageProvider.open(scopeId) },
           transports: { webSockets, circuitRelayTransport },
           edgeReader: { refusal: edgeReaderRefusal },
           strandDatabaseSetup: registerVoteTorrentFunctions,

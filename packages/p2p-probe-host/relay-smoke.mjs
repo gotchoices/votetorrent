@@ -30,7 +30,7 @@
  * transient error to retry past.
  */
 import { CadreNode } from '@serfab/cadre-core';
-import { MemoryRawStorage } from '@optimystic/db-p2p';
+import { memoryNodeStorage } from '@optimystic/db-p2p';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
 
@@ -54,7 +54,7 @@ async function main() {
     controlNetwork: { partyId: PARTY_ID, bootstrapNodes: [] },
     nodeClass: 'server',
     strandFilter: { mode: 'all' },
-    storage: { provider: () => new MemoryRawStorage() },
+    storage: { open: async () => memoryNodeStorage() },
     network: {
       transports: [webSockets()],
       listenAddrs: ['/ip4/0.0.0.0/tcp/0/ws'], // ephemeral — avoids EADDRINUSE (drone.mjs pattern)
@@ -90,7 +90,7 @@ async function main() {
     controlNetwork: { partyId: PARTY_ID, bootstrapNodes: [serverBootstrapAddr] },
     nodeClass: 'device',
     strandFilter: { mode: 'all' },
-    storage: { provider: () => new MemoryRawStorage() },
+    storage: { open: async () => memoryNodeStorage() },
     network: {
       transports: [webSockets(), circuitRelayTransport()],
       listenAddrs: ['/p2p-circuit'],

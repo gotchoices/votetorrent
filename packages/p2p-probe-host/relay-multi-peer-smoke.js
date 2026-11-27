@@ -113,7 +113,7 @@
  * or an emulator-NAT-only surface — see 41-04-STRAND-COHORT-DIAGNOSIS.md).
  */
 import { CadreNode } from '@serfab/cadre-core';
-import { MemoryRawStorage, createLibp2pNode } from '@optimystic/db-p2p';
+import { memoryNodeStorage, createLibp2pNode } from '@optimystic/db-p2p';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
 import { multiaddr } from '@multiformats/multiaddr';
@@ -240,7 +240,7 @@ async function bootDrone(name, bootstrapControlAddr, strandBootstrapAddr) {
     // Published cadre-core@0.8.1 defaults to fail-closed schema-signature verification
     // (types.d.ts:349-352); this dev-only unsigned MINIMAL_SCHEMA needs the explicit relax.
     requireSignedSchemas: false,
-    storage: { provider: () => new MemoryRawStorage() },
+    storage: { open: async () => memoryNodeStorage() },
     network: {
       transports: [webSockets()],
       listenAddrs: ['/ip4/0.0.0.0/tcp/0/ws'], // ephemeral — avoids EADDRINUSE
@@ -322,7 +322,7 @@ function newClient(mode, droneAControlAddr, droneBControlAddr, droneAStrandAddr,
     },
     nodeClass: 'device',
     strandFilter: { mode: 'all' },
-    storage: { provider: () => new MemoryRawStorage() },
+    storage: { open: async () => memoryNodeStorage() },
     network: {
       transports: buildClientTransports(mode, 2),
       listenAddrs: buildClientListenAddrs(mode, droneAStrandAddr, droneBStrandAddr),
@@ -556,7 +556,7 @@ function newStrandCohortClient(droneAControlAddr, droneBControlAddr, droneAStran
     nodeClass: 'device',
     strandFilter: { mode: 'all' },
     requireSignedSchemas: false,
-    storage: { provider: () => new MemoryRawStorage() },
+    storage: { open: async () => memoryNodeStorage() },
     network: {
       transports: [webSockets(), circuitRelayTransport({ reservationConcurrency: 2 })],
       listenAddrs,

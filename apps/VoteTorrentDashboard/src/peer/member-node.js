@@ -44,10 +44,10 @@
  * message.
  */
 
-import { createEdgeNode as createCadreEdgeNode, lazyRawStorage, isOwnerGrant } from '@serfab/cadre-core/edge-node';
+import { createEdgeNode as createCadreEdgeNode, isOwnerGrant } from '@serfab/cadre-core/edge-node';
 import { decodeCadreInvitation, CadreInviteRejectedError, DEFAULT_IDENTITY_KEY_ID } from '@serfab/cadre-core';
 import { DEFAULT_STRAND_CLUSTER_SIZE } from '@serfab/quereus-plugin-sereus';
-import { openOptimysticWebDb, IndexedDBRawStorage, IndexedDBKVStore } from '@optimystic/db-p2p-storage-web';
+import { openOptimysticWebDb, indexedDbNodeStorage, IndexedDBKVStore } from '@optimystic/db-p2p-storage-web';
 import { VOTETORRENT_SCHEMA_SQL, VOTETORRENT_SCHEMA_VERSION, registerVoteTorrentFunctions } from '@votetorrent/vote-engine/browser';
 
 /** The fixed prefix of every log line this module writes. */
@@ -304,11 +304,10 @@ function nextMacrotask() {
  *
  * @typedef {object} MemberNodeDeps
  * @property {(platform: import('@serfab/cadre-core/edge-node').EdgeNodePlatform) => import('@serfab/cadre-core/edge-node').EdgeNode} [createEdgeNode]
- * @property {typeof lazyRawStorage} [lazyRawStorage]
  * @property {typeof isOwnerGrant} [isOwnerGrant]
  * @property {typeof decodeCadreInvitation} [decodeCadreInvitation]
  * @property {typeof openOptimysticWebDb} [openOptimysticWebDb]
- * @property {typeof IndexedDBRawStorage} [IndexedDBRawStorage]
+ * @property {typeof indexedDbNodeStorage} [indexedDbNodeStorage]
  * @property {typeof IndexedDBKVStore} [IndexedDBKVStore]
  * @property {IDBFactory | undefined} [indexedDB] Default `globalThis.indexedDB`.
  * @property {number} [removalSettleMs] Test only: the removal-settle bound; a positive finite number, else `REMOVAL_SETTLE_MAX_MS`.
@@ -320,11 +319,10 @@ function nextMacrotask() {
 function resolveDeps(deps = {}) {
 	return {
 		createEdgeNode: deps.createEdgeNode ?? createCadreEdgeNode,
-		lazyRawStorage: deps.lazyRawStorage ?? lazyRawStorage,
 		isOwnerGrant: deps.isOwnerGrant ?? isOwnerGrant,
 		decodeCadreInvitation: deps.decodeCadreInvitation ?? decodeCadreInvitation,
 		openOptimysticWebDb: deps.openOptimysticWebDb ?? openOptimysticWebDb,
-		IndexedDBRawStorage: deps.IndexedDBRawStorage ?? IndexedDBRawStorage,
+		indexedDbNodeStorage: deps.indexedDbNodeStorage ?? indexedDbNodeStorage,
 		IndexedDBKVStore: deps.IndexedDBKVStore ?? IndexedDBKVStore,
 		indexedDB: 'indexedDB' in deps ? deps.indexedDB : globalThis.indexedDB,
 		removalSettleMs:
@@ -386,8 +384,8 @@ export function createMemberPlatform({ networkHash, keyStore, strandId, deps }) 
 	/** Per-scope generation, bumped by `destroyScope`: an old proxy's late open must not resurrect. */
 	/** @type {Map<string, number>} */
 	const generations = new Map();
-	/** @type {Map<string, import('@optimystic/db-p2p').IRawStorage>} */
-	const proxies = new Map();
+	/** @type {Map<string, Promise<import('@optimystic/db-p2p').OpenNodeStorage>>} */
+	const storages = new Map();
 	/** @type {Map<string, Set<WebDbHandle>>} */
 	const handles = new Map();
 
@@ -435,17 +433,15 @@ export function createMemberPlatform({ networkHash, keyStore, strandId, deps }) 
 	const storage = {
 		id: `vt-dashboard-${networkHash}`,
 
-		rawStorage(scope) {
+		nodeStorage(scope) {
 			const name = memberStorageDbName(networkHash, scope);
-			const cached = proxies.get(scope);
+			const cached = storages.get(scope);
 			if (cached) return cached;
 			const generation = (generations.get(scope) ?? 0) + 1;
 			generations.set(scope, generation);
 			const openedInEpoch = epoch;
 			const isStale = () => generations.get(scope) !== generation || epoch !== openedInEpoch;
-			const proxy = d.lazyRawStorage(async () => {
-				if (isStale()) throw new MemberNodeError('not-running');
-				const handle = await d.openOptimysticWebDb(name);
+			const pending = d.openOptimysticWebDb(name).then((handle) => {
 				if (isStale()) {
 					try {
 						handle.close();
@@ -455,15 +451,23 @@ export function createMemberPlatform({ networkHash, keyStore, strandId, deps }) 
 					throw new MemberNodeError('not-running');
 				}
 				trackHandle(scope, handle);
-				return new d.IndexedDBRawStorage(handle);
-			}, 'power-loss');
-			proxies.set(scope, proxy);
-			return proxy;
+				return /** @type {any} */ (d.indexedDbNodeStorage)(handle);
+			});
+			storages.set(scope, pending);
+			return pending;
 		},
 
 		async destroyScope(scope) {
 			const name = memberStorageDbName(networkHash, scope);
-			proxies.delete(scope);
+			const pending = storages.get(scope);
+			storages.delete(scope);
+			if (pending) {
+				try {
+					await (await pending).close();
+				} catch (err) {
+					logFailure(err);
+				}
+			}
 			generations.set(scope, (generations.get(scope) ?? 0) + 1);
 			closeScopeHandles(scope);
 			if (!d.indexedDB) throw new MemberStorageBusyError();
@@ -504,7 +508,14 @@ export function createMemberPlatform({ networkHash, keyStore, strandId, deps }) 
 					logFailure(err);
 				}
 			}
-			proxies.clear();
+			for (const pending of storages.values()) {
+				try {
+					await (await pending).close();
+				} catch (err) {
+					logFailure(err);
+				}
+			}
+			storages.clear();
 			for (const scope of [...handles.keys()]) closeScopeHandles(scope);
 		},
 	};

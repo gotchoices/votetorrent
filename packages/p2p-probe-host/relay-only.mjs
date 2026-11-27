@@ -56,7 +56,7 @@ import {
 import { dirname, basename, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CadreNode, resolveRelayServer } from '@serfab/cadre-core';
-import { MemoryRawStorage } from '@optimystic/db-p2p';
+import { memoryNodeStorage } from '@optimystic/db-p2p';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
 import { generateKeyPair, privateKeyFromProtobuf, privateKeyToProtobuf } from '@libp2p/crypto/keys';
@@ -203,9 +203,9 @@ function stackPreflight() {
 	})();
 	out('RELAY_STACK ' + JSON.stringify({ node: process.versions.node, versions, patch }));
 	const ok =
-		versions['@serfab/cadre-core'] === '1.24.0' &&
+		versions['@serfab/cadre-core'] === '1.25.0' &&
 		patch &&
-		versions['@optimystic/db-p2p'] === '1.29.0' &&
+		versions['@optimystic/db-p2p'] === '1.30.0' &&
 		versions['main-event'] === '1.0.5' &&
 		nodeOk;
 	if (!ok) refuse('stack');
@@ -224,12 +224,14 @@ function isAddrInUse(err) {
 	return causeHas(err, (e) => e.code === 'EADDRINUSE' || /EADDRINUSE/.test(String(e.message ?? '')));
 }
 
-function scopedProvider() {
+function scopedStorage() {
 	const byScope = new Map();
-	return (scope) => {
-		const id = typeof scope === 'string' ? scope : JSON.stringify(scope ?? 'default');
-		if (!byScope.has(id)) byScope.set(id, new MemoryRawStorage());
-		return byScope.get(id);
+	return {
+		async open(scope) {
+			const id = typeof scope === 'string' ? scope : JSON.stringify(scope ?? 'default');
+			if (!byScope.has(id)) byScope.set(id, memoryNodeStorage());
+			return byScope.get(id);
+		},
 	};
 }
 
@@ -304,7 +306,7 @@ async function serve(opts) {
 		nodeClass: 'server',
 		strandFilter: { mode: 'none' },
 		requireSignedSchemas: false,
-		storage: { provider: scopedProvider() },
+		storage: scopedStorage(),
 		hibernation: { enabled: false },
 		network,
 	});
@@ -468,7 +470,7 @@ async function probeClient(opts) {
 		nodeClass: 'device',
 		requireSignedSchemas: false,
 		strandFilter: { mode: 'all' },
-		storage: { provider: scopedProvider() },
+		storage: scopedStorage(),
 		hibernation: { enabled: false },
 		network: {
 			controlCohort: { strandAddrRefreshMs: 30_000 },

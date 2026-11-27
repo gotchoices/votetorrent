@@ -458,13 +458,17 @@ test('6 names: memberStorageDbName is per network and scope, fails closed, and t
 		keyStore: new InMemoryKeyStore(),
 		relayAddrs: [RELAY],
 		strandId: STRAND,
-		deps: { openOptimysticWebDb: openSpy, IndexedDBRawStorage: /** @type {any} */ (FakeRaw), IndexedDBKVStore: /** @type {any} */ (FakeKv) },
+		deps: {
+			openOptimysticWebDb: openSpy,
+			indexedDbNodeStorage: /** @type {any} */ (() => ({ blocks: new FakeRaw(), close: async () => undefined })),
+			IndexedDBKVStore: /** @type {any} */ (FakeKv),
+		},
 	});
-	const first = platform.storage.rawStorage(STRAND);
-	const second = platform.storage.rawStorage(STRAND);
-	assert.equal(first, second, 'one proxy per scope until close');
-	assert.equal(opened.length, 0, 'nothing opens before first use');
-	await first.getMetadata(/** @type {any} */ ('block-1'));
+	const first = await platform.storage.nodeStorage(STRAND);
+	const second = await platform.storage.nodeStorage(STRAND);
+	assert.equal(first, second, 'one storage per scope until close');
+	assert.equal(opened.length, 1, 'the scope opens on first request');
+	await first.blocks.getMetadata(/** @type {any} */ ('block-1'));
 	assert.equal(opened.length, 1);
 	assert.equal(await platform.storage.nodeLocal().get('k'), 'value');
 	assert.equal(opened.length, 2);
@@ -475,14 +479,13 @@ test('6 names: memberStorageDbName is per network and scope, fails closed, and t
 	assert.equal(opened[0][0], memberStorageDbName(HASH, STRAND));
 	assert.equal(opened[1][0], memberStorageDbName(HASH, '~node-local'));
 	await platform.storage.close();
-	assert.notEqual(platform.storage.rawStorage(STRAND), first, 'close drops the cached proxy');
+	assert.notEqual(await platform.storage.nodeStorage(STRAND), first, 'close drops the cached storage');
 });
 
-test('6b commit proofs: the real lazy proxy over real IndexedDB storage carries the four commit-proof methods db-p2p 1.28 calls', async () => {
-	// @optimystic/db-p2p 1.28.0 stores a commit proof once, by message hash, and calls getProofEntry /
-	// saveProofEntry / getCommitProof / saveCommitProof on the storage unconditionally. cadre-core 1.23.0's
-	// lazyRawStorage proxy lacked all four, so BlockStorage.hasBlockProof threw `getProofEntry is not a
-	// function` on this node's storage. The cadre-core yarn patch adds them; this pins it.
+test('6b commit proofs: the real IndexedDB NodeStorage carries the commit-proof methods db-p2p calls', async () => {
+	// @optimystic/db-p2p stores a commit proof once, by message hash, and calls getProofEntry /
+	// saveProofEntry / getCommitProof / saveCommitProof on the block store unconditionally. The
+	// three-store NodeStorage factory wires them; this pins that the platform uses that factory.
 	const hash = 'net-6b';
 	const platform = createMemberPlatform({
 		networkHash: hash,
@@ -490,7 +493,7 @@ test('6b commit proofs: the real lazy proxy over real IndexedDB storage carries 
 		relayAddrs: [RELAY],
 		strandId: STRAND,
 	});
-	const raw = /** @type {any} */ (platform.storage.rawStorage(STRAND));
+	const raw = /** @type {any} */ ((await platform.storage.nodeStorage(STRAND)).blocks);
 	for (const m of ['getProofEntry', 'saveProofEntry', 'getCommitProof', 'saveCommitProof']) {
 		assert.equal(typeof raw[m], 'function', `the proxy forwards ${m}`);
 	}
@@ -1284,7 +1287,11 @@ function countingWebDb() {
 		closes,
 		openCount: () => total(opens),
 		closeCount: () => total(closes),
-		deps: { openOptimysticWebDb, IndexedDBRawStorage: FakeRaw, IndexedDBKVStore: FakeKv },
+		deps: {
+			openOptimysticWebDb,
+			indexedDbNodeStorage: /** @type {any} */ (() => ({ blocks: new FakeRaw(), close: async () => undefined })),
+			IndexedDBKVStore: FakeKv,
+		},
 	};
 }
 
@@ -1317,7 +1324,7 @@ test('24 M-R1 removal settle: stop() resolves only after cadre-core\'s removal r
 	fake.state.status = { state: 'running' };
 	const storage = fake.edge.platform.storage;
 	await storage.nodeLocal().get('k');
-	await storage.rawStorage(STRAND).getMetadata(/** @type {any} */ ('block-1'));
+	await (await storage.nodeStorage(STRAND)).blocks.getMetadata(/** @type {any} */ ('block-1'));
 	assert.equal(counting.openCount(), 2, 'the node-local view and one raw scope are open');
 
 	fake.edge.fire('cadre:removed', REMOVAL);

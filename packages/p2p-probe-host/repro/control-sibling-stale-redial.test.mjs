@@ -46,7 +46,7 @@ import {
   ed25519KeyPairFromLibp2p,
   softwareOwnerSigner,
 } from '@serfab/cadre-core';
-import { MemoryRawStorage } from '@optimystic/db-p2p';
+import { memoryNodeStorage } from '@optimystic/db-p2p';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
 import { generateKeyPair } from '@libp2p/crypto/keys';
@@ -95,7 +95,7 @@ async function startRelay() {
     nodeClass: 'server',
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
-    storage: { provider: scopedMemoryProvider() },
+    storage: scopedMemoryProvider(),
     hibernation: { enabled: false },
     network: { transports: [webSockets(), circuitRelayTransport()], listenAddrs: ['/ip4/127.0.0.1/tcp/0/ws'] },
   });
@@ -108,13 +108,15 @@ async function startRelay() {
 
 function scopedMemoryProvider() {
   const scopes = new Map();
-  return (scope) => {
-    let store = scopes.get(scope);
-    if (!store) {
-      store = new MemoryRawStorage();
-      scopes.set(scope, store);
-    }
-    return store;
+  return {
+    async open(scope) {
+      let store = scopes.get(scope);
+      if (!store) {
+        store = memoryNodeStorage();
+        scopes.set(scope, store);
+      }
+      return store;
+    },
   };
 }
 
@@ -126,7 +128,7 @@ async function startAuthorityShaped({ privateKey, relayAddr, gater }) {
     nodeClass: 'device',
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
-    storage: { provider: scopedMemoryProvider() },
+    storage: scopedMemoryProvider(),
     trustedOwners: { store: new MemoryTrustedOwnerStore(PARTY_ID) },
     hibernation: { enabled: false },
     network: {

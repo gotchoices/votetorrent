@@ -223,13 +223,15 @@ class MemoryLocalStorage {
 	}
 }
 
-/** relay-only.mjs `scopedProvider`: one MemoryRawStorage per storage scope. */
-function scopedProvider(/** @type {any} */ MemoryRawStorage) {
+/** relay-only.mjs `scopedStorage`: one NodeStorage per storage scope. */
+function scopedStorage(/** @type {any} */ memoryNodeStorage) {
 	const byScope = new Map();
-	return (/** @type {any} */ scope) => {
-		const id = typeof scope === 'string' ? scope : JSON.stringify(scope ?? 'default');
-		if (!byScope.has(id)) byScope.set(id, new MemoryRawStorage());
-		return byScope.get(id);
+	return {
+		async open(/** @type {any} */ scope) {
+			const id = typeof scope === 'string' ? scope : JSON.stringify(scope ?? 'default');
+			if (!byScope.has(id)) byScope.set(id, memoryNodeStorage());
+			return byScope.get(id);
+		},
 	};
 }
 
@@ -326,7 +328,7 @@ async function main() {
 	// the browser bundle uses.
 	const cadre = /** @type {any} */ (await import('@serfab/cadre-core'));
 	const { CadreNode } = cadre;
-	const { MemoryRawStorage } = /** @type {any} */ (await import('@optimystic/db-p2p'));
+	const { memoryNodeStorage } = /** @type {any} */ (await import('@optimystic/db-p2p'));
 	const { webSockets } = /** @type {any} */ (await import('@libp2p/websockets'));
 	const { circuitRelayTransport } = /** @type {any} */ (await import('@libp2p/circuit-relay-v2'));
 	const { generateKeyPair } = /** @type {any} */ (await import('@libp2p/crypto/keys'));
@@ -402,7 +404,7 @@ async function main() {
 		nodeClass: 'server',
 		strandFilter: { mode: 'none' },
 		requireSignedSchemas: false,
-		storage: { provider: scopedProvider(MemoryRawStorage) },
+		storage: scopedStorage(memoryNodeStorage),
 		hibernation: { enabled: false },
 		network: relayNetwork,
 	});
@@ -437,7 +439,7 @@ async function main() {
 			requireSignedSchemas: false,
 			strandFilter: { mode: 'all' },
 			strandClusterSize: clusterSize,
-			storage: { provider: scopedProvider(MemoryRawStorage) },
+			storage: scopedStorage(memoryNodeStorage),
 			hibernation: { enabled: false },
 			strandReactivity: { enabled: true },
 			// One tracker per node (66-28), never shared between A and B; its control refusal too (2026-11-13), as the

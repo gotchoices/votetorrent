@@ -82,17 +82,17 @@ describeP2PHarness('a Voter approves nothing yet still writes and reads its own 
   /** The Voter app's CadreNode shape (CadreNodeProvider.tsx), plus `edgeReaderProtocol` when `declares`. */
   async function startVoter (declares: boolean): Promise<Voter> {
     const { CadreNode } = cadre
-    const { MemoryRawStorage } = await import('@optimystic/db-p2p')
+    const { memoryNodeStorage } = await import('@optimystic/db-p2p')
     const { webSockets } = await import('@libp2p/websockets')
     const { generateKeyPair } = await import('@libp2p/crypto/keys')
-    const storage = new MemoryRawStorage()
+    const storage = memoryNodeStorage()
     const refusal = createEdgeReaderRefusal()
     const node: any = new CadreNode({
       privateKey: await generateKeyPair('Ed25519'),
       controlNetwork: { partyId: harness!.partyId, bootstrapNodes: [] },
       requireSignedSchemas: false,
       strandFilter: { mode: 'all' },
-      storage: { provider: () => storage },
+      storage: { open: async () => storage },
       strandClusterSize: 4,
       hibernation: { enabled: false },
       nodeClass: 'device',

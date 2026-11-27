@@ -42,7 +42,7 @@ import {
   ed25519KeyPairFromLibp2p,
   softwareOwnerSigner,
 } from '@serfab/cadre-core';
-import { MemoryRawStorage } from '@optimystic/db-p2p';
+import { memoryNodeStorage } from '@optimystic/db-p2p';
 import { webSockets } from '@libp2p/websockets';
 import { generateKeyPair } from '@libp2p/crypto/keys';
 import { peerIdFromPrivateKey } from '@libp2p/peer-id';
@@ -73,13 +73,15 @@ async function waitFor(label, predicate, timeoutMs = STEP_MS, everyMs = 250) {
 /** Per-scope memory stores that outlive one CadreNode instance, so a restart reopens them. */
 function persistentMemoryProvider() {
   const scopes = new Map();
-  return (scope) => {
-    let store = scopes.get(scope);
-    if (!store) {
-      store = new MemoryRawStorage();
-      scopes.set(scope, store);
-    }
-    return store;
+  return {
+    async open(scope) {
+      let store = scopes.get(scope);
+      if (!store) {
+        store = memoryNodeStorage();
+        scopes.set(scope, store);
+      }
+      return store;
+    },
   };
 }
 
@@ -89,7 +91,7 @@ function buildNode({ privateKey, provider, trustedOwnerStore, bootstrapNodes, co
     controlNetwork: { partyId: PARTY_ID, bootstrapNodes },
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
-    storage: { provider },
+    storage: provider,
     trustedOwners: { store: trustedOwnerStore },
     hibernation: { enabled: false },
     nodeClass: 'device',

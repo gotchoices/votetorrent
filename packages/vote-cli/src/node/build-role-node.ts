@@ -18,7 +18,6 @@ import { circuitRelayTransport } from '@libp2p/circuit-relay-v2'
 import { generateKeyPair, privateKeyFromProtobuf, privateKeyToProtobuf } from '@libp2p/crypto/keys'
 import { peerIdFromPrivateKey } from '@libp2p/peer-id'
 import { webSockets } from '@libp2p/websockets'
-import { FileRawStorage } from '@optimystic/db-p2p-storage-fs'
 import {
   CadreNode,
   PersistentBootstrapPeerStore,
@@ -61,7 +60,7 @@ import type { FileKvStorage } from '../vault/file-kv.js'
 import { fileSlot, slotKey } from './durable-slots.js'
 import { loadOrCreatePeerKey } from './peer-key.js'
 import { awaitRelayReservation } from './relay-readiness.js'
-import { createScopedStorage, type RawStorageLike } from './scoped-storage.js'
+import { createScopedStorage } from './scoped-storage.js'
 
 /** The apps' store scopes, so a CLI peer of a role persists under the same slot names as a phone of that role. */
 export const AUTHORITY_CADRE_STORE_SCOPE = 'votetorrent-cadre-node'
@@ -97,7 +96,7 @@ export interface RoleNodeDeps {
   PersistentBootstrapPeerStore: typeof PersistentBootstrapPeerStore
   ed25519KeyPairFromLibp2p: typeof ed25519KeyPairFromLibp2p
   softwareOwnerSigner: typeof softwareOwnerSigner
-  FileRawStorage: new (basePath: string) => RawStorageLike
+  openStorage?: (dir: string) => Promise<unknown>
   webSockets: typeof webSockets
   circuitRelayTransport: typeof circuitRelayTransport
   generateKeyPair: typeof generateKeyPair
@@ -122,7 +121,6 @@ export function defaultRoleNodeDeps(): RoleNodeDeps {
     PersistentBootstrapPeerStore,
     ed25519KeyPairFromLibp2p,
     softwareOwnerSigner,
-    FileRawStorage,
     webSockets,
     circuitRelayTransport,
     generateKeyPair,
@@ -242,7 +240,7 @@ export async function buildRoleNode(opts: BuildRoleNodeOptions, deps: RoleNodeDe
   const roleStores = createRoleStores(kind, kv)
   const bootstrap = await roleStores.joinBootstrap.readJoinBootstrap()
   // 6. scoped storage and ONE edge-reader refusal per boot
-  const scoped = createScopedStorage(peerDir, deps.FileRawStorage)
+  const scoped = createScopedStorage(peerDir, deps.openStorage as ((dir: string) => Promise<import('@optimystic/db-p2p').OpenNodeStorage>) | undefined)
   const refusal = deps.createEdgeReaderRefusal()
   // 7. instruments
   const isolated = instruments ? new Set<string>() : null
@@ -265,7 +263,7 @@ export async function buildRoleNode(opts: BuildRoleNodeOptions, deps: RoleNodeDe
       privateKey,
       relay: [relay.multiaddr],
       bootstrap,
-      storage: { provider: (scope) => scoped.provider(scope) },
+      storage: { open: (scope: string) => scoped.open(scope) },
       transports: { webSockets: deps.webSockets, circuitRelayTransport: deps.circuitRelayTransport },
       edgeReader: kind === 'voter' ? { refusal, protocol: deps.EDGE_READER_PROTOCOL } : { refusal },
       strandDatabaseSetup: deps.registerVoteTorrentFunctions,

@@ -8,7 +8,7 @@
  * the process boundary — it would just be evidence that the two harnesses differ.
  */
 import { CadreNode } from '@serfab/cadre-core';
-import { MemoryRawStorage } from '@optimystic/db-p2p';
+import { MemoryRawStorage, memoryNodeStorage } from '@optimystic/db-p2p';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
 import { generateKeyPair } from '@libp2p/crypto/keys';
@@ -73,7 +73,7 @@ export function baseConfig({ partyId = PARTY_ID, bootstrapNodes, privateKey, clu
     // exactly as the reference drone harness does. Not a production posture.
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
-    storage: { provider: () => storage },
+    storage: { open: async () => ({ ...memoryNodeStorage(), blocks: storage }) },
     strandClusterSize: clusterSize,
     hibernation: { enabled: false },
   };

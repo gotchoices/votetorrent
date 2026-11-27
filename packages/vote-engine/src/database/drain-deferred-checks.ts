@@ -17,16 +17,28 @@ import type { Database } from '@quereus/quereus';
  * silently skipping the drain (that would move these checks back to COMMIT and change verdicts).
  */
 export async function drainDeferredChecks(db: Database): Promise<void> {
-	const queue = (db as unknown as DeferredQueueHost).getDeferredConstraints?.();
+	const host = db as unknown as DeferredQueueHost;
+	const queue = host.getDeferredConstraints?.();
 	if (!queue || typeof queue.runDeferredRows !== 'function') {
 		throw new Error(
 			'drainDeferredChecks: this @quereus/quereus build has no getDeferredConstraints().runDeferredRows(); '
 			+ 'the engine cannot evaluate deferred CHECKs before COMMIT. Re-check the Quereus upgrade.'
 		);
 	}
-	await queue.runDeferredRows();
+	if (!host.transactionManager || typeof host.transactionManager.changeLogRowExists !== 'function') {
+		throw new Error(
+			'drainDeferredChecks: this @quereus/quereus build has no transactionManager.changeLogRowExists(); '
+			+ '5.7 requires a row-existence predicate to drain deferred CHECKs. Re-check the Quereus upgrade.'
+		);
+	}
+	await queue.runDeferredRows((identity) =>
+		host.transactionManager!.changeLogRowExists!(identity.tableKey, identity.primaryKey)
+	);
 }
 
 interface DeferredQueueHost {
-	getDeferredConstraints?: () => { runDeferredRows?: () => Promise<void> } | undefined;
+	getDeferredConstraints?: () => {
+		runDeferredRows?: (rowExists: (identity: { tableKey: string; primaryKey: string }) => boolean) => Promise<void>
+	} | undefined;
+	transactionManager?: { changeLogRowExists?: (baseTable: string, pkKey: string) => boolean };
 }

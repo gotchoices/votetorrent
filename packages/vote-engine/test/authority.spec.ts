@@ -28,6 +28,7 @@ import { computeAdminPromotionDigest, computeRadProposalDigest, readProposedRost
 import type { TestAuthorityContext } from './fixtures/test-context.js'
 import { AsyncStorage } from './shims/react-native'
 import { UserHistoryEvent } from '@votetorrent/vote-core'
+import type { Scope } from '@votetorrent/vote-core'
 import type {
   User,
   NetworkInit,
@@ -4351,7 +4352,11 @@ describe('AuthorityEngine', () => {
     })
 
     it('should reject update or delete of InviteSlot (InsertOnly)', async () => {
-      const { authorityEngine } = await createNetworkAndAuthority()
+      const { authorityEngine, user } = await addTestAuthority(await createTestNetwork())
+      // Quereus 5.7 only evaluates a deferred row check for a row that exists. Seed one
+      // through the real invite path so this assertion is not vacuous on an empty table.
+      const invite = authorityEngine.createOfficerInvite({name: 'InsertOnly', title: 'Member', scopes: ['rad'] as Scope[]})
+      await authorityEngine.saveInviteWithSigning(invite, 'rad' as Scope, makeTestSignCallback(user))
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let updateErr: unknown
       try {
@@ -4592,7 +4597,10 @@ describe('AuthorityEngine', () => {
     })
 
     it('should reject update or delete of AdminSigning (InsertOnly)', async () => {
-      const { authorityEngine } = await createNetworkAndAuthority()
+      const { authorityEngine, user } = await addTestAuthority(await createTestNetwork())
+      // saveInviteWithSigning starts an AdminSigning session, so the table is non-empty.
+      const invite = authorityEngine.createOfficerInvite({name: 'InsertOnly', title: 'Member', scopes: ['rad'] as Scope[]})
+      await authorityEngine.saveInviteWithSigning(invite, 'rad' as Scope, makeTestSignCallback(user))
       const ctx = (authorityEngine as unknown as { ctx: EngineContext }).ctx
       let updateErr: unknown
       try {

@@ -4,7 +4,7 @@
  * Phase 40 CI regression locks — three lockfile/manifest invariants for the
  * published-package stack that no existing spec covers:
  *
- *   UPG-06 — patched @quereus/quereus 5.6.1 single copy. Extends
+ *   UPG-06 — patched @quereus/quereus 5.7.1 single copy. Extends
  *            quereus-single-copy-regression.spec.ts (UPG-03, "single copy,
  *            4.x") to the phase-specific version+patch: the resolved version
  *            must be exactly 4.3.1, the required forward-ported patch locator
@@ -81,8 +81,8 @@ describe('published stack lock regression (UPG-06 / PUB-01 / PUB-02)', () => {
   const lock = readFileSync(join(repoRoot, 'yarn.lock'), 'utf8')
   const rootPackageJson = readFileSync(join(repoRoot, 'package.json'), 'utf8')
 
-  describe('UPG-06: patched @quereus/quereus 5.6.1 single copy', () => {
-    it('resolves a single @quereus/quereus version, and it is exactly 5.6.1', () => {
+  describe('UPG-06: patched @quereus/quereus 5.7.1 single copy', () => {
+    it('resolves a single @quereus/quereus version, and it is exactly 5.7.1', () => {
       const versions = resolvedVersionsFor(lock, '@quereus/quereus')
       expect(versions.length, 'expected at least one resolved @quereus/quereus block in yarn.lock').to.be.greaterThan(0)
 
@@ -94,16 +94,22 @@ describe('published stack lock regression (UPG-06 / PUB-01 / PUB-02)', () => {
 
       expect(
         distinct[0],
-        `Resolved @quereus/quereus version must be exactly 5.6.1, got ${distinct[0]}`
-      ).to.equal('5.6.1')
+        `Resolved @quereus/quereus version must be exactly 5.7.1, got ${distinct[0]}`
+      ).to.equal('5.7.1')
     })
 
-    it('carries the required 5.6.1 patch (@quereus-quereus-npm-5.6.1-votetorrent)', () => {
-      const count = (lock.match(/@quereus-quereus-npm-5\.6\.1-votetorrent/g) ?? []).length
+    it('carries the required 5.7.1 patch (@quereus-quereus-npm-5.7.1-votetorrent)', () => {
+      const count = (lock.match(/@quereus-quereus-npm-5\.7\.1-votetorrent/g) ?? []).length
       expect(
         count,
-        'Expected the @quereus-quereus-npm-5.6.1-votetorrent patch locator to be present in yarn.lock. Forward-ported '
-        + '4.11.0 -> 4.14.0 (spike 064) -> 4.17.1 -> 4.18.0 -> 4.19.4 -> 4.20.0 -> 4.20.1 -> 4.20.2 -> 4.20.3 -> 4.21.1 -> 4.24.0 -> 4.26.0 -> 5.0.0 -> 5.4.0 -> 5.6.0 -> 5.6.1. '
+        'Expected the @quereus-quereus-npm-5.7.1-votetorrent patch locator to be present in yarn.lock. Forward-ported '
+        + '4.11.0 -> 4.14.0 (spike 064) -> 4.17.1 -> 4.18.0 -> 4.19.4 -> 4.20.0 -> 4.20.1 -> 4.20.2 -> 4.20.3 -> 4.21.1 -> 4.24.0 -> 4.26.0 -> 5.0.0 -> 5.4.0 -> 5.6.0 -> 5.6.1 -> 5.7.1. '
+        + 'The 5.7.1 hop (2026-11-27, forced by @optimystic 1.30.0 / @serfab 1.25.0, whose peer ranges moved to ^5.7.1): '
+        + 'unpatched, vote-engine went 3162 passing / 817 failing. The four emitter/write-coercion hunks carried with '
+        + 'line offsets only; row-constraints.js was RE-DERIVED for 5.7\'s deferred row-identity API — the queued row and '
+        + 'its identity both use the coerced NEW section, or keyed deferred checks are dropped when the raw and stored '
+        + 'keys differ. The engine drains deferred CHECKs with the new row-existence callback '
+        + '(src/database/drain-deferred-checks.ts). The DELETE preCoerced site stays true. '
         + 'The 5.6.1 hop (2026-11-21, forced by @optimystic 1.29.0, whose plugins moved their peer range to ^5.6.1): all five patched files are byte-identical between 5.6.0 and 5.6.1, so the patch carried as a rename. '
         + 'The 5.6.0 hop (2026-11-19, forced by @optimystic 1.28.0, whose plugins moved their peer range to ^5.6.0): of the five patched files only row-constraints.js changed upstream (commit-only CHECKs, auto-named unnamed CHECKs), and the 5.4.0 patch applied cleanly to all five, coerceNewSection included; 5.6.0 now ends row-constraints.js with a newline, so the no-newline marker is gone and the +/- lines are otherwise identical. Regenerated through yarn patch / patch-commit. Unpatched, vote-engine went 3445 passing / 602 failing, the same ExpirationValid / SubmittedAtValid class with CidValid / SignatureValid knock-ons, so the coercion half stays. The DELETE preCoerced site stays true. '
         + 'The 5.4.0 hop (2026-11-12, forced by @optimystic 1.27.0, whose plugins moved their peer range to ^5.4.0): all five patched files are byte-identical between 5.0.0 and 5.4.0, so the patch carried unchanged. '
@@ -215,11 +221,11 @@ describe('published stack lock regression (UPG-06 / PUB-01 / PUB-02)', () => {
 
       expect(
         distinct[0],
-        `Resolved @optimystic/quereus-plugin-optimystic version must be 1.29.x, got ${distinct[0]}`
-      ).to.match(/^1\.29\./)
+        `Resolved @optimystic/quereus-plugin-optimystic version must be 1.30.x, got ${distinct[0]}`
+      ).to.match(/^1\.30\./)
     })
 
-    it('resolves ^1.29.0 in the root package.json dependency declaration', () => {
+    it('resolves ^1.30.0 in the root package.json dependency declaration', () => {
       const parsed = JSON.parse(rootPackageJson) as {
         dependencies?: Record<string, string>
         resolutions?: Record<string, string>
@@ -228,8 +234,8 @@ describe('published stack lock regression (UPG-06 / PUB-01 / PUB-02)', () => {
         parsed.resolutions?.['@optimystic/quereus-plugin-optimystic']
       expect(
         declared,
-        'Expected root package.json to declare @optimystic/quereus-plugin-optimystic as ^1.29.0'
-      ).to.equal('^1.29.0')
+        'Expected root package.json to declare @optimystic/quereus-plugin-optimystic as ^1.30.0'
+      ).to.equal('^1.30.0')
     })
 
     it('has zero references to the dead patch locators (0.13.5 plugin-optimystic patch, 0.7.1 cadre-core patch)', () => {

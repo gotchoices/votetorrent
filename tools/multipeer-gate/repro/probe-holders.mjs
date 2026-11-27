@@ -10,7 +10,7 @@
  * RELAYS=1 (passing) vs RELAYS=2 (failing) is the A/B.
  */
 import { CadreNode, ed25519KeyPairFromLibp2p } from '@serfab/cadre-core';
-import { MemoryRawStorage } from '@optimystic/db-p2p';
+import { MemoryRawStorage, memoryNodeStorage } from '@optimystic/db-p2p';
 import { webSockets } from '@libp2p/websockets';
 import { circuitRelayTransport } from '@libp2p/circuit-relay-v2';
 import { generateKeyPair } from '@libp2p/crypto/keys';
@@ -38,7 +38,7 @@ function base(bootstrapNodes, key, name) {
     controlNetwork: { partyId: PARTY_ID, bootstrapNodes },
     requireSignedSchemas: false,
     strandFilter: { mode: 'all' },
-    storage: { provider: () => { const s = new TrackingStorage(); stores.set(name, s); return s; } },
+    storage: { open: async () => { const s = new TrackingStorage(); stores.set(name, s); return { ...memoryNodeStorage(), blocks: s }; } },
     strandClusterSize: 2,
     hibernation: { enabled: false },
   };

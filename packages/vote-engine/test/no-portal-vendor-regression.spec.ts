@@ -128,7 +128,7 @@ describe('no-portal / no-vendor regression (PUB-01 / PUB-02)', () => {
   })
 
   // PUB-01-c — the 6 packages resolve to their published version lines.
-  it('PUB-01-c: the 6 de-vendored packages resolve to published versions (@serfab 1.19.x, @optimystic/db-* 1.20.x)', () => {
+  it('PUB-01-c: the 6 de-vendored packages resolve to published versions (@serfab 1.25.x, @optimystic/db-* 1.30.x)', () => {
     for (const pkg of DEVENDORED_PACKAGES) {
       const versions = resolvedVersionsFor(lock, pkg)
       expect(versions.length, `expected at least one resolved ${pkg} block in yarn.lock`).to.be.greaterThan(0)
@@ -227,9 +227,14 @@ describe('no-portal / no-vendor regression (PUB-01 / PUB-02)', () => {
       // older one; NodeProfile 'transaction'/'storage' renamed nodeClass 'device'/'server'; per-node roles incl. a
       // strandCohortMember:false client). cadre-core patch forward-ported: 7 hunks re-placed by hand, two concerns
       // dropped as upstreamed (lazyRawStorage commit-proof methods; the joiner coordinator-miss deferral).
+      // 2026-11-27: @serfab 1.24.0 -> 1.25.0 (always-on replica re-offers a commit it missed; upstream
+      // renews a held relay reservation, so that patch concern was dropped) and @optimystic 1.29.0 ->
+      // 1.30.0 (storage allotments, cohort-refusal classification, own-block write accepted). @quereus
+      // 5.6.1 -> 5.7.1, forced by both families' ^5.7.1 ranges; quereus patch re-seated for the new
+      // deferred row-identity API, db-p2p patch carried verbatim.
       const expectedPrefix = pkg === '@serfab/strand-proto'
         ? '0.11.'
-        : pkg.startsWith('@serfab/') ? '1.24.' : '1.29.'
+        : pkg.startsWith('@serfab/') ? '1.25.' : '1.30.'
       expect(
         distinct[0],
         `Resolved ${pkg} version must start with ${expectedPrefix}, got ${distinct[0]}`

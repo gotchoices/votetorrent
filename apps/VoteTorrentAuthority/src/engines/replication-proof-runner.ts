@@ -118,6 +118,7 @@ const CADRE_STORE = 'votetorrent-cadre-probe-replication';
 const PROOF_NETWORK_STORE = 'replication-proof-strand';
 // Store-name prefix for this proof's scoped LevelDBs — used by the provider, and by the script's wipe.
 const PROOF_STORE_PREFIX = 'votetorrent-replication-strand';
+const PROOF_STORAGE = createScopedRnStorageProvider(PROOF_STORE_PREFIX);
 
 // Control address — the drone's control-node ws multiaddr. The harness injects this per-run
 // (D-07 automated injection). Placeholder boots solo (no crash — CF-02 bootstrap mode).
@@ -485,7 +486,7 @@ export async function runReplicationProof(): Promise<void> {
       requireSignedSchemas: false,
       strandFilter: { mode: 'all' },
       // ISO-01 per-scope storage + persistence guardrail (aligned with the app providers).
-      storage: { provider: createScopedRnStorageProvider(PROOF_STORE_PREFIX) },
+      storage: { open: (scopeId: string) => PROOF_STORAGE.open(scopeId) },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       // CONTROL node network — reserves through the drone's CONTROL relay (P2P-11 41-11).
       network: {

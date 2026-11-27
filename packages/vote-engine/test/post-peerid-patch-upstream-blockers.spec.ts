@@ -134,7 +134,6 @@ const GENESIS_EXEMPTION_TOKENS = ['genesis', 'bootstrapGrace', 'isFoundingBlock'
 const CADRE_NODE_DIST = ['@serfab', 'cadre-core', 'dist', 'cadre-node.js']
 const CADRE_STRAND_MANAGER_DIST = ['@serfab', 'cadre-core', 'dist', 'strand-instance-manager.js']
 const CADRE_TYPES_DIST = ['@serfab', 'cadre-core', 'dist', 'types.d.ts']
-const HARDCODED_CLUSTER_SIZE_MARKER = 'clusterSize' + ': ' + '3'
 const CLUSTER_POLICY_KEY_MARKER = 'clusterPolicy'
 
 // ── Issue 3 markers — gossipsub / libp2p-3 Stream incompatibility ───────────────────────────────
@@ -245,19 +244,21 @@ describe('post-peerId-patch blocker 1: db-p2p membership admission gate deadlock
   })
 })
 
-describe('post-peerId-patch blocker 2: cadre-core hardcodes clusterSize and drops allowUnvalidatedSmallCluster', () => {
-  it('both createLibp2pNode call sites still hardcode clusterSize: 3', () => {
-    for (const dist of [CADRE_NODE_DIST, CADRE_STRAND_MANAGER_DIST]) {
+describe('post-peerId-patch blocker 2: cadre-core clusterSize passthrough (fixed upstream in 1.25.0)', () => {
+  it('both createLibp2pNode call sites now take cluster size from config', () => {
+    const markers: Array<[typeof CADRE_NODE_DIST, string]> = [
+      [CADRE_NODE_DIST, 'this.config.strandClusterSize'],
+      [CADRE_STRAND_MANAGER_DIST, 'resolveStrandClusterSize(config.clusterSize)'],
+    ]
+    for (const [dist, marker] of markers) {
       const p = resolveInstalled(...dist)
       expect(p, 'Expected ' + dist.join('/') + ' to be installed').to.not.equal(undefined)
       const src = stripComments(readFileSync(p as string, 'utf8'))
       expect(
-        src.includes(HARDCODED_CLUSTER_SIZE_MARKER),
-        'Expected the hardcoded `' + HARDCODED_CLUSTER_SIZE_MARKER + '` literal in ' + dist.join('/') +
-        '. If it now reads from config, cadre-core may have added the passthrough — close ' +
-        '.planning/quick/260731-fm3-file-upstream-issues-for-post-peerid-pat/issues/' +
-        'cadre-core-hardcoded-clustersize-no-clusterpolicy-passthrough.md and wire the option through ' +
-        'CadreNodeProvider.tsx + replication-proof-runner.ts.',
+        src.includes(marker),
+        'Expected cadre-core 1.25.0 to source cluster size from config (' + marker + ') in ' + dist.join('/') +
+        '. The hardcoded clusterSize: 3 blocker is fixed upstream; wire the option through ' +
+        'CadreNodeProvider.tsx + replication-proof-runner.ts if the app needs to set it.',
       ).to.equal(true)
     }
   })
